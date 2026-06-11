@@ -1,0 +1,22 @@
+@font-face {
+  font-display: swap;
+  font-family: "Pretendard";
+  font-weight: 100 900;
+  src: url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/woff2/PretendardVariable.woff2")
+    format("woff2-variations");
+}
+
+:root {
+  --blue: #3e6ae1;
+  --blue-pressed: #3457b1;
+  --ink: #171a20;
+  --graphite: #393c41;
+  --pewter: #5c5e62;
+  --silver: #d0d1d2;
+  --fog: #eeeeee;
+  --ash: #f4f4f4;
+  --white: #ffffff;
+  --red: #b3261e;
+  --radius: 4px;
+  --motion: 0.33s cubic-bezier(0.5, 0, 0, 0.75);
+}

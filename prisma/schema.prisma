@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String        @id @default(cuid())
+  riroId            String?       @unique
+  name              String
+  studentNumber     String        @unique
+  generation        Int
+  role              String        @default("STUDENT")
+  bookingStatus     String        @default("ACTIVE")
+  restrictionReason String?
+  restrictedUntil   DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  reservations      Reservation[]
+  auditLogs         AuditLog[]
+  sessions          Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model PeriodSetting {
+  id          String   @id @default(cuid())
+  date        String
+  studyPeriod String
+  openTime    String
+  closeTime   String
+  capacity    Int      @default(10)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([date, studyPeriod])
+}
+
+model Reservation {
+  id          String   @id @default(cuid())
+  date        String
+  studyPeriod String
+  status      String   @default("CONFIRMED")
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, date, studyPeriod])
+  @@index([date, studyPeriod, status])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  userId    String?
+  action    String
+  detail    String
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+}

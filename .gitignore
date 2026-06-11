@@ -1,0 +1,14 @@
+.next
+.omo
+node_modules
+coverage
+dist
+.env
+.env.local
+dev.db
+dev.db-journal
+prisma/dev.db
+prisma/dev.db-journal
+playwright-report
+test-results
+tsconfig.tsbuildinfo

@@ -1,0 +1,148 @@
+.app-shell {
+  background: var(--white);
+  min-height: 100svh;
+}
+
+.workspace,
+.admin-grid {
+  display: grid;
+  gap: 0;
+  margin: 0 auto;
+  min-height: 100svh;
+}
+
+.workspace {
+  grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
+  transition: grid-template-columns var(--motion);
+}
+
+.workspace[data-sidebar="closed"] {
+  grid-template-columns: 80px minmax(0, 1fr);
+}
+
+.admin-grid {
+  grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+}
+
+.login-panel,
+.admin-panel:first-child {
+  align-content: start;
+  background: var(--white);
+  border-right: 1px solid var(--fog);
+  display: grid;
+  gap: 28px;
+  padding: 32px;
+}
+
+.login-panel {
+  overflow: hidden;
+}
+
+.login-panel[data-open="false"] {
+  padding: 24px 18px;
+}
+
+.sidebar-head {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto 1fr auto;
+}
+
+.login-panel[data-open="false"] .sidebar-head {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+
+.sidebar-content {
+  opacity: 1;
+  transition: opacity var(--motion), visibility var(--motion);
+}
+
+.login-panel[data-open="false"] .auth-mark,
+.login-panel[data-open="false"] .sidebar-content {
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.tool-panel,
+.admin-panel:last-child {
+  background: var(--ash);
+  display: grid;
+  gap: 24px;
+  padding: 32px;
+}
+
+.brand-row,
+.topbar,
+.row,
+.period-top,
+.admin-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.brand-mark {
+  align-items: center;
+  background: var(--ink);
+  border-radius: var(--radius);
+  color: var(--white);
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.muted {
+  color: var(--pewter);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.stack,
+.login-form,
+.admin-form,
+.period-grid {
+  display: grid;
+}
+
+.stack {
+  gap: 14px;
+}
+
+.login-form,
+.admin-form {
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field span {
+  color: var(--pewter);
+  font-size: 0.86rem;
+}
+
+.field input,
+.field select {
+  background: var(--white);
+  border: 1px solid var(--silver);
+  border-radius: var(--radius);
+  color: var(--ink);
+  min-height: 44px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.field input:focus-visible,
+.field select:focus-visible {
+  border-color: var(--blue);
+  outline: 2px solid color-mix(in srgb, var(--blue) 22%, transparent);
+  outline-offset: 2px;
+}

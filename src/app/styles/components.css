@@ -1,0 +1,278 @@
+.primary-button,
+.ghost-button,
+.danger-button,
+.period-button,
+.icon-button {
+  align-items: center;
+  border: 3px solid transparent;
+  border-radius: var(--radius);
+  display: inline-flex;
+  font-size: 0.88rem;
+  font-weight: 500;
+  gap: 8px;
+  justify-content: center;
+  min-height: 40px;
+  padding: 4px 16px;
+  transition: background-color var(--motion), border-color var(--motion), color var(--motion), box-shadow 0.25s ease;
+}
+
+.icon-button {
+  background: var(--white);
+  color: var(--graphite);
+  min-height: 40px;
+  padding: 0;
+  width: 40px;
+}
+
+.auth-mark {
+  align-items: center;
+  background: var(--fog);
+  border-radius: var(--radius);
+  color: var(--blue);
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  justify-self: end;
+  width: 36px;
+}
+
+.sidebar-toggle {
+  justify-self: end;
+}
+
+.primary-button,
+.period-button {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.primary-button:hover,
+.period-button:hover {
+  background: var(--blue-pressed);
+}
+
+.primary-button:active,
+.period-button:active,
+.ghost-button:active,
+.danger-button:active,
+.icon-button:active {
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+
+.ghost-button {
+  background: var(--white);
+  color: var(--graphite);
+}
+
+.danger-button {
+  background: var(--white);
+  color: var(--red);
+}
+
+.period-button:disabled,
+.primary-button:disabled {
+  background: #8e8e8e;
+  color: var(--white);
+}
+
+.tabbar {
+  display: grid;
+  gap: 8px;
+  grid-auto-rows: 108px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tabbar button {
+  background: var(--white);
+  border: 3px solid transparent;
+  border-radius: var(--radius);
+  color: var(--pewter);
+  font-size: 0.88rem;
+  font-weight: 500;
+  height: 100%;
+  min-height: 108px;
+  transition: background-color var(--motion), border-color var(--motion), color var(--motion);
+  width: 100%;
+}
+
+.tabbar button[data-active="true"] {
+  background: var(--ink);
+  color: var(--white);
+}
+
+.period-grid {
+  gap: 16px;
+}
+
+.period-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+}
+
+.advance-unavailable {
+  background: var(--white);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  padding: 22px;
+}
+
+.period-title {
+  display: flex;
+  gap: 10px;
+}
+
+.period-badge {
+  align-items: center;
+  background: var(--fog);
+  border-radius: var(--radius);
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 500;
+  min-height: 28px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.meter {
+  background: var(--fog);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.meter span {
+  background: var(--blue);
+  display: block;
+  height: 100%;
+  transition: width var(--motion);
+}
+
+.applicant-list {
+  background: var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.applicant-head,
+.applicant-list li {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.applicant-head {
+  color: var(--pewter);
+  font-size: 0.82rem;
+}
+
+.applicant-list ul {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.applicant-list li {
+  background: var(--white);
+  border-radius: var(--radius);
+  color: var(--ink);
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.applicant-list li span {
+  color: var(--pewter);
+  font-size: 0.82rem;
+}
+
+.toast {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--silver);
+  border-radius: var(--radius);
+  color: var(--ink);
+  padding: 12px 16px;
+}
+
+.table-list {
+  background: var(--white);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.table-line {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1.1fr 0.8fr 0.8fr auto;
+  min-height: 56px;
+  padding: 12px 14px;
+}
+
+.table-line + .table-line {
+  border-top: 1px solid var(--fog);
+}
+
+@media (max-width: 850px) {
+  .workspace,
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace[data-sidebar="closed"] {
+    grid-template-columns: 1fr;
+  }
+
+  .login-panel,
+  .admin-panel:first-child {
+    border-right: 0;
+    min-height: auto;
+  }
+
+  .login-panel[data-open="false"] {
+    min-height: 88px;
+  }
+
+  .topbar,
+  .admin-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .period-top {
+    align-items: flex-start;
+  }
+
+  .period-button,
+  .primary-button,
+  .ghost-button,
+  .danger-button {
+    width: 100%;
+  }
+
+  .tabbar {
+    grid-auto-rows: 72px;
+  }
+
+  .tabbar button {
+    min-height: 72px;
+  }
+
+  .table-line {
+    grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+}
