@@ -6,14 +6,16 @@ import { visibleBox } from "./playwright-layout";
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
 async function login(page: Page, loginId: string): Promise<void> {
+  if (loginId === "admin") {
+    await loginWithApi(page, loginId);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
+    return;
+  }
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
-  if (loginId === "admin") {
-    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
-    return;
-  }
   await page.locator(".period-card .period-badge").first().waitFor();
 }
 
@@ -23,7 +25,8 @@ async function logout(page: Page): Promise<void> {
 
 async function loginWithApi(page: Page, loginId: string): Promise<void> {
   const response = await page.request.post(`${BASE_URL}/api/auth/riro/login`, {
-    data: { id: loginId, password: "password" }
+    data: { id: loginId, password: "password" },
+    headers: { "x-forwarded-for": `192.0.2.${Math.floor(Math.random() * 200) + 1}` }
   });
   expect(response.ok()).toBeTruthy();
 }

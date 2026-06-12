@@ -16,5 +16,6 @@ export default defineConfig({
   timeout: 30_000,
   use: {
     trace: "on-first-retry"
-  }
+  },
+  workers: 1
 });

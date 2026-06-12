@@ -16,19 +16,29 @@ type AdminPeriodSetting = {
 };
 
 async function login(page: Page, loginId: string): Promise<void> {
+  if (loginId === "admin") {
+    await loginWithApi(page, loginId);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
+    return;
+  }
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
-  if (loginId === "admin") {
-    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
-    return;
-  }
   await page.locator(".period-card .period-badge").first().waitFor();
 }
 
 async function logout(page: Page): Promise<void> {
   await csrfRequest(page, "/api/auth/logout", { method: "POST" });
+}
+
+async function loginWithApi(page: Page, loginId: string): Promise<void> {
+  const response = await page.request.post(`${BASE_URL}/api/auth/riro/login`, {
+    data: { id: loginId, password: "password" },
+    headers: { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` }
+  });
+  expect(response.ok()).toBeTruthy();
 }
 
 async function mockClientDate(page: Page, fixedIso: string): Promise<void> {

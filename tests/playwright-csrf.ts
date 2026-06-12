@@ -4,6 +4,8 @@ type JsonPrimitive = boolean | null | number | string;
 type JsonValue = JsonPrimitive | { readonly [key: string]: JsonValue } | readonly JsonValue[];
 type MutatingMethod = "DELETE" | "PATCH" | "POST";
 
+const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+
 type CsrfRequestOptions = {
   readonly json?: JsonValue;
   readonly method: MutatingMethod;
@@ -55,7 +57,9 @@ async function fetchCsrfToken(page: Page): Promise<string> {
 }
 
 function absoluteUrl(page: Page, path: string): string {
-  return new URL(path, page.url()).toString();
+  const currentUrl = page.url();
+  const baseUrl = currentUrl === "about:blank" ? BASE_URL : currentUrl;
+  return new URL(path, baseUrl).toString();
 }
 
 function isObject(value: unknown): value is object {

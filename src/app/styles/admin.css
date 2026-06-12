@@ -575,7 +575,10 @@
 
   .student-detail-panel[data-open="true"] {
     gap: 12px;
-    max-height: none;
+    max-height: min(76svh, 760px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
   .student-detail-panel[data-open="true"] .detail-metrics {

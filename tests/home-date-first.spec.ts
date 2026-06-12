@@ -23,15 +23,29 @@ type ReservationCreateResponse = {
 };
 
 async function login(page: Page, loginId = `date-first-${Date.now()}`): Promise<void> {
+  if (loginId === "admin") {
+    await loginWithApi(page, loginId);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
+    return;
+  }
+  await loginWithForm(page, loginId);
+  await page.locator(".period-card .period-badge").first().waitFor();
+}
+
+async function loginWithForm(page: Page, loginId: string): Promise<void> {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
-  if (loginId === "admin") {
-    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
-    return;
-  }
-  await page.locator(".period-card .period-badge").first().waitFor();
+}
+
+async function loginWithApi(page: Page, loginId: string): Promise<void> {
+  const response = await page.request.post(`${BASE_URL}/api/auth/riro/login`, {
+    data: { id: loginId, password: "password" },
+    headers: { "x-forwarded-for": `203.0.113.${Math.floor(Math.random() * 200) + 1}` }
+  });
+  expect(response.ok()).toBeTruthy();
 }
 
 async function logout(page: Page): Promise<void> {
@@ -260,7 +274,7 @@ test("applicant toggle preserves period order and tab dimensions", async ({ page
 });
 
 test("admin users see the operations console after normal login", async ({ page }) => {
-  await login(page, "admin");
+  await loginWithForm(page, "admin");
 
   await expect(page).toHaveURL(new RegExp(`^${BASE_URL.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}/?$`, "u"));
   await expect(page.getByRole("heading", { name: "운영 대시보드" })).toBeVisible();
