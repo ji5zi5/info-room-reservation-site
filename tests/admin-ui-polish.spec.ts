@@ -1,4 +1,7 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+import { csrfRequest } from "./playwright-csrf";
+import { visibleBox } from "./playwright-layout";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
@@ -15,7 +18,7 @@ async function login(page: Page, loginId: string): Promise<void> {
 }
 
 async function logout(page: Page): Promise<void> {
-  await page.request.post(`${BASE_URL}/api/auth/logout`);
+  await csrfRequest(page, "/api/auth/logout", { method: "POST" });
 }
 
 async function loginWithApi(page: Page, loginId: string): Promise<void> {
@@ -40,20 +43,6 @@ async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
     }
     globalThis.Date = MockDate as DateConstructor;
   }, fixedIso);
-}
-
-async function visibleBox(locator: Locator, label: string): Promise<{
-  readonly bottom: number;
-  readonly height: number;
-  readonly width: number;
-  readonly x: number;
-  readonly y: number;
-}> {
-  const box = await locator.boundingBox();
-  if (!box) {
-    throw new Error(`${label} should be visible`);
-  }
-  return { bottom: box.y + box.height, height: box.height, width: box.width, x: box.x, y: box.y };
 }
 
 test("admin student management keeps empty detail from clipping the 390px viewport", async ({ page }) => {

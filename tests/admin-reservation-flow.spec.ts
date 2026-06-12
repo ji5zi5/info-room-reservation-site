@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { todayKst } from "./kst-date";
+import { csrfRequest, responseErrorCode } from "./playwright-csrf";
+
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
 type StudyPeriod = "EIGHTH" | "FIRST";
@@ -25,9 +28,7 @@ async function login(page: Page, loginId: string): Promise<void> {
 }
 
 async function logout(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-  });
+  await csrfRequest(page, "/api/auth/logout", { method: "POST" });
 }
 
 async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
@@ -60,28 +61,22 @@ async function patchPeriodSettings(
   date: string,
   periods: readonly AdminPeriodSetting[]
 ): Promise<void> {
-  await page.evaluate(
-    async ({ nextPeriods, targetDate }) => {
-      const response = await fetch("/api/admin/period-settings", {
-        body: JSON.stringify({ date: targetDate, periods: nextPeriods }),
-        headers: { "content-type": "application/json" },
-        method: "PATCH"
-      });
-      if (!response.ok) {
-        throw new Error("period settings patch failed");
-      }
+  const response = await csrfRequest(page, "/api/admin/period-settings", {
+    json: {
+      date,
+      periods: periods.map((period) => ({
+        capacity: period.capacity,
+        closeTime: period.closeTime,
+        enabled: period.enabled,
+        openTime: period.openTime,
+        studyPeriod: period.studyPeriod
+      }))
     },
-    { nextPeriods: periods, targetDate: date }
-  );
-}
-
-function todayKst(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "Asia/Seoul",
-    year: "numeric"
-  }).format(new Date());
+    method: "PATCH"
+  });
+  if (!response.ok()) {
+    throw new Error("period settings patch failed");
+  }
 }
 
 test("non-admin users are redirected away from admin page", async ({ page }) => {
@@ -164,16 +159,14 @@ test("admin reservations default to confirmed and expose status filters", async 
 test("admins cannot create student reservations", async ({ page }) => {
   await login(page, "admin");
 
-  const result = await page.evaluate(async (date) => {
-    const response = await fetch("/api/reservations", {
-      body: JSON.stringify({ date, studyPeriod: "EIGHTH" }),
-      headers: { "content-type": "application/json" },
-      method: "POST"
-    });
-    const payload = (await response.json()) as { readonly error?: { readonly code?: string } };
-    return { code: payload.error?.code, status: response.status };
-  }, todayKst());
+  const response = await csrfRequest(page, "/api/reservations", {
+    json: { date: todayKst(), studyPeriod: "EIGHTH" },
+    method: "POST"
+  });
 
-  expect(result).toEqual({ code: "admin_not_reservable", status: 403 });
+  expect({ code: await responseErrorCode(response), status: response.status() }).toEqual({
+    code: "admin_not_reservable",
+    status: 403
+  });
   await expect(page.getByRole("button", { name: "8면학 예약" })).toHaveCount(0);
 });

@@ -1,4 +1,8 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+import { todayKst } from "./kst-date";
+import { csrfRequest } from "./playwright-csrf";
+import { visibleBox, visiblePosition } from "./playwright-layout";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
@@ -31,9 +35,7 @@ async function login(page: Page, loginId = `date-first-${Date.now()}`): Promise<
 }
 
 async function logout(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-  });
+  await csrfRequest(page, "/api/auth/logout", { method: "POST" });
 }
 
 async function fetchPeriodSettings(page: Page, date: string): Promise<readonly AdminPeriodSetting[]> {
@@ -49,19 +51,22 @@ async function patchPeriodSettings(
   date: string,
   periods: readonly AdminPeriodSetting[]
 ): Promise<void> {
-  await page.evaluate(
-    async ({ targetDate, nextPeriods }) => {
-      const response = await fetch("/api/admin/period-settings", {
-        body: JSON.stringify({ date: targetDate, periods: nextPeriods }),
-        headers: { "content-type": "application/json" },
-        method: "PATCH"
-      });
-      if (!response.ok) {
-        throw new Error("period settings patch failed");
-      }
+  const response = await csrfRequest(page, "/api/admin/period-settings", {
+    json: {
+      date,
+      periods: periods.map((period) => ({
+        capacity: period.capacity,
+        closeTime: period.closeTime,
+        enabled: period.enabled,
+        openTime: period.openTime,
+        studyPeriod: period.studyPeriod
+      }))
     },
-    { nextPeriods: periods, targetDate: date }
-  );
+    method: "PATCH"
+  });
+  if (!response.ok()) {
+    throw new Error("period settings patch failed");
+  }
 }
 
 async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
@@ -79,31 +84,6 @@ async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
     }
     globalThis.Date = MockDate as DateConstructor;
   }, fixedIso);
-}
-
-async function visibleBox(locator: Locator, label: string): Promise<{ readonly height: number; readonly width: number }> {
-  const box = await locator.boundingBox();
-  if (!box) {
-    throw new Error(`${label} should be visible`);
-  }
-  return { height: box.height, width: box.width };
-}
-
-async function visiblePosition(locator: Locator, label: string): Promise<{ readonly x: number; readonly y: number }> {
-  const box = await locator.boundingBox();
-  if (!box) {
-    throw new Error(`${label} should be visible`);
-  }
-  return { x: box.x, y: box.y };
-}
-
-function todayKst(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "Asia/Seoul",
-    year: "numeric"
-  }).format(new Date());
 }
 
 test("advance reservation shows date picker before period cards", async ({ page }) => {
@@ -247,9 +227,7 @@ test("period cards show confirmed applicants", async ({ page }) => {
     await expect(eighthCard.getByText(studentNumber)).toBeHidden();
   } finally {
     if (reservationId) {
-      await page.evaluate(async (id) => {
-        await fetch(`/api/reservations/${id}`, { method: "DELETE" });
-      }, reservationId);
+      await csrfRequest(page, `/api/reservations/${reservationId}`, { method: "DELETE" });
     }
     await logout(page);
     await login(page, "admin");
