@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   Sparkles
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { getAdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
 import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
@@ -25,32 +25,40 @@ type SessionUser = {
 };
 
 type Tab = "today" | "advance";
+type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
 
 export default function HomePage(): React.ReactElement {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [periods, setPeriods] = useState<readonly PeriodSummary[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [tab, setTab] = useState<Tab>("today");
-  const [advanceDate, setAdvanceDate] = useState(() => {
-    const policy = getAdvanceReservationPolicy(new Date());
-    return policy.kind === "available" ? policy.minDate : policy.today;
-  });
+  const [advancePolicy, setAdvancePolicy] = useState<AdvanceReservationPolicy | null>(null);
+  const [advanceDate, setAdvanceDate] = useState("");
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const advancePolicy = useMemo(() => getAdvanceReservationPolicy(new Date()), []);
-  const advanceUnavailable = tab === "advance" && advancePolicy.kind === "unavailable";
-  const todayDate = advancePolicy.today;
+  const advanceUnavailable = tab === "advance" && advancePolicy?.kind === "unavailable";
+  const todayDate = advancePolicy?.today ?? "";
   const targetDate = tab === "advance" ? advanceDate : todayDate;
 
   useEffect(() => {
     void refreshMe();
+    const adminMessage = consumeAdminRedirectMessage();
+    if (adminMessage) {
+      setToast(adminMessage);
+    }
   }, []);
 
   useEffect(() => {
-    if (!user) {
+    const policy = getAdvanceReservationPolicy(new Date());
+    setAdvancePolicy(policy);
+    setAdvanceDate(policy.kind === "available" ? policy.minDate : policy.today);
+  }, []);
+
+  useEffect(() => {
+    if (!user || !targetDate) {
       return;
     }
     if (advanceUnavailable) {
@@ -111,6 +119,14 @@ export default function HomePage(): React.ReactElement {
       return;
     }
     setToast("예약이 확정되었습니다.");
+    await refreshPeriods(targetDate);
+  }
+
+  async function cancelReservation(reservationId: string): Promise<void> {
+    setLoading(true);
+    const response = await fetch(`/api/reservations/${reservationId}`, { method: "DELETE" });
+    setLoading(false);
+    setToast(response.ok ? "예약이 취소되었습니다." : "예약 취소에 실패했습니다.");
     await refreshPeriods(targetDate);
   }
 
@@ -184,7 +200,7 @@ export default function HomePage(): React.ReactElement {
           <div className="topbar">
             <div>
               <h2>예약 현황</h2>
-              <p className="muted">{advanceUnavailable ? "사전예약 불가" : targetDate}</p>
+              <p className="muted">{advancePolicy ? (advanceUnavailable ? "사전예약 불가" : targetDate) : "예약 날짜 확인 중"}</p>
             </div>
             <CalendarDays color="#3E6AE1" />
           </div>
@@ -192,17 +208,26 @@ export default function HomePage(): React.ReactElement {
             <button type="button" data-active={tab === "today"} onClick={() => setTab("today")}>당일예약</button>
             <button type="button" data-active={tab === "advance"} onClick={() => setTab("advance")}>사전예약</button>
           </div>
-          {tab === "advance" && advancePolicy.kind === "available" ? (
-            <label className="field advance-date-field">
-              <span>사전예약 날짜</span>
-              <input
-                max={advancePolicy.maxDate}
-                min={advancePolicy.minDate}
-                type="date"
-                value={advanceDate}
-                onChange={(event) => setAdvanceDate(event.currentTarget.value)}
-              />
-            </label>
+          {advancePolicy && !advanceUnavailable ? (
+            <div className="reservation-date-rail">
+              {tab === "advance" && advancePolicy.kind === "available" ? (
+                <label className="field advance-date-field">
+                  <span>사전예약 날짜</span>
+                  <input
+                    max={advancePolicy.maxDate}
+                    min={advancePolicy.minDate}
+                    type="date"
+                    value={advanceDate}
+                    onChange={(event) => setAdvanceDate(event.currentTarget.value)}
+                  />
+                </label>
+              ) : (
+                <label className="field advance-date-field">
+                  <span>예약 날짜</span>
+                  <input disabled readOnly type="date" value={todayDate} />
+                </label>
+              )}
+            </div>
           ) : null}
           {advanceUnavailable ? (
             <div className="advance-unavailable" role="status">
@@ -217,6 +242,7 @@ export default function HomePage(): React.ReactElement {
                   loading={loading}
                   period={period}
                   userReady={user !== null}
+                  onCancel={(reservationId) => void cancelReservation(reservationId)}
                   onReserve={(studyPeriod) => void reserve(studyPeriod)}
                 />
               ))}
@@ -227,4 +253,14 @@ export default function HomePage(): React.ReactElement {
       </div>
     </main>
   );
+}
+
+function consumeAdminRedirectMessage(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const reason = params.get("admin");
+  if (reason === "required" || reason === "forbidden") {
+    window.history.replaceState(null, "", window.location.pathname);
+    return reason === "required" ? "로그인이 필요합니다." : "관리자 권한이 필요합니다.";
+  }
+  return null;
 }

@@ -1,6 +1,9 @@
 import { prisma } from "./db";
 import { DEFAULT_PERIOD_CAPACITY, STUDY_PERIODS, getStudyPeriodLabel, parseStudyPeriod, type StudyPeriod } from "./study-periods";
 
+export const DEFAULT_PERIOD_OPEN_TIME = "13:00";
+export const DEFAULT_PERIOD_CLOSE_TIME = "16:20";
+
 export type PeriodSummary = {
   readonly applicants: readonly PeriodApplicant[];
   readonly capacity: number;
@@ -9,6 +12,7 @@ export type PeriodSummary = {
   readonly date: string;
   readonly enabled: boolean;
   readonly label: string;
+  readonly myReservationId: string | null;
   readonly openTime: string;
   readonly remaining: number;
   readonly studyPeriod: StudyPeriod;
@@ -22,9 +26,17 @@ export type PeriodApplicant = {
 
 type PeriodApplicantRow = PeriodApplicant & {
   readonly studyPeriod: StudyPeriod;
+  readonly userId: string;
+};
+
+type PeriodReservationOwner = {
+  readonly reservationId: string;
+  readonly studyPeriod: StudyPeriod;
+  readonly userId: string;
 };
 
 type PeriodSummaryOptions = {
+  readonly currentUserId?: string;
   readonly includeApplicants?: boolean;
 };
 
@@ -33,15 +45,13 @@ export async function getPeriodSummaries(
   options: PeriodSummaryOptions = {}
 ): Promise<readonly PeriodSummary[]> {
   await ensurePeriodSettings(date);
-  const [settings, counts, applicants] = await Promise.all([
-    prisma.periodSetting.findMany({ where: { date } }),
-    prisma.reservation.groupBy({
-      by: ["studyPeriod"],
-      where: { date, status: "CONFIRMED" },
-      _count: { _all: true }
-    }),
-    getPeriodApplicants(date, options.includeApplicants === true)
-  ]);
+  const settings = await prisma.periodSetting.findMany({ where: { date } });
+  const counts = await prisma.reservation.groupBy({
+    by: ["studyPeriod"],
+    where: { date, status: "CONFIRMED" },
+    _count: { _all: true }
+  });
+  const applicants = await getPeriodApplicants(date, options.includeApplicants === true);
 
   return STUDY_PERIODS.map((studyPeriod) => {
     const setting = settings.find((candidate) => candidate.studyPeriod === studyPeriod);
@@ -49,14 +59,16 @@ export async function getPeriodSummaries(
       throw new MissingPeriodSettingError(date, studyPeriod);
     }
     const count = counts.find((candidate) => candidate.studyPeriod === studyPeriod)?._count._all ?? 0;
+    const periodApplicants = applicantsForPeriod(studyPeriod, applicants);
     return {
-      applicants: applicantsForPeriod(studyPeriod, applicants),
+      applicants: periodApplicants,
       capacity: setting.capacity,
       closeTime: setting.closeTime,
       confirmedCount: count,
       date,
       enabled: setting.enabled,
       label: getStudyPeriodLabel(studyPeriod),
+      myReservationId: findMyReservationId(studyPeriod, applicants, options.currentUserId),
       openTime: setting.openTime,
       remaining: Math.max(setting.capacity - count, 0),
       studyPeriod
@@ -73,6 +85,7 @@ async function getPeriodApplicants(date: string, includeApplicants: boolean): Pr
     select: {
       id: true,
       studyPeriod: true,
+      userId: true,
       user: {
         select: {
           name: true,
@@ -87,7 +100,8 @@ async function getPeriodApplicants(date: string, includeApplicants: boolean): Pr
     name: reservation.user.name,
     reservationId: reservation.id,
     studentNumber: reservation.user.studentNumber,
-    studyPeriod: parseStudyPeriod(reservation.studyPeriod)
+    studyPeriod: parseStudyPeriod(reservation.studyPeriod),
+    userId: reservation.userId
   }));
 }
 
@@ -104,15 +118,29 @@ function applicantsForPeriod(
     }));
 }
 
+export function findMyReservationId(
+  studyPeriod: StudyPeriod,
+  applicants: readonly PeriodReservationOwner[],
+  currentUserId: string | undefined
+): string | null {
+  if (!currentUserId) {
+    return null;
+  }
+  return (
+    applicants.find((applicant) => applicant.studyPeriod === studyPeriod && applicant.userId === currentUserId)
+      ?.reservationId ?? null
+  );
+}
+
 export async function ensurePeriodSettings(date: string): Promise<void> {
   for (const studyPeriod of STUDY_PERIODS) {
     await prisma.periodSetting.upsert({
       create: {
         capacity: DEFAULT_PERIOD_CAPACITY,
-        closeTime: "23:00",
+        closeTime: DEFAULT_PERIOD_CLOSE_TIME,
         date,
         enabled: true,
-        openTime: "08:00",
+        openTime: DEFAULT_PERIOD_OPEN_TIME,
         studyPeriod
       },
       update: {},

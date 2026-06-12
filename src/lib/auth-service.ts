@@ -7,6 +7,13 @@ type LoginInput = {
   readonly password: string;
 };
 
+type RiroAuthenticator = (input: LoginInput) => Promise<RiroAuthResult>;
+
+type AuthModeOptions = {
+  readonly mockLoginEnabled: boolean;
+  readonly riroAuthenticator: RiroAuthenticator;
+};
+
 export type LoginResult =
   | {
       readonly kind: "success";
@@ -32,7 +39,7 @@ export async function loginUserWithRiro(input: LoginInput): Promise<LoginResult>
     return authResult;
   }
 
-  const role = resolveAppRole(authResult.profile, input.id);
+  const role = resolveAppRole(authResult.profile);
   const user = await prisma.user.upsert({
     create: {
       bookingStatus: "ACTIVE",
@@ -67,10 +74,20 @@ export async function loginUserWithRiro(input: LoginInput): Promise<LoginResult>
 }
 
 async function authenticate(input: LoginInput): Promise<RiroAuthResult> {
-  if (process.env.RIRO_MOCK_LOGIN === "true") {
+  return authenticateWithConfiguredMode(input, {
+    mockLoginEnabled: process.env.RIRO_MOCK_LOGIN === "true",
+    riroAuthenticator: (authInput) => loginWithRiroSchool({ id: authInput.id, password: authInput.password })
+  });
+}
+
+export async function authenticateWithConfiguredMode(
+  input: LoginInput,
+  options: AuthModeOptions
+): Promise<RiroAuthResult> {
+  if (options.mockLoginEnabled) {
     return mockRiroLogin(input);
   }
-  return loginWithRiroSchool({ id: input.id, password: input.password });
+  return options.riroAuthenticator(input);
 }
 
 function mockRiroLogin(input: LoginInput): RiroAuthResult {
@@ -95,12 +112,18 @@ function mockRiroLogin(input: LoginInput): RiroAuthResult {
   };
 }
 
-function resolveAppRole(profile: RiroProfile, loginId: string): "ADMIN" | "STUDENT" {
-  const adminNumbers = new Set((process.env.ADMIN_STUDENT_NUMBERS ?? "0").split(",").map((value) => value.trim()));
-  if (loginId === "admin" || profile.role === "TEACHER" || adminNumbers.has(profile.studentNumber)) {
+export function resolveAppRole(
+  profile: RiroProfile,
+  adminNumbers = parseAdminStudentNumbers(process.env.ADMIN_STUDENT_NUMBERS ?? "")
+): "ADMIN" | "STUDENT" {
+  if (profile.role === "TEACHER" || adminNumbers.has(profile.studentNumber)) {
     return "ADMIN";
   }
   return "STUDENT";
+}
+
+function parseAdminStudentNumbers(value: string): ReadonlySet<string> {
+  return new Set(value.split(",").map((item) => item.trim()).filter(Boolean));
 }
 
 function normalizeMockStudentNumber(id: string): string {

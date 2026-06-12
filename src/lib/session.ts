@@ -80,9 +80,10 @@ export async function clearCurrentSession(): Promise<void> {
 }
 
 export function setSessionCookie(response: Response, token: string): void {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   response.headers.append(
     "Set-Cookie",
-    `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_DAYS * 24 * 60 * 60}`
+    `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_DAYS * 24 * 60 * 60}${secure}`
   );
 }
 

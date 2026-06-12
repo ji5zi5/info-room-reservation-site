@@ -85,6 +85,23 @@ async function visibleBox(locator: Locator, label: string): Promise<{ readonly h
   return { height: box.height, width: box.width };
 }
 
+async function visiblePosition(locator: Locator, label: string): Promise<{ readonly x: number; readonly y: number }> {
+  const box = await locator.boundingBox();
+  if (!box) {
+    throw new Error(`${label} should be visible`);
+  }
+  return { x: box.x, y: box.y };
+}
+
+function todayKst(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Asia/Seoul",
+    year: "numeric"
+  }).format(new Date());
+}
+
 test("advance reservation shows date picker before period cards", async ({ page }) => {
   await mockClientDate(page, "2026-06-11T09:00:00+09:00");
   await login(page);
@@ -108,6 +125,18 @@ test("home page omits redundant explanatory copy", async ({ page }) => {
   await expect(page.getByText("정보실 사전 컨펌제 · 리로스쿨 인증")).toHaveCount(0);
 });
 
+test("mocked client date does not trigger a hydration mismatch", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await mockClientDate(page, "2026-06-11T09:00:00+09:00");
+
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: "예약 현황" })).toBeVisible();
+  await page.waitForTimeout(300);
+
+  expect(pageErrors.filter((message) => message.includes("Hydration failed"))).toEqual([]);
+});
+
 test("reservation header copy is compact and tabs keep stable dimensions", async ({ page }) => {
   await mockClientDate(page, "2026-06-11T09:00:00+09:00");
   await login(page);
@@ -129,6 +158,24 @@ test("reservation header copy is compact and tabs keep stable dimensions", async
   expect(Math.round(advanceAfter.height)).toBe(Math.round(advanceBefore.height));
 });
 
+test("today and advance tabs keep period cards on the same visual rail", async ({ page }) => {
+  await mockClientDate(page, "2026-06-11T09:00:00+09:00");
+  await login(page, `rail-${Date.now()}`);
+
+  const firstCard = page.locator(".period-card").first();
+  const todayPosition = await visiblePosition(firstCard, "today first period card");
+
+  await page.getByRole("button", { name: "사전예약" }).click();
+  await expect(page.getByLabel("사전예약 날짜")).toBeVisible();
+  const advancePosition = await visiblePosition(firstCard, "advance first period card");
+
+  await page.getByRole("button", { name: "당일예약" }).click();
+  const todayAgainPosition = await visiblePosition(firstCard, "today first period card after return");
+
+  expect(Math.abs(Math.round(advancePosition.y - todayPosition.y))).toBeLessThanOrEqual(2);
+  expect(Math.abs(Math.round(todayAgainPosition.y - todayPosition.y))).toBeLessThanOrEqual(2);
+});
+
 test("left panel collapses and expands", async ({ page }) => {
   await login(page);
 
@@ -146,7 +193,7 @@ test("left panel collapses and expands", async ({ page }) => {
 });
 
 test("period cards show confirmed applicants", async ({ page }) => {
-  const date = "2026-06-11";
+  const date = todayKst();
   const studentNumber = String(Math.floor(10_000 + Math.random() * 90_000));
   let reservationId: string | undefined;
   let originalPeriods: readonly AdminPeriodSetting[] = [];
@@ -182,8 +229,16 @@ test("period cards show confirmed applicants", async ({ page }) => {
     }
 
     await expect(page.getByText("예약이 확정되었습니다.")).toBeVisible();
-    await expect(eighthCard.getByText("신청자")).toBeVisible();
+    const applicantToggle = eighthCard.getByRole("button", { name: /신청자 \d+명 보기/u });
+    await expect(applicantToggle).toBeVisible();
+    await expect(eighthCard.getByText(studentNumber)).toBeHidden();
+
+    await applicantToggle.click();
+    await expect(eighthCard.getByRole("button", { name: "신청자 접기" })).toBeVisible();
     await expect(eighthCard.getByText(studentNumber)).toBeVisible();
+
+    await eighthCard.getByRole("button", { name: "신청자 접기" }).click();
+    await expect(eighthCard.getByText(studentNumber)).toBeHidden();
   } finally {
     if (reservationId) {
       await page.evaluate(async (id) => {
@@ -194,6 +249,39 @@ test("period cards show confirmed applicants", async ({ page }) => {
     await login(page, "admin");
     await patchPeriodSettings(page, date, originalPeriods);
   }
+});
+
+test("applicant toggle preserves period order and tab dimensions", async ({ page }) => {
+  await mockClientDate(page, "2026-06-11T09:00:00+09:00");
+  await login(page, "25-10316");
+
+  const todayTab = page.getByRole("button", { name: "당일예약" });
+  const advanceTab = page.getByRole("button", { name: "사전예약" });
+  const todayBefore = await visibleBox(todayTab, "today tab before applicant toggle");
+  const advanceBefore = await visibleBox(advanceTab, "advance tab before applicant toggle");
+  const periodBadges = page.locator(".period-badge");
+  await expect(periodBadges.nth(0)).toHaveText("8면학");
+  await expect(periodBadges.nth(1)).toHaveText("1면학");
+
+  await page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: /신청자 .* 보기/u }).click();
+
+  const todayAfter = await visibleBox(todayTab, "today tab after applicant toggle");
+  const advanceAfter = await visibleBox(advanceTab, "advance tab after applicant toggle");
+  expect(Math.round(todayAfter.width)).toBe(Math.round(todayBefore.width));
+  expect(Math.round(todayAfter.height)).toBe(Math.round(todayBefore.height));
+  expect(Math.round(advanceAfter.width)).toBe(Math.round(advanceBefore.width));
+  expect(Math.round(advanceAfter.height)).toBe(Math.round(advanceBefore.height));
+  await expect(periodBadges.nth(0)).toHaveText("8면학");
+  await expect(periodBadges.nth(1)).toHaveText("1면학");
+});
+
+test("admin entry remains available for admin users", async ({ page }) => {
+  await login(page, "admin");
+
+  await expect(page.getByRole("link", { name: "관리자 화면" })).toBeVisible();
+  await page.getByRole("link", { name: "관리자 화면" }).click();
+  await expect(page).toHaveURL(/\/admin$/u);
+  await expect(page.getByRole("heading", { name: "예약자 목록" })).toBeVisible();
 });
 
 test("advance reservation is unavailable on Friday", async ({ page }) => {

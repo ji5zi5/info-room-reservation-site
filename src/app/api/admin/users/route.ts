@@ -1,22 +1,23 @@
 import { NextResponse } from "next/server";
 
-import { toKstDate } from "@/lib/date";
+import { filterAdminUsers, parseAdminUserStatusFilter } from "@/lib/admin-users";
 import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
 import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
-import { filterAdminReservations, orderAdminReservations, parseAdminReservationStatus } from "@/lib/admin-reservations";
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
     await requireAdmin();
     const url = new URL(request.url);
-    const date = url.searchParams.get("date") ?? toKstDate(new Date());
-    const status = parseAdminReservationStatus(url.searchParams.get("status"));
-    const reservations = await prisma.reservation.findMany({
-      include: { user: true },
-      where: { date }
+    const bookingStatus = parseAdminUserStatusFilter(url.searchParams.get("bookingStatus"));
+    const query = url.searchParams.get("query") ?? "";
+    const users = await prisma.user.findMany({
+      orderBy: [{ bookingStatus: "desc" }, { studentNumber: "asc" }],
+      take: 300
     });
-    return NextResponse.json({ reservations: orderAdminReservations(filterAdminReservations(reservations, status)) });
+    return NextResponse.json({
+      users: filterAdminUsers(users, { bookingStatus, query }).slice(0, 100)
+    });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);

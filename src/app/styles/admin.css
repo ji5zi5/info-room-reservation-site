@@ -1,0 +1,114 @@
+.admin-content {
+  background: var(--ash);
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+  padding: 32px;
+}
+
+.admin-dashboard-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.metric-card {
+  animation: card-enter 0.28s ease both;
+  background: var(--white);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.metric-grid {
+  color: var(--graphite);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.notice-panel {
+  background: var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.notification-pill {
+  align-items: center;
+  background: var(--white);
+  border-radius: 999px;
+  color: var(--pewter);
+  display: inline-flex;
+  font-size: 0.84rem;
+  font-weight: 600;
+  min-height: 30px;
+  padding: 4px 12px;
+  width: fit-content;
+}
+
+.notification-pill[data-status="SENT"] {
+  color: var(--blue);
+}
+
+.notification-pill[data-status="FAILED"] {
+  color: var(--red);
+}
+
+.grow-field {
+  flex: 1;
+  min-width: 220px;
+}
+
+.user-list {
+  background: var(--white);
+  border-radius: var(--radius);
+  display: grid;
+  overflow: hidden;
+}
+
+.user-line {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(150px, 0.9fr) minmax(0, 2fr);
+  min-height: 76px;
+  padding: 14px;
+}
+
+.user-line + .user-line {
+  border-top: 1px solid var(--fog);
+}
+
+.restriction-controls {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(68px, 0.5fr) minmax(160px, 1.2fr) auto auto;
+}
+
+.restriction-controls input,
+.restriction-controls select {
+  background: var(--white);
+  border: 1px solid var(--silver);
+  border-radius: var(--radius);
+  color: var(--ink);
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+@media (max-width: 1040px) {
+  .admin-dashboard-grid,
+  .metric-grid,
+  .user-line,
+  .restriction-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-content {
+    padding: 24px;
+  }
+}
