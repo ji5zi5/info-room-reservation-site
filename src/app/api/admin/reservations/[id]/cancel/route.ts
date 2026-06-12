@@ -1,13 +1,32 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
-import { jsonError } from "@/lib/http";
-import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
+import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
+import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { requireMutatingRequestSafety } from "@/lib/request-security";
+import { hashRequestClientIp } from "@/lib/request-source";
+import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
+import { requireAdminSession, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 
-export async function POST(_request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
+export async function POST(request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
+  const requestSafetyError = requireMutatingRequestSafety(request);
+  if (requestSafetyError) {
+    return jsonMutatingRequestSafetyError(requestSafetyError);
+  }
+
   try {
-    const admin = await requireAdmin();
+    const session = await requireAdminSession();
+    const csrfResult = await validateRequestCsrf(request, session.id);
+    if (csrfResult.kind === "error") {
+      return jsonError(403, csrfResult.reason, messageForCsrfError(csrfResult.reason));
+    }
+    const admin = session.user;
+    const rateLimitResult = await enforceAdminMutationRateLimit(request, admin.id);
+    if (rateLimitResult.kind === "blocked") {
+      return jsonRateLimitError(rateLimitResult);
+    }
     const params = await context.params;
+    const ipHash = hashRequestClientIp(request);
     const result = await prisma.$transaction(async (transaction) => {
       const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
       if (!reservation) {
@@ -17,11 +36,22 @@ export async function POST(_request: Request, context: { readonly params: Promis
         data: { status: "CANCELLED" },
         where: { id: reservation.id }
       });
+      const action = await transaction.adminAction.create({
+        data: {
+          action: "ADMIN_RESERVATION_CANCEL",
+          actorId: admin.id,
+          after: JSON.stringify({ reservationStatus: updated.status }),
+          before: JSON.stringify({ reservationStatus: reservation.status }),
+          ipHash,
+          reservationId: reservation.id,
+          targetUserId: reservation.userId
+        }
+      });
       await transaction.auditLog.create({
         data: {
           action: "ADMIN_RESERVATION_CANCEL",
           actorId: admin.id,
-          detail: JSON.stringify({ reservationId: reservation.id }),
+          detail: JSON.stringify({ actionId: action.id, reservationId: reservation.id }),
           userId: reservation.userId
         }
       });

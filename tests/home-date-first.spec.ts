@@ -224,6 +224,8 @@ test("period cards show confirmed applicants", async ({ page }) => {
       (response) => response.url().endsWith("/api/reservations") && response.request().method() === "POST"
     );
     await eighthCard.getByRole("button", { name: "8면학 예약" }).click();
+    await expect(page.getByRole("dialog", { name: "8면학 예약할까요?" })).toBeVisible();
+    await page.getByRole("button", { name: "예약 확정" }).click();
 
     const reservationResponse = await reservationResponsePromise;
     const payload = (await reservationResponse.json()) as ReservationCreateResponse;

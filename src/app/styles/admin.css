@@ -100,6 +100,32 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.admin-stat-strip {
+  align-items: center;
+  background: var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  min-width: 0;
+  padding: 10px;
+}
+
+.admin-stat-strip span {
+  align-items: center;
+  background: var(--white);
+  border-radius: var(--radius);
+  color: var(--graphite);
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 36px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+  text-align: center;
+}
+
 .metric-card {
   animation: card-enter 0.28s ease both;
   background: color-mix(in srgb, var(--fog) 54%, var(--white));
@@ -108,6 +134,46 @@
   display: grid;
   gap: 14px;
   padding: 18px;
+}
+
+.admin-stat-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stat-summary-card,
+.admin-offender-panel {
+  background: color-mix(in srgb, var(--fog) 54%, var(--white));
+  border: 1px solid var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.stat-summary-card {
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr);
+}
+
+.stat-mini-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stat-mini-grid span {
+  background: var(--white);
+  border-radius: var(--radius);
+  color: var(--graphite);
+  min-height: 34px;
+  padding: 7px 9px;
+  text-align: center;
+}
+
+.admin-offender-panel {
+  grid-column: 1 / -1;
 }
 
 .metric-grid {
@@ -161,9 +227,40 @@
 
 .user-list {
   background: var(--white);
+  border: 1px solid var(--fog);
   border-radius: var(--radius);
   display: grid;
   overflow: hidden;
+}
+
+.audit-list {
+  border: 1px solid var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  overflow: hidden;
+}
+
+.audit-line {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(160px, 0.72fr) minmax(0, 1.3fr) auto;
+  min-height: 92px;
+  padding: 14px;
+}
+
+.audit-line + .audit-line {
+  border-top: 1px solid var(--fog);
+}
+
+.audit-line > div {
+  min-width: 0;
+}
+
+.audit-line strong {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
 }
 
 .user-line {
@@ -210,6 +307,7 @@
   animation: admin-panel-in 0.24s ease both;
   align-content: start;
   background: var(--white);
+  border: 1px solid var(--fog);
   border-radius: var(--radius);
   display: grid;
   gap: 14px;
@@ -217,6 +315,7 @@
   min-width: 0;
   overflow: auto;
   padding: 20px;
+  scrollbar-gutter: stable;
 }
 
 .empty-detail {
@@ -280,6 +379,10 @@
 
 .detail-actions {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-actions .primary-button {
+  grid-column: 1 / -1;
 }
 
 .detail-section {
@@ -353,7 +456,10 @@
 
 @media (max-width: 1040px) {
   .admin-dashboard-grid,
+  .admin-stat-grid,
+  .admin-stat-strip,
   .metric-grid,
+  .stat-summary-card,
   .user-line,
   .restriction-controls {
     grid-template-columns: 1fr;
@@ -366,6 +472,7 @@
 
 @media (max-width: 900px) {
   .admin-console-layout {
+    align-content: start;
     grid-template-columns: 1fr;
   }
 
@@ -393,21 +500,98 @@
 }
 
 @media (max-width: 640px) {
-  .admin-nav-panel,
+  .admin-nav-panel {
+    gap: 12px;
+    padding: 14px 16px;
+  }
+
+  .admin-nav-panel .brand-row {
+    min-height: 34px;
+  }
+
+  .admin-nav-panel .brand-mark {
+    height: 34px;
+    width: 34px;
+  }
+
+  .admin-nav-panel h1 {
+    font-size: 1.52rem;
+    line-height: 1.08;
+  }
+
+  .admin-title-block {
+    display: grid;
+    gap: 4px;
+  }
+
+  .admin-title-block .muted {
+    font-size: 0.8rem;
+  }
+
+  .admin-date-picker {
+    align-items: center;
+    gap: 8px;
+    grid-template-columns: auto minmax(0, 1fr);
+    margin-top: 0;
+  }
+
+  .admin-date-picker span {
+    white-space: nowrap;
+  }
+
+  .admin-nav-panel > .ghost-button {
+    justify-self: center;
+    min-height: 38px;
+    width: auto;
+  }
+
   .admin-workspace,
   .admin-console-layout .admin-panel,
   .student-detail-panel {
     padding: 16px;
   }
 
+  .admin-workspace {
+    gap: 14px;
+  }
+
   .admin-section-nav {
+    gap: 6px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .admin-dashboard-grid,
-  .detail-actions,
-  .detail-metrics {
+  .admin-section-nav button {
+    min-height: 38px;
+    padding: 0 10px;
+  }
+
+  .student-detail-panel.empty-detail {
+    display: none;
+  }
+
+  .admin-dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .student-detail-panel[data-open="true"] {
+    gap: 12px;
+    max-height: none;
+  }
+
+  .student-detail-panel[data-open="true"] .detail-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .student-detail-panel[data-open="true"] .detail-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .student-detail-panel[data-open="true"] .detail-actions .primary-button {
+    grid-column: 1 / -1;
+  }
+
+  .student-detail-panel[data-open="true"] .notice-panel {
+    gap: 6px;
   }
 
   .admin-action-row,
@@ -416,6 +600,11 @@
   }
 
   .restriction-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-line {
+    align-items: stretch;
     grid-template-columns: 1fr;
   }
 

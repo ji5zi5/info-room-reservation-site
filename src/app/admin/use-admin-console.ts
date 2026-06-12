@@ -8,88 +8,56 @@ import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 import {
   applyUserRestriction,
   cancelAdminReservation,
+  fetchAdminAuditActions,
   fetchAdminDashboard,
   fetchAdminReservations,
   fetchAdminSettings,
+  fetchAdminStatistics,
   fetchAdminUserDetail,
   fetchAdminUsers,
   markReservationNoShow,
   removeUserRestriction,
+  revokeUserSessions,
   saveAdminSettings,
   sendClosedPeriodNotification,
   updatePeriodSetting
 } from "./admin-api-client";
+import { todayKst } from "./admin-date";
 import { buildReservationCsv } from "./admin-csv";
 import {
+  DEFAULT_RESTRICTION_DRAFT,
+  type AdminConsoleState,
+  type AdminSection,
+  type UserRestrictionDraft
+} from "./admin-console-state";
+import {
+  type AdminAuditAction,
+  type AdminAuditActionFilter,
   type AdminDashboardPeriod,
   type AdminPeriodSetting,
   type AdminReservation,
   type AdminReservationStatusFilter,
   type AdminReservationStudyPeriodFilter,
+  type AdminStatistics,
   type AdminUser,
   type AdminUserDetail,
   type AdminUserStatusFilter,
   type StudyPeriod
 } from "./admin-types";
 
-type UserRestrictionDraft = {
-  readonly days: string;
-  readonly reason: string;
-  readonly status: "BANNED" | "RESTRICTED";
-};
+export type { AdminSection } from "./admin-console-state";
 
-export type AdminSection = "dashboard" | "reservations" | "settings" | "students";
-
-const DEFAULT_RESTRICTION_DRAFT = {
-  days: "7",
-  reason: "정보실 예약 제한",
-  status: "RESTRICTED"
-} satisfies UserRestrictionDraft;
-
-export function useAdminConsole(): {
-  readonly activeSection: AdminSection;
-  readonly applyRestriction: (userId: string) => Promise<void>;
-  readonly applyRestrictionPreset: (userId: string, days: number) => Promise<void>;
-  readonly banUser: (userId: string) => Promise<void>;
-  readonly cancelReservation: (reservationId: string) => Promise<void>;
-  readonly clearSelectedUser: () => void;
-  readonly copyReservationsCsv: () => Promise<void>;
-  readonly dashboardPeriods: readonly AdminDashboardPeriod[];
-  readonly date: string;
-  readonly markNoShow: (reservationId: string) => Promise<void>;
-  readonly periods: readonly AdminPeriodSetting[];
-  readonly refresh: () => Promise<void>;
-  readonly removeRestriction: (userId: string) => Promise<void>;
-  readonly reservationPeriodFilter: AdminReservationStudyPeriodFilter;
-  readonly reservationQuery: string;
-  readonly reservations: readonly AdminReservation[];
-  readonly restrictionDrafts: Readonly<Record<string, UserRestrictionDraft>>;
-  readonly saveSettings: () => Promise<void>;
-  readonly selectedUserDetail: AdminUserDetail | null;
-  readonly selectedUserId: string | null;
-  readonly selectStatus: (status: AdminReservationStatusFilter) => void;
-  readonly sendNotification: (period: AdminDashboardPeriod, force: boolean) => Promise<void>;
-  readonly setActiveSection: (section: AdminSection) => void;
-  readonly setDate: (date: string) => void;
-  readonly setReservationPeriodFilter: (period: AdminReservationStudyPeriodFilter) => void;
-  readonly setReservationQuery: (query: string) => void;
-  readonly setRestrictionDraft: (userId: string, patch: Partial<UserRestrictionDraft>) => void;
-  readonly setUserQuery: (query: string) => void;
-  readonly setUserStatusFilter: (status: AdminUserStatusFilter) => void;
-  readonly statusFilter: AdminReservationStatusFilter;
-  readonly toast: string | null;
-  readonly updatePeriod: (studyPeriod: StudyPeriod, patch: Partial<AdminPeriodSetting>) => void;
-  readonly userQuery: string;
-  readonly userStatusFilter: AdminUserStatusFilter;
-  readonly users: readonly AdminUser[];
-  readonly viewUser: (userId: string) => Promise<void>;
-} {
+export function useAdminConsole(): AdminConsoleState {
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [date, setDate] = useState(todayKst());
   const [periods, setPeriods] = useState<readonly AdminPeriodSetting[]>([]);
   const [dashboardPeriods, setDashboardPeriods] = useState<readonly AdminDashboardPeriod[]>([]);
   const [reservations, setReservations] = useState<readonly AdminReservation[]>([]);
+  const [statistics, setStatistics] = useState<AdminStatistics | null>(null);
   const [users, setUsers] = useState<readonly AdminUser[]>([]);
+  const [auditActions, setAuditActions] = useState<readonly AdminAuditAction[]>([]);
+  const [auditActionFilter, setAuditActionFilter] = useState<AdminAuditActionFilter>("ALL");
+  const [auditQuery, setAuditQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<AdminReservationStatusFilter>("CONFIRMED");
   const [reservationPeriodFilter, setReservationPeriodFilter] = useState<AdminReservationStudyPeriodFilter>("ALL");
   const [reservationQuery, setReservationQuery] = useState("");
@@ -106,7 +74,17 @@ export function useAdminConsole(): {
 
   useEffect(() => {
     void refresh();
-  }, [date, reservationPeriodFilter, reservationQuery, statusFilter, userQuery, userStatusFilter]);
+  }, [
+    activeSection,
+    auditActionFilter,
+    auditQuery,
+    date,
+    reservationPeriodFilter,
+    reservationQuery,
+    statusFilter,
+    userQuery,
+    userStatusFilter
+  ]);
 
   useEffect(() => {
     if (selectedUserId) {
@@ -120,7 +98,7 @@ export function useAdminConsole(): {
       setToast("관리자 로그인이 필요합니다.");
       return;
     }
-    const [dashboardPayload, reservationsPayload, usersPayload] = await Promise.all([
+    const [dashboardPayload, reservationsPayload, statisticsPayload, usersPayload, auditPayload] = await Promise.all([
       fetchAdminDashboard(date),
       fetchAdminReservations({
         date,
@@ -128,12 +106,16 @@ export function useAdminConsole(): {
         status: statusFilter,
         studyPeriod: reservationPeriodFilter
       }),
-      fetchAdminUsers({ query: userQuery, status: userStatusFilter })
+      fetchAdminStatistics({ from: date, to: date }),
+      fetchAdminUsers({ query: userQuery, status: userStatusFilter }),
+      fetchAdminAuditActions({ action: auditActionFilter, query: auditQuery })
     ]);
     setPeriods(settingsPayload);
     setDashboardPeriods(dashboardPayload);
     setReservations(reservationsPayload);
+    setStatistics(statisticsPayload);
     setUsers(usersPayload);
+    setAuditActions(auditPayload);
     if (selectedUserId) {
       await refreshSelectedUser(selectedUserId);
     }
@@ -201,6 +183,12 @@ export function useAdminConsole(): {
     await refresh();
   }
 
+  async function revokeSessions(userId: string): Promise<void> {
+    const ok = await revokeUserSessions(userId);
+    setToast(ok ? "학생의 로그인 세션을 종료했습니다." : "세션 종료 실패");
+    await refresh();
+  }
+
   function updatePeriod(studyPeriod: StudyPeriod, patch: Partial<AdminPeriodSetting>): void {
     setPeriods((current) => updatePeriodSetting(current, studyPeriod, patch));
   }
@@ -241,6 +229,9 @@ export function useAdminConsole(): {
 
   return {
     activeSection,
+    auditActionFilter,
+    auditActions,
+    auditQuery,
     applyRestriction,
     applyRestrictionPreset,
     banUser,
@@ -253,6 +244,7 @@ export function useAdminConsole(): {
     periods,
     refresh,
     removeRestriction,
+    revokeSessions,
     reservationPeriodFilter,
     reservationQuery,
     reservations,
@@ -263,6 +255,8 @@ export function useAdminConsole(): {
     selectStatus,
     sendNotification,
     setActiveSection,
+    setAuditActionFilter,
+    setAuditQuery,
     setDate,
     setReservationPeriodFilter,
     setReservationQuery,
@@ -270,6 +264,7 @@ export function useAdminConsole(): {
     setUserQuery,
     setUserStatusFilter,
     statusFilter,
+    statistics,
     toast,
     updatePeriod,
     userQuery,
@@ -277,13 +272,4 @@ export function useAdminConsole(): {
     users,
     viewUser
   };
-}
-
-function todayKst(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "Asia/Seoul",
-    year: "numeric"
-  }).format(new Date());
 }

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { orderUserSanctions, summarizeUserSanctions } from "@/lib/admin-action-log";
+import { summarizeUserSessions } from "@/lib/admin-session-control";
 import { orderAdminUserReservations, summarizeAdminUserReservations } from "@/lib/admin-user-detail";
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
@@ -16,9 +18,22 @@ export async function GET(_request: Request, context: { readonly params: Promise
           orderBy: { createdAt: "desc" },
           take: 20
         },
+        adminActionsTargeted: {
+          orderBy: { createdAt: "desc" },
+          take: 30
+        },
         reservations: {
           orderBy: [{ date: "desc" }, { createdAt: "asc" }],
           take: 100
+        },
+        sessions: {
+          select: {
+            expiresAt: true
+          }
+        },
+        sanctions: {
+          orderBy: { createdAt: "desc" },
+          take: 30
         }
       },
       where: { id: params.id }
@@ -28,6 +43,8 @@ export async function GET(_request: Request, context: { readonly params: Promise
     }
 
     const reservationHistory = orderAdminUserReservations(user.reservations);
+    const sanctions = orderUserSanctions(user.sanctions);
+    const now = new Date();
     const today = toKstDate(new Date());
     return NextResponse.json({
       user: {
@@ -49,10 +66,37 @@ export async function GET(_request: Request, context: { readonly params: Promise
         detail: log.detail,
         id: log.id
       })),
+      adminActions: user.adminActionsTargeted.map((action) => ({
+        action: action.action,
+        actorId: action.actorId,
+        after: action.after,
+        before: action.before,
+        createdAt: action.createdAt,
+        id: action.id,
+        reason: action.reason,
+        reservationId: action.reservationId,
+        targetUserId: action.targetUserId
+      })),
       currentReservations: reservationHistory.filter(
         (reservation) => reservation.status === "CONFIRMED" && reservation.date >= today
       ),
       reservationHistory,
+      sanctions: sanctions.map((sanction) => ({
+        actorId: sanction.actorId,
+        createdAt: sanction.createdAt,
+        endsAt: sanction.endsAt,
+        id: sanction.id,
+        reason: sanction.reason,
+        revokedAt: sanction.revokedAt,
+        revokedById: sanction.revokedById,
+        revokedReason: sanction.revokedReason,
+        sourceActionId: sanction.sourceActionId,
+        startsAt: sanction.startsAt,
+        status: sanction.status,
+        type: sanction.type
+      })),
+      sanctionSummary: summarizeUserSanctions(sanctions),
+      sessionSummary: summarizeUserSessions(user.sessions, now),
       summary: summarizeAdminUserReservations(user.reservations)
     });
   } catch (error) {

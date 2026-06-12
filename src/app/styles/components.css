@@ -125,7 +125,7 @@
 .reservation-date-rail {
   align-items: start;
   display: grid;
-  min-height: 68px;
+  min-height: 71px;
 }
 
 .advance-date-field {
@@ -136,6 +136,10 @@
 .advance-date-field input:disabled {
   color: var(--graphite);
   opacity: 1;
+}
+
+.advance-date-placeholder {
+  min-height: 71px;
 }
 
 .status-filter {
@@ -172,6 +176,7 @@
 
 .period-grid {
   gap: 16px;
+  min-height: 253px;
 }
 
 .period-card {
@@ -188,7 +193,31 @@
   border-radius: var(--radius);
   display: grid;
   gap: 8px;
+  min-height: 253px;
+  place-content: start;
   padding: 22px;
+}
+
+.reservation-warning {
+  background: color-mix(in srgb, var(--white) 82%, var(--blue) 18%);
+  border: 1px solid color-mix(in srgb, var(--blue) 24%, var(--silver));
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.reservation-warning p {
+  align-items: center;
+  color: var(--graphite);
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reservation-warning svg {
+  color: var(--blue);
+  flex: 0 0 auto;
 }
 
 .period-title {
@@ -343,6 +372,62 @@
   padding: 12px 16px;
 }
 
+.confirm-backdrop {
+  animation: confirm-backdrop-in 0.18s ease both;
+  background: rgba(23, 26, 32, 0.36);
+  display: grid;
+  inset: 0;
+  padding: 24px;
+  place-items: center;
+  position: fixed;
+  z-index: 30;
+}
+
+.confirm-dialog {
+  animation: confirm-dialog-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 80px rgba(23, 26, 32, 0.24);
+  display: grid;
+  gap: 14px;
+  max-width: 430px;
+  padding: 22px;
+  position: relative;
+  width: min(100%, 430px);
+}
+
+.confirm-close {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+}
+
+.confirm-mark {
+  align-items: center;
+  background: color-mix(in srgb, var(--red) 10%, var(--white));
+  border-radius: var(--radius);
+  color: var(--red);
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.confirm-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  padding-top: 4px;
+}
+
+.danger-aware {
+  background: var(--ink);
+}
+
+.danger-aware:hover {
+  background: var(--graphite);
+}
+
 @keyframes card-enter {
   from {
     opacity: 0.94;
@@ -362,6 +447,26 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes confirm-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes confirm-dialog-in {
+  from {
+    transform: translateY(10px) scale(0.985);
+  }
+
+  to {
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -401,7 +506,8 @@
   }
 
   .login-panel[data-open="false"] {
-    min-height: 88px;
+    min-height: 72px;
+    padding: 16px 0;
   }
 
   .topbar,
@@ -422,7 +528,8 @@
   }
 
   .period-actions,
-  .status-filter {
+  .status-filter,
+  .confirm-actions {
     grid-template-columns: 1fr;
   }
 
@@ -444,6 +551,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .workspace,
+  .login-panel,
+  .sidebar-content,
   .primary-button,
   .ghost-button,
   .danger-button,
@@ -454,12 +564,16 @@
   .applicant-toggle,
   .applicant-toggle svg,
   .applicant-content,
-  .meter span {
+  .meter span,
+  .confirm-backdrop,
+  .confirm-dialog {
     transition: none;
   }
 
   .period-card,
-  .toast {
+  .toast,
+  .confirm-backdrop,
+  .confirm-dialog {
     animation: none;
   }
 }

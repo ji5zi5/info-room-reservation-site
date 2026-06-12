@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { buildClosedListNotificationAdminAction } from "@/lib/admin-operation-audit";
 import { createClosedPeriodNotificationService } from "@/lib/closed-period-notification-service";
+import { prisma } from "@/lib/db";
 import { sendDiscordWebhook } from "@/lib/discord-notifications";
-import { jsonError } from "@/lib/http";
+import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { prismaClosedPeriodNotificationRepository } from "@/lib/prisma-notification-repository";
-import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
+import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { requireMutatingRequestSafety } from "@/lib/request-security";
+import { hashRequestClientIp } from "@/lib/request-source";
+import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
+import { requireAdminSession, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 
 const ManualSendSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
@@ -14,8 +20,21 @@ const ManualSendSchema = z.object({
 });
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const requestSafetyError = requireMutatingRequestSafety(request);
+  if (requestSafetyError) {
+    return jsonMutatingRequestSafetyError(requestSafetyError);
+  }
+
   try {
-    await requireAdmin();
+    const session = await requireAdminSession();
+    const csrfResult = await validateRequestCsrf(request, session.id);
+    if (csrfResult.kind === "error") {
+      return jsonError(403, csrfResult.reason, messageForCsrfError(csrfResult.reason));
+    }
+    const rateLimitResult = await enforceAdminMutationRateLimit(request, session.user.id);
+    if (rateLimitResult.kind === "blocked") {
+      return jsonRateLimitError(rateLimitResult);
+    }
     const parsed = ManualSendSchema.safeParse(await request.json());
     if (!parsed.success) {
       return jsonError(400, "bad_request", "마감 명단 전송 요청 형식이 올바르지 않습니다.");
@@ -24,6 +43,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!webhookUrl) {
       return jsonError(500, "discord_webhook_missing", "Discord webhook 설정이 필요합니다.");
     }
+    const ipHash = hashRequestClientIp(request);
 
     const now = new Date();
     const service = createClosedPeriodNotificationService({
@@ -39,6 +59,29 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (result.kind === "skipped") {
       return jsonError(409, result.reason, messageForSkipped(result.reason));
     }
+    const action = await prisma.adminAction.create({
+      data: buildClosedListNotificationAdminAction({
+        actorId: session.user.id,
+        date: parsed.data.date,
+        force: parsed.data.force === true,
+        ipHash,
+        result,
+        studyPeriod: parsed.data.studyPeriod
+      })
+    });
+    await prisma.auditLog.create({
+      data: {
+        action: "CLOSED_LIST_NOTIFICATION_SEND",
+        actorId: session.user.id,
+        detail: JSON.stringify({
+          actionId: action.id,
+          date: parsed.data.date,
+          force: parsed.data.force === true,
+          kind: result.kind,
+          studyPeriod: parsed.data.studyPeriod
+        })
+      }
+    });
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {

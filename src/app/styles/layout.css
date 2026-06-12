@@ -12,12 +12,16 @@
 }
 
 .workspace {
-  grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
-  transition: grid-template-columns var(--motion);
+  --sidebar-width: clamp(320px, 32vw, 410px);
+
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  transition: grid-template-columns 0.42s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .workspace[data-sidebar="closed"] {
-  grid-template-columns: 80px minmax(0, 1fr);
+  --sidebar-width: 72px;
+
+  grid-template-columns: 72px minmax(0, 1fr);
 }
 
 .admin-grid {
@@ -36,10 +40,17 @@
 
 .login-panel {
   overflow: hidden;
+  transition:
+    gap 0.32s ease,
+    min-height 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    padding 0.42s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .login-panel[data-open="false"] {
-  padding: 24px 18px;
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  padding: 24px 16px;
 }
 
 .sidebar-head {
@@ -47,28 +58,43 @@
   display: grid;
   gap: 10px;
   grid-template-columns: auto 1fr auto;
+  min-width: 0;
 }
 
 .login-panel[data-open="false"] .sidebar-head {
   grid-template-columns: 1fr;
+  inline-size: 40px;
   justify-items: center;
+  justify-self: center;
+  max-width: 40px;
+  min-height: 40px;
 }
 
 .sidebar-content {
+  max-height: 760px;
   opacity: 1;
-  transition: opacity var(--motion), visibility var(--motion);
+  transform: translateX(0);
+  transition:
+    max-height 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease,
+    transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.login-panel[data-open="false"] .auth-mark,
 .login-panel[data-open="false"] .sidebar-content {
-  display: none;
+  max-height: 0;
   opacity: 0;
   pointer-events: none;
+  transform: translateX(-10px);
   visibility: hidden;
+}
+
+.login-panel[data-open="false"] .sidebar-toggle {
+  justify-self: center;
 }
 
 .tool-panel,
 .admin-panel:last-child {
+  align-content: start;
   background: var(--ash);
   display: grid;
   gap: 24px;
@@ -95,6 +121,11 @@
   height: 40px;
   justify-content: center;
   width: 40px;
+}
+
+.login-panel[data-open="false"] .auth-mark,
+.login-panel[data-open="false"] .brand-mark {
+  display: none;
 }
 
 .muted {

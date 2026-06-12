@@ -1,16 +1,19 @@
 "use client";
 
-import { BarChart3, CalendarClock, ListChecks, LogOut, Search, Settings } from "lucide-react";
+import { BarChart3, CalendarClock, ListChecks, LogOut, Search, Settings, ShieldAlert } from "lucide-react";
 import type { ReactElement } from "react";
 
+import { AdminAuditPanel } from "./admin-audit-panel";
 import { AdminDashboardPanel } from "./admin-dashboard-panel";
 import { AdminReservationsPanel } from "./admin-reservations-panel";
 import { AdminSettingsPanel } from "./admin-settings-panel";
 import { AdminStudentDetail } from "./admin-student-detail";
 import { AdminUsersPanel } from "./admin-users-panel";
+import { csrfFetch, resetCsrfToken } from "../csrf-fetch";
 import { type AdminSection, useAdminConsole } from "./use-admin-console";
 
 const SECTION_LABELS: Record<AdminSection, string> = {
+  audit: "감사",
   dashboard: "운영",
   reservations: "예약자",
   settings: "설정",
@@ -24,6 +27,7 @@ const SECTIONS: readonly {
   { icon: <BarChart3 size={18} />, id: "dashboard" },
   { icon: <ListChecks size={18} />, id: "reservations" },
   { icon: <Search size={18} />, id: "students" },
+  { icon: <ShieldAlert size={18} />, id: "audit" },
   { icon: <Settings size={18} />, id: "settings" }
 ];
 
@@ -31,7 +35,8 @@ export function AdminConsole(): ReactElement {
   const consoleState = useAdminConsole();
 
   async function logout(): Promise<void> {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await csrfFetch("/api/auth/logout", { method: "POST" });
+    resetCsrfToken();
     window.location.assign("/");
   }
 
@@ -45,7 +50,7 @@ export function AdminConsole(): ReactElement {
             </span>
             <strong>정보실 운영</strong>
           </div>
-          <div>
+          <div className="admin-title-block">
             <h1>관리자</h1>
             <p className="muted">현황 · 명단 · 학생 제재 · 설정</p>
           </div>
@@ -76,6 +81,7 @@ export function AdminConsole(): ReactElement {
             {consoleState.activeSection === "dashboard" ? (
               <AdminDashboardPanel
                 periods={consoleState.dashboardPeriods}
+                statistics={consoleState.statistics}
                 onSendNotification={(period, force) => void consoleState.sendNotification(period, force)}
               />
             ) : null}
@@ -110,6 +116,16 @@ export function AdminConsole(): ReactElement {
                 onSetStatus={consoleState.setUserStatusFilter}
               />
             ) : null}
+            {consoleState.activeSection === "audit" ? (
+              <AdminAuditPanel
+                actionFilter={consoleState.auditActionFilter}
+                actions={consoleState.auditActions}
+                query={consoleState.auditQuery}
+                onSetActionFilter={consoleState.setAuditActionFilter}
+                onSetQuery={consoleState.setAuditQuery}
+                onViewUser={(userId) => void consoleState.viewUser(userId)}
+              />
+            ) : null}
             {consoleState.activeSection === "settings" ? (
               <AdminSettingsPanel
                 date={consoleState.date}
@@ -127,6 +143,7 @@ export function AdminConsole(): ReactElement {
             onBan={(userId) => void consoleState.banUser(userId)}
             onClose={consoleState.clearSelectedUser}
             onRelease={(userId) => void consoleState.removeRestriction(userId)}
+            onRevokeSessions={(userId) => void consoleState.revokeSessions(userId)}
           />
           {consoleState.toast ? <div className="toast admin-toast">{consoleState.toast}</div> : null}
         </div>

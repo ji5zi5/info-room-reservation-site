@@ -29,6 +29,12 @@ export type UserBookingState = {
   readonly restrictedUntil: Date | null;
 };
 
+export type BookingRestrictionUpdate = {
+  readonly bookingStatus: "BANNED" | "RESTRICTED";
+  readonly restrictedUntil: Date | null;
+  readonly restrictionReason: string;
+};
+
 export type ReservationResult =
   | {
       readonly kind: "confirmed";
@@ -74,6 +80,24 @@ export type ReserveStudyPeriodInput = {
   readonly studyPeriod: StudyPeriod;
   readonly userId: string;
 };
+
+const STUDENT_CANCELLATION_RESTRICTION_MS = 3 * 24 * 60 * 60 * 1000;
+
+export function buildStudentCancellationRestriction(now: Date): BookingRestrictionUpdate {
+  return {
+    bookingStatus: "RESTRICTED",
+    restrictedUntil: new Date(now.getTime() + STUDENT_CANCELLATION_RESTRICTION_MS),
+    restrictionReason: "예약 취소"
+  };
+}
+
+export function buildNoShowBan(reason: string): BookingRestrictionUpdate {
+  return {
+    bookingStatus: "BANNED",
+    restrictedUntil: null,
+    restrictionReason: reason
+  };
+}
 
 export async function reserveStudyPeriod(input: ReserveStudyPeriodInput): Promise<ReservationResult> {
   return input.store.transaction(async (store) => {

@@ -17,6 +17,11 @@ export type SessionUser = {
   readonly studentNumber: string;
 };
 
+export type CurrentSession = {
+  readonly id: string;
+  readonly user: SessionUser;
+};
+
 export async function createSession(userId: string): Promise<string> {
   const token = randomBytes(32).toString("base64url");
   await prisma.session.create({
@@ -30,6 +35,11 @@ export async function createSession(userId: string): Promise<string> {
 }
 
 export async function getCurrentUser(): Promise<SessionUser | null> {
+  const session = await getCurrentSession();
+  return session?.user ?? null;
+}
+
+export async function getCurrentSession(): Promise<CurrentSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (!token) {
@@ -46,21 +56,32 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   }
 
   return {
-    bookingStatus: session.user.bookingStatus,
-    generation: session.user.generation,
-    id: session.user.id,
-    name: session.user.name,
-    role: session.user.role,
-    studentNumber: session.user.studentNumber
+    id: session.id,
+    user: {
+      bookingStatus: session.user.bookingStatus,
+      generation: session.user.generation,
+      id: session.user.id,
+      name: session.user.name,
+      role: session.user.role,
+      studentNumber: session.user.studentNumber
+    }
   };
 }
 
 export async function requireUser(): Promise<SessionUser> {
-  const user = await getCurrentUser();
-  if (!user) {
+  const session = await getCurrentSession();
+  if (!session) {
     throw new UnauthorizedSessionError();
   }
-  return user;
+  return session.user;
+}
+
+export async function requireSession(): Promise<CurrentSession> {
+  const session = await getCurrentSession();
+  if (!session) {
+    throw new UnauthorizedSessionError();
+  }
+  return session;
 }
 
 export async function requireAdmin(): Promise<SessionUser> {
@@ -69,6 +90,14 @@ export async function requireAdmin(): Promise<SessionUser> {
     throw new ForbiddenSessionError();
   }
   return user;
+}
+
+export async function requireAdminSession(): Promise<CurrentSession> {
+  const session = await requireSession();
+  if (session.user.role !== "ADMIN") {
+    throw new ForbiddenSessionError();
+  }
+  return session;
 }
 
 export async function clearCurrentSession(): Promise<void> {
