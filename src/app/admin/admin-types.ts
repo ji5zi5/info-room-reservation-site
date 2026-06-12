@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { ADMIN_RESERVATION_STATUS_FILTERS, type AdminReservationStatusFilter } from "@/lib/admin-reservations";
+import {
+  ADMIN_RESERVATION_PERIOD_FILTERS,
+  ADMIN_RESERVATION_STATUS_FILTERS,
+  type AdminReservationStatusFilter,
+  type AdminReservationStudyPeriodFilter
+} from "@/lib/admin-reservations";
 import { ADMIN_USER_STATUS_FILTERS, type AdminUserStatusFilter } from "@/lib/admin-users";
 
 const StudyPeriodSchema = z.union([z.literal("EIGHTH"), z.literal("FIRST")]);
@@ -38,6 +43,7 @@ export const AdminDashboardPeriodSchema = AdminPeriodSettingSchema.extend({
 });
 
 export const AdminReservationSchema = z.object({
+  createdAt: z.string(),
   date: z.string(),
   id: z.string(),
   status: z.string(),
@@ -46,6 +52,7 @@ export const AdminReservationSchema = z.object({
     bookingStatus: z.string(),
     id: z.string(),
     name: z.string(),
+    role: z.string(),
     studentNumber: z.string()
   })
 });
@@ -66,10 +73,46 @@ export const AdminDashboardPayloadSchema = z.object({ periods: z.array(AdminDash
 export const AdminReservationsPayloadSchema = z.object({ reservations: z.array(AdminReservationSchema) });
 export const AdminUsersPayloadSchema = z.object({ users: z.array(AdminUserSchema) });
 
+const AdminUserReservationSchema = z.object({
+  createdAt: z.string(),
+  date: z.string(),
+  id: z.string(),
+  status: z.string(),
+  studyPeriod: z.string(),
+  updatedAt: z.string(),
+  userId: z.string()
+});
+
+const AdminAuditLogSchema = z.object({
+  action: z.string(),
+  actorId: z.string().nullable(),
+  createdAt: z.string(),
+  detail: z.string(),
+  id: z.string()
+});
+
+const AdminUserReservationSummarySchema = z.object({
+  cancelledCount: z.number(),
+  confirmedCount: z.number(),
+  noShowCount: z.number()
+});
+
+export const AdminUserDetailSchema = z.object({
+  auditLogs: z.array(AdminAuditLogSchema),
+  currentReservations: z.array(AdminUserReservationSchema),
+  reservationHistory: z.array(AdminUserReservationSchema),
+  summary: AdminUserReservationSummarySchema,
+  user: AdminUserSchema.extend({
+    createdAt: z.string(),
+    updatedAt: z.string()
+  })
+});
+
 export type AdminDashboardPeriod = z.infer<typeof AdminDashboardPeriodSchema>;
 export type AdminPeriodSetting = z.infer<typeof AdminPeriodSettingSchema>;
 export type AdminReservation = z.infer<typeof AdminReservationSchema>;
 export type AdminUser = z.infer<typeof AdminUserSchema>;
+export type AdminUserDetail = z.infer<typeof AdminUserDetailSchema>;
 export type StudyPeriod = z.infer<typeof StudyPeriodSchema>;
-export type { AdminReservationStatusFilter, AdminUserStatusFilter };
-export { ADMIN_RESERVATION_STATUS_FILTERS, ADMIN_USER_STATUS_FILTERS };
+export type { AdminReservationStatusFilter, AdminReservationStudyPeriodFilter, AdminUserStatusFilter };
+export { ADMIN_RESERVATION_PERIOD_FILTERS, ADMIN_RESERVATION_STATUS_FILTERS, ADMIN_USER_STATUS_FILTERS };

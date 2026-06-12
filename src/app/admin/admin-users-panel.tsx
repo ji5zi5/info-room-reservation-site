@@ -16,21 +16,25 @@ const USER_STATUS_LABELS: Record<AdminUserStatusFilter, string> = {
 export function AdminUsersPanel({
   onApplyRestriction,
   onRemoveRestriction,
+  onSelectUser,
   onSetDraft,
   onSetQuery,
   onSetStatus,
   query,
   restrictionDrafts,
+  selectedUserId,
   status,
   users
 }: {
   readonly onApplyRestriction: (userId: string) => void;
   readonly onRemoveRestriction: (userId: string) => void;
+  readonly onSelectUser: (userId: string) => void;
   readonly onSetDraft: (userId: string, patch: { readonly days?: string; readonly reason?: string; readonly status?: "BANNED" | "RESTRICTED" }) => void;
   readonly onSetQuery: (query: string) => void;
   readonly onSetStatus: (status: AdminUserStatusFilter) => void;
   readonly query: string;
   readonly restrictionDrafts: Readonly<Record<string, { readonly days: string; readonly reason: string; readonly status: "BANNED" | "RESTRICTED" }>>;
+  readonly selectedUserId: string | null;
   readonly status: AdminUserStatusFilter;
   readonly users: readonly AdminUser[];
 }): React.ReactElement {
@@ -61,7 +65,7 @@ export function AdminUsersPanel({
         {users.map((user) => {
           const draft = restrictionDrafts[user.id] ?? { days: "7", reason: "정보실 예약 제한", status: "RESTRICTED" };
           return (
-            <div className="user-line" key={user.id}>
+            <div className="user-line" data-selected={selectedUserId === user.id} key={user.id}>
               <div>
                 <strong>{user.name}</strong>
                 <p className="muted">{user.studentNumber} · {statusLabel(user.bookingStatus)}</p>
@@ -77,6 +81,9 @@ export function AdminUsersPanel({
                 <button className="danger-button" type="button" onClick={() => onApplyRestriction(user.id)}>
                   <Ban size={16} />
                   제한
+                </button>
+                <button className="ghost-button" type="button" onClick={() => onSelectUser(user.id)}>
+                  자세히
                 </button>
                 {user.bookingStatus !== "ACTIVE" ? (
                   <button className="ghost-button" type="button" onClick={() => onRemoveRestriction(user.id)}>

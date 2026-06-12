@@ -18,6 +18,15 @@ export type AdminUserFilterInput = {
   readonly query: string;
 };
 
+export type RestrictableUserResult =
+  | {
+      readonly kind: "ok";
+    }
+  | {
+      readonly kind: "error";
+      readonly reason: "admin_target" | "self_restriction";
+    };
+
 export function parseAdminUserStatusFilter(value: string | null): AdminUserStatusFilter {
   switch (value) {
     case "ACTIVE":
@@ -48,4 +57,17 @@ export function filterAdminUsers(
       user.studentNumber.toLocaleLowerCase("ko-KR").includes(normalizedQuery)
     );
   });
+}
+
+export function assertRestrictableUser(input: {
+  readonly actorId: string;
+  readonly target: Pick<AdminUserListRow, "id" | "role">;
+}): RestrictableUserResult {
+  if (input.actorId === input.target.id) {
+    return { kind: "error", reason: "self_restriction" };
+  }
+  if (input.target.role === "ADMIN") {
+    return { kind: "error", reason: "admin_target" };
+  }
+  return { kind: "ok" };
 }

@@ -17,6 +17,10 @@ async function login(page: Page, loginId: string): Promise<void> {
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
+  if (loginId === "admin") {
+    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
+    return;
+  }
   await page.locator(".period-card .period-badge").first().waitFor();
 }
 
@@ -133,10 +137,27 @@ test("reserved periods show a cancel action and refresh applicants after cancel"
 
 test("admin reservations default to confirmed and expose status filters", async ({ page }) => {
   await login(page, "admin");
-  await page.getByRole("link", { name: "관리자 화면" }).click();
+  await page.getByRole("button", { name: "예약자" }).click();
 
   await expect(page.getByRole("button", { name: "확정" })).toHaveAttribute("data-active", "true");
   await page.getByRole("button", { name: "전체" }).click();
   await expect(page).toHaveURL(/status=ALL/u);
   await expect(page.getByRole("button", { name: "전체" })).toHaveAttribute("data-active", "true");
+});
+
+test("admins cannot create student reservations", async ({ page }) => {
+  await login(page, "admin");
+
+  const result = await page.evaluate(async (date) => {
+    const response = await fetch("/api/reservations", {
+      body: JSON.stringify({ date, studyPeriod: "EIGHTH" }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    });
+    const payload = (await response.json()) as { readonly error?: { readonly code?: string } };
+    return { code: payload.error?.code, status: response.status };
+  }, todayKst());
+
+  expect(result).toEqual({ code: "admin_not_reservable", status: 403 });
+  await expect(page.getByRole("button", { name: "8면학 예약" })).toHaveCount(0);
 });

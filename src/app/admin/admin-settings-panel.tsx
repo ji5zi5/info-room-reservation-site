@@ -1,17 +1,19 @@
 "use client";
 
-import { CalendarClock, Save } from "lucide-react";
+import { CalendarClock, LogOut, Save } from "lucide-react";
 
 import type { AdminPeriodSetting, StudyPeriod } from "./admin-types";
 
 export function AdminSettingsPanel({
   date,
+  onLogout,
   onDateChange,
   onSave,
   onUpdatePeriod,
   periods
 }: {
   readonly date: string;
+  readonly onLogout: () => void;
   readonly onDateChange: (date: string) => void;
   readonly onSave: () => void;
   readonly onUpdatePeriod: (studyPeriod: StudyPeriod, patch: Partial<AdminPeriodSetting>) => void;
@@ -23,7 +25,10 @@ export function AdminSettingsPanel({
         <span className="brand-mark">
           <CalendarClock size={22} />
         </span>
-        <a className="ghost-button" href="/">예약 화면</a>
+        <button className="ghost-button" type="button" onClick={onLogout}>
+          <LogOut size={18} />
+          로그아웃
+        </button>
       </div>
       <div>
         <h1>관리자</h1>

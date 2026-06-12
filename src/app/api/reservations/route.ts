@@ -17,6 +17,10 @@ const ReservationRequestSchema = z.object({
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const user = await requireUser();
+    if (user.role === "ADMIN") {
+      return jsonError(403, "admin_not_reservable", "관리자 계정은 예약할 수 없습니다.");
+    }
+
     const parsed = ReservationRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
       return jsonError(400, "bad_request", "예약 요청 형식이 올바르지 않습니다.");
@@ -54,6 +58,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
 type ReservationErrorReason =
   | "advance_unavailable"
+  | "admin_not_reservable"
   | "closed"
   | "disabled"
   | "duplicate"
@@ -65,6 +70,10 @@ type ReservationErrorReason =
 function statusForReservationError(reason: ReservationErrorReason): number {
   switch (reason) {
     case "advance_unavailable":
+      return 409;
+    case "admin_not_reservable":
+    case "restricted":
+      return 403;
     case "closed":
     case "disabled":
     case "duplicate":
@@ -73,8 +82,6 @@ function statusForReservationError(reason: ReservationErrorReason): number {
       return 409;
     case "not_found":
       return 404;
-    case "restricted":
-      return 403;
   }
 }
 
@@ -82,6 +89,8 @@ function messageForReservationError(reason: ReservationErrorReason): string {
   switch (reason) {
     case "advance_unavailable":
       return "사전예약 불가";
+    case "admin_not_reservable":
+      return "관리자 계정은 예약할 수 없습니다.";
     case "closed":
       return "예약 시간이 마감되었습니다.";
     case "disabled":

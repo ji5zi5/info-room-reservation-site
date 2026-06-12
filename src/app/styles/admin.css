@@ -1,3 +1,91 @@
+.admin-shell {
+  background: var(--ash);
+  overflow-x: hidden;
+}
+
+.admin-console-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  min-height: 100svh;
+  width: 100%;
+}
+
+.admin-nav-panel {
+  align-content: start;
+  background: var(--white);
+  border-right: 1px solid var(--fog);
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+  padding: 28px;
+}
+
+.admin-nav-panel h1 {
+  font-size: 2rem;
+}
+
+.admin-section-nav {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-section-nav button {
+  align-items: center;
+  background: var(--white);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--graphite);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 44px;
+  padding: 0 12px;
+  transform: translateY(0);
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    color var(--motion),
+    transform 0.16s ease;
+}
+
+.admin-section-nav button:hover,
+.admin-section-nav button[data-active="true"] {
+  background: var(--fog);
+  color: var(--ink);
+}
+
+.admin-section-nav button:active {
+  transform: translateY(2px) scale(0.99);
+}
+
+.admin-date-picker {
+  margin-top: 8px;
+}
+
+.admin-workspace {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  min-width: 0;
+  padding: 28px;
+}
+
+.admin-main-panel {
+  min-width: 0;
+}
+
+.admin-console-layout .admin-panel {
+  animation: admin-panel-in 0.22s ease both;
+  align-content: start;
+  background: var(--white);
+  border: 0;
+  border-radius: var(--radius);
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  padding: 22px;
+}
+
 .admin-content {
   background: var(--ash);
   display: grid;
@@ -14,7 +102,8 @@
 
 .metric-card {
   animation: card-enter 0.28s ease both;
-  background: var(--white);
+  background: color-mix(in srgb, var(--fog) 54%, var(--white));
+  border: 1px solid var(--fog);
   border-radius: var(--radius);
   display: grid;
   gap: 14px;
@@ -62,6 +151,14 @@
   min-width: 220px;
 }
 
+.admin-action-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .user-list {
   background: var(--white);
   border-radius: var(--radius);
@@ -71,15 +168,24 @@
 
 .user-line {
   align-items: center;
+  border: 1px solid transparent;
   display: grid;
   gap: 14px;
   grid-template-columns: minmax(150px, 0.9fr) minmax(0, 2fr);
   min-height: 76px;
   padding: 14px;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion);
 }
 
 .user-line + .user-line {
   border-top: 1px solid var(--fog);
+}
+
+.user-line[data-selected="true"] {
+  background: color-mix(in srgb, var(--blue) 7%, var(--white));
+  border-color: color-mix(in srgb, var(--blue) 28%, var(--silver));
 }
 
 .restriction-controls {
@@ -100,6 +206,151 @@
   padding: 0 10px;
 }
 
+.student-detail-panel {
+  animation: admin-panel-in 0.24s ease both;
+  align-content: start;
+  background: var(--white);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 14px;
+  max-height: calc(100svh - 56px);
+  min-width: 0;
+  overflow: auto;
+  padding: 20px;
+}
+
+.empty-detail {
+  color: var(--pewter);
+  place-content: center;
+  text-align: center;
+}
+
+.student-detail-head {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.student-detail-head h3 {
+  font-size: 1.18rem;
+  margin-top: 8px;
+}
+
+.status-chip {
+  background: var(--fog);
+  border-radius: 999px;
+  color: var(--graphite);
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-height: 26px;
+  padding: 4px 10px;
+  width: fit-content;
+}
+
+.status-chip[data-status="ACTIVE"] {
+  color: var(--blue);
+}
+
+.status-chip[data-status="BANNED"],
+.status-chip[data-status="RESTRICTED"] {
+  color: var(--red);
+}
+
+.detail-metrics,
+.detail-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-metrics span {
+  background: var(--fog);
+  border-radius: var(--radius);
+  color: var(--graphite);
+  font-size: 0.84rem;
+  min-height: 38px;
+  padding: 9px 10px;
+  text-align: center;
+}
+
+.detail-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-section {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-section h4 {
+  font-size: 0.86rem;
+  margin: 0;
+}
+
+.detail-lines {
+  display: grid;
+  gap: 6px;
+}
+
+.detail-line {
+  align-items: center;
+  background: var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.detail-line span,
+.detail-line strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-line strong {
+  color: var(--graphite);
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-align: right;
+}
+
+.admin-toast {
+  bottom: 24px;
+  box-shadow: 0 14px 38px rgba(23, 26, 32, 0.14);
+  position: fixed;
+  right: 24px;
+  z-index: 20;
+}
+
+@keyframes admin-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1180px) {
+  .admin-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .student-detail-panel {
+    max-height: none;
+  }
+}
+
 @media (max-width: 1040px) {
   .admin-dashboard-grid,
   .metric-grid,
@@ -110,5 +361,88 @@
 
   .admin-content {
     padding: 24px;
+  }
+}
+
+@media (max-width: 900px) {
+  .admin-console-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-nav-panel {
+    border-bottom: 1px solid var(--fog);
+    border-right: 0;
+    padding: 22px;
+  }
+
+  .admin-section-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .admin-section-nav button {
+    justify-content: center;
+  }
+
+  .admin-workspace {
+    padding: 22px;
+  }
+
+  .student-detail-panel[data-open="true"] {
+    order: -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-nav-panel,
+  .admin-workspace,
+  .admin-console-layout .admin-panel,
+  .student-detail-panel {
+    padding: 16px;
+  }
+
+  .admin-section-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-dashboard-grid,
+  .detail-actions,
+  .detail-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-action-row,
+  .admin-action-row .ghost-button {
+    width: 100%;
+  }
+
+  .restriction-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-line {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-line strong {
+    text-align: left;
+  }
+
+  .admin-toast {
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-console-layout .admin-panel,
+  .metric-card,
+  .student-detail-panel {
+    animation: none;
+  }
+
+  .admin-section-nav button,
+  .user-line {
+    transition: none;
   }
 }
