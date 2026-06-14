@@ -1,17 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { e2eNow, FIXED_FRIDAY_DATE, mockClientDate, mockOpenPeriodsForDates } from "./e2e-time";
 import { csrfRequest } from "./playwright-csrf";
 import { visibleBox } from "./playwright-layout";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
-async function login(page: Page, loginId: string): Promise<void> {
+async function login(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
   if (loginId === "admin") {
-    await loginWithApi(page, loginId);
+    await loginWithApi(page, loginId, fixedIso);
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
     return;
   }
+  await mockClientDate(page, fixedIso);
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
@@ -23,61 +25,13 @@ async function logout(page: Page): Promise<void> {
   await csrfRequest(page, "/api/auth/logout", { method: "POST" });
 }
 
-async function loginWithApi(page: Page, loginId: string): Promise<void> {
+async function loginWithApi(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
+  await mockClientDate(page, fixedIso);
   const response = await page.request.post(`${BASE_URL}/api/auth/riro/login`, {
     data: { id: loginId, password: "password" },
     headers: { "x-forwarded-for": `192.0.2.${Math.floor(Math.random() * 200) + 1}` }
   });
   expect(response.ok()).toBeTruthy();
-}
-
-async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
-  await page.addInitScript((iso) => {
-    const fixedNow = new Date(iso).valueOf();
-    const RealDate = Date;
-    class MockDate extends RealDate {
-      public constructor(value?: string | number | Date) {
-        super(value ?? fixedNow);
-      }
-
-      public static override now(): number {
-        return fixedNow;
-      }
-    }
-    globalThis.Date = MockDate as DateConstructor;
-  }, fixedIso);
-}
-
-async function mockPeriodsForDate(page: Page, date: string): Promise<void> {
-  await page.route(`**/api/periods?date=${date}`, async (route) => {
-    await route.fulfill({
-      body: JSON.stringify({
-        periods: [
-          buildMockPeriod(date, "EIGHTH", "8면학"),
-          buildMockPeriod(date, "FIRST", "1면학")
-        ]
-      }),
-      contentType: "application/json",
-      status: 200
-    });
-  });
-}
-
-function buildMockPeriod(date: string, studyPeriod: "EIGHTH" | "FIRST", label: string): object {
-  return {
-    applicants: [],
-    capacity: 10,
-    closeTime: "23:59",
-    confirmedCount: 0,
-    date,
-    enabled: true,
-    label,
-    myReservationId: null,
-    openTime: "00:00",
-    remaining: 10,
-    studyPeriod,
-    windowState: "open"
-  };
 }
 
 test("admin student management keeps empty detail from clipping the 390px viewport", async ({ page }) => {
@@ -119,9 +73,8 @@ test("admin panels keep concise headings and open student detail space only when
 });
 
 test("friday advance unavailable keeps the same content rail as today tab", async ({ page }) => {
-  await mockPeriodsForDate(page, "2026-06-12");
-  await mockClientDate(page, "2026-06-12T09:00:00+09:00");
-  await login(page, `friday-rail-${Date.now()}`);
+  await mockOpenPeriodsForDates(page, FIXED_FRIDAY_DATE);
+  await login(page, `friday-rail-${Date.now()}`, e2eNow(FIXED_FRIDAY_DATE));
 
   const todayCard = page.locator(".period-card").first();
   const todayBox = await visibleBox(todayCard, "today period card");

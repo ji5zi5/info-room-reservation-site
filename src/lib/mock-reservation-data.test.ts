@@ -21,6 +21,13 @@ const student = {
   studentNumber: "12345"
 } satisfies SessionUser;
 
+function openAllMockPeriods(date: string): void {
+  updateMockAdminPeriodSettings(date, [
+    { capacity: 10, closeTime: "23:59", enabled: true, openTime: "00:00", studyPeriod: "EIGHTH" },
+    { capacity: 10, closeTime: "23:59", enabled: true, openTime: "00:00", studyPeriod: "FIRST" }
+  ]);
+}
+
 describe("mock reservation data", () => {
   afterEach(() => {
     resetMockAdminPeriodSettingsForTests();
@@ -28,10 +35,7 @@ describe("mock reservation data", () => {
   });
 
   it("shares mock users and reservations with period summaries", () => {
-    updateMockAdminPeriodSettings("2026-06-14", [
-      { capacity: 10, closeTime: "23:59", enabled: true, openTime: "00:00", studyPeriod: "EIGHTH" },
-      { capacity: 10, closeTime: "23:59", enabled: true, openTime: "00:00", studyPeriod: "FIRST" }
-    ]);
+    openAllMockPeriods("2026-06-14");
     upsertMockReservationUser(student);
 
     const result = reserveMockStudyPeriod({
@@ -52,10 +56,7 @@ describe("mock reservation data", () => {
   });
 
   it("applies the cancellation restriction in no-database mock mode", () => {
-    updateMockAdminPeriodSettings("2026-06-14", [
-      { capacity: 10, closeTime: "23:59", enabled: true, openTime: "00:00", studyPeriod: "EIGHTH" },
-      { capacity: 10, closeTime: "23:59", enabled: true, openTime: "00:00", studyPeriod: "FIRST" }
-    ]);
+    openAllMockPeriods("2026-06-14");
     upsertMockReservationUser(student);
     reserveMockStudyPeriod({
       date: "2026-06-14",

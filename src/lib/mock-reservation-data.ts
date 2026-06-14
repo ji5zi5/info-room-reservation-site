@@ -10,24 +10,15 @@ import type { SessionUser } from "./session";
 import type { StudyPeriod } from "./study-periods";
 
 type MockUser = AdminUserListRow;
+type MockReservationState = { readonly reservations: MockReservation[]; readonly usersById: Map<string, MockUser> };
 
 type MockReservation = Reservation & {
   readonly createdAt: Date;
-  readonly user: {
-    readonly bookingStatus: string;
-    readonly id: string;
-    readonly name: string;
-    readonly role: string;
-    readonly studentNumber: string;
-  };
+  readonly user: Pick<MockUser, "bookingStatus" | "id" | "name" | "role" | "studentNumber">;
 };
 
 type MockCancelResult =
-  | {
-      readonly kind: "cancelled";
-      readonly reservation: MockReservation;
-      readonly user: SessionUser;
-    }
+  | { readonly kind: "cancelled"; readonly reservation: MockReservation; readonly user: SessionUser }
   | {
       readonly kind: "forbidden";
     }
@@ -40,8 +31,12 @@ const usersById = mockState.usersById;
 const reservations = mockState.reservations;
 
 export function upsertMockReservationUser(user: SessionUser): void {
+  upsertMockReservationUserRecord(user);
+}
+
+function upsertMockReservationUserRecord(user: SessionUser): MockUser {
   const existing = usersById.get(user.id);
-  usersById.set(user.id, {
+  const nextUser = {
     bookingStatus: existing?.bookingStatus ?? user.bookingStatus,
     generation: user.generation,
     id: user.id,
@@ -50,7 +45,9 @@ export function upsertMockReservationUser(user: SessionUser): void {
     restrictionReason: existing?.restrictionReason ?? null,
     role: user.role,
     studentNumber: user.studentNumber
-  });
+  } satisfies MockUser;
+  usersById.set(user.id, nextUser);
+  return nextUser;
 }
 
 export function getMockAdminUsers(filters: AdminUserFilterInput): readonly MockUser[] {
@@ -92,17 +89,8 @@ export function getMockAdminUserDetail(userId: string): object | null {
     ),
     reservationHistory: userReservations,
     sanctions: [],
-    sanctionSummary: {
-      activeCount: 0,
-      permanentCount: 0,
-      revokedCount: 0,
-      totalCount: 0
-    },
-    sessionSummary: {
-      activeCount: 1,
-      expiredCount: 0,
-      totalCount: 1
-    },
+    sanctionSummary: { activeCount: 0, permanentCount: 0, revokedCount: 0, totalCount: 0 },
+    sessionSummary: { activeCount: 1, expiredCount: 0, totalCount: 1 },
     summary: summarizeAdminUserReservations(userReservations),
     user: {
       ...user,
@@ -145,11 +133,7 @@ export function reserveMockStudyPeriod(input: {
   readonly studyPeriod: StudyPeriod;
   readonly user: SessionUser;
 }): ReservationResult {
-  upsertMockReservationUser(input.user);
-  const user = usersById.get(input.user.id);
-  if (!user) {
-    return { kind: "error", reason: "not_found" };
-  }
+  const user = upsertMockReservationUserRecord(input.user);
   if (isMockUserRestricted(user, input.now)) {
     return { kind: "error", reason: "restricted" };
   }
@@ -185,57 +169,47 @@ export function cancelMockReservation(input: {
   readonly now: Date;
   readonly user: SessionUser;
 }): MockCancelResult {
-  upsertMockReservationUser(input.user);
-  const index = reservations.findIndex((reservation) => reservation.id === input.id);
-  if (index === -1) {
-    return { kind: "not_found" };
-  }
-  const reservation = reservations[index];
-  if (!reservation) {
-    return { kind: "not_found" };
-  }
-  if (reservation.user.id !== input.user.id && input.user.role !== "ADMIN") {
-    return { kind: "forbidden" };
-  }
-  if (reservation.status !== "CANCELLED") {
-    const cancelledReservation = {
-      ...reservation,
-      status: "CANCELLED"
-    } satisfies MockReservation;
-    reservations[index] = cancelledReservation;
-  }
-
-  const user = usersById.get(input.user.id);
-  if (!user) {
-    return { kind: "not_found" };
-  }
-  if (reservation.user.id === input.user.id && input.user.role !== "ADMIN") {
-    const restriction = buildStudentCancellationRestriction(input.now);
-    usersById.set(input.user.id, {
-      ...user,
-      bookingStatus: restriction.bookingStatus,
-      restrictedUntil: restriction.restrictedUntil,
-      restrictionReason: restriction.restrictionReason
-    });
-  }
-
-  const nextUser = usersById.get(input.user.id);
-  if (!nextUser) {
-    return { kind: "not_found" };
-  }
-  const nextReservation = reservations[index];
-  if (!nextReservation) {
-    return { kind: "not_found" };
-  }
-  return {
-    kind: "cancelled",
-    reservation: nextReservation,
-    user: {
-      ...input.user,
-      bookingStatus: nextUser.bookingStatus,
-      restrictedUntil: nextUser.restrictedUntil ? nextUser.restrictedUntil.toISOString() : null
+  const user = upsertMockReservationUserRecord(input.user);
+  for (const [index, reservation] of reservations.entries()) {
+    if (reservation.id !== input.id) {
+      continue;
     }
-  };
+    if (reservation.user.id !== input.user.id && input.user.role !== "ADMIN") {
+      return { kind: "forbidden" };
+    }
+
+    const nextReservation =
+      reservation.status === "CANCELLED"
+        ? reservation
+        : ({
+            ...reservation,
+            status: "CANCELLED"
+          } satisfies MockReservation);
+    reservations[index] = nextReservation;
+
+    let nextUser = user;
+    if (reservation.user.id === input.user.id && input.user.role !== "ADMIN") {
+      const restriction = buildStudentCancellationRestriction(input.now);
+      nextUser = {
+        ...user,
+        bookingStatus: restriction.bookingStatus,
+        restrictedUntil: restriction.restrictedUntil,
+        restrictionReason: restriction.restrictionReason
+      };
+      usersById.set(input.user.id, nextUser);
+    }
+
+    return {
+      kind: "cancelled",
+      reservation: nextReservation,
+      user: {
+        ...input.user,
+        bookingStatus: nextUser.bookingStatus,
+        restrictedUntil: nextUser.restrictedUntil ? nextUser.restrictedUntil.toISOString() : null
+      }
+    };
+  }
+  return { kind: "not_found" };
 }
 
 export function resetMockReservationDataForTests(): void {
@@ -282,15 +256,9 @@ function parseNullableDate(value: string | null): Date | null {
   return value ? new Date(value) : null;
 }
 
-function getGlobalMockReservationState(): {
-  readonly reservations: MockReservation[];
-  readonly usersById: Map<string, MockUser>;
-} {
+function getGlobalMockReservationState(): MockReservationState {
   const globalStore = globalThis as typeof globalThis & {
-    __infoRoomMockReservationData?: {
-      readonly reservations: MockReservation[];
-      readonly usersById: Map<string, MockUser>;
-    };
+    __infoRoomMockReservationData?: MockReservationState;
   };
   globalStore.__infoRoomMockReservationData ??= {
     reservations: [],
