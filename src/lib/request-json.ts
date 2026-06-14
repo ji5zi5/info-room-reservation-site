@@ -22,29 +22,27 @@ export async function readJsonRequest<T>(
 ): Promise<JsonRequestResult<T>> {
   const body = await request.text();
   if (!body.trim()) {
-    return {
-      kind: "error",
-      response: jsonError(400, "bad_request", input.message)
-    };
+    return badJsonRequest(input.message);
   }
 
   const payload = parseJsonBody(body);
   if (payload.kind === "error") {
-    return {
-      kind: "error",
-      response: jsonError(400, "bad_request", input.message)
-    };
+    return badJsonRequest(input.message);
   }
 
   const parsed = input.schema.safeParse(payload.data);
   if (!parsed.success) {
-    return {
-      kind: "error",
-      response: jsonError(400, "bad_request", input.message)
-    };
+    return badJsonRequest(input.message);
   }
 
   return { data: parsed.data, kind: "ok" };
+}
+
+function badJsonRequest(message: string): JsonRequestResult<never> {
+  return {
+    kind: "error",
+    response: jsonError(400, "bad_request", message)
+  };
 }
 
 function parseJsonBody(body: string): { readonly data: unknown; readonly kind: "ok" } | { readonly kind: "error" } {

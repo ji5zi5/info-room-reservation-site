@@ -31,6 +31,17 @@ export type AdminAuditActionFilters = {
   readonly query: string;
 };
 
+const ADMIN_AUDIT_ACTION_CATEGORIES: Readonly<Record<string, AdminAuditActionCategory>> = {
+  ADMIN_RESERVATION_CANCEL: "RESERVATION",
+  CLOSED_LIST_NOTIFICATION_SEND: "NOTIFICATION",
+  NO_SHOW_BAN: "NO_SHOW",
+  PERIOD_SETTINGS_PATCH: "SETTINGS",
+  STUDENT_RESERVATION_CANCEL_RESTRICTION: "RESERVATION",
+  USER_RESTRICTION_APPLY: "RESTRICTION",
+  USER_RESTRICTION_REMOVE: "RESTRICTION",
+  USER_SESSIONS_REVOKE: "SESSION"
+};
+
 export function parseAdminAuditActionFilter(value: string | null): AdminAuditActionFilter {
   switch (value) {
     case "NO_SHOW":
@@ -48,24 +59,7 @@ export function parseAdminAuditActionFilter(value: string | null): AdminAuditAct
 }
 
 export function classifyAdminAuditAction(action: string): AdminAuditActionCategory {
-  switch (action) {
-    case "USER_RESTRICTION_APPLY":
-    case "USER_RESTRICTION_REMOVE":
-      return "RESTRICTION";
-    case "ADMIN_RESERVATION_CANCEL":
-    case "STUDENT_RESERVATION_CANCEL_RESTRICTION":
-      return "RESERVATION";
-    case "USER_SESSIONS_REVOKE":
-      return "SESSION";
-    case "NO_SHOW_BAN":
-      return "NO_SHOW";
-    case "PERIOD_SETTINGS_PATCH":
-      return "SETTINGS";
-    case "CLOSED_LIST_NOTIFICATION_SEND":
-      return "NOTIFICATION";
-    default:
-      return "OTHER";
-  }
+  return ADMIN_AUDIT_ACTION_CATEGORIES[action] ?? "OTHER";
 }
 
 export function filterAdminAuditActions<T extends AdminAuditActionRow>(
@@ -73,15 +67,12 @@ export function filterAdminAuditActions<T extends AdminAuditActionRow>(
   filters: AdminAuditActionFilters
 ): readonly T[] {
   const normalizedQuery = filters.query.trim().toLocaleLowerCase("ko-KR");
-  return actions.filter((action) => {
-    if (filters.action !== "ALL" && classifyAdminAuditAction(action.action) !== filters.action) {
-      return false;
-    }
-    if (!normalizedQuery) {
-      return true;
-    }
-    return auditSearchTokens(action).some((token) => token.toLocaleLowerCase("ko-KR").includes(normalizedQuery));
-  });
+  return actions.filter(
+    (action) =>
+      (filters.action === "ALL" || classifyAdminAuditAction(action.action) === filters.action) &&
+      (!normalizedQuery ||
+        auditSearchTokens(action).some((token) => token.toLocaleLowerCase("ko-KR").includes(normalizedQuery)))
+  );
 }
 
 export function orderAdminAuditActions<T extends AdminAuditActionRow>(actions: readonly T[]): readonly T[] {

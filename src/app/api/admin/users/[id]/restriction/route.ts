@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { assertRestrictableUser } from "@/lib/admin-users";
 import { prisma } from "@/lib/db";
-import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
-import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { jsonError } from "@/lib/http";
 import { readJsonRequest } from "@/lib/request-json";
-import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
-import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
-import { requireAdminSession, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
+
+import {
+  adminSessionErrorResponse,
+  findRestrictableTarget,
+  prepareAdminRestrictionMutation,
+  stringifyRestrictionSnapshot
+} from "./restriction-route-support";
 
 const RestrictionRequestSchema = z.object({
   days: z.number().int().min(1).max(365).nullable().optional(),
@@ -18,21 +20,10 @@ const RestrictionRequestSchema = z.object({
 });
 
 export async function POST(request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
-  const requestSafetyError = requireMutatingRequestSafety(request);
-  if (requestSafetyError) {
-    return jsonMutatingRequestSafetyError(requestSafetyError);
-  }
-
   try {
-    const session = await requireAdminSession();
-    const csrfResult = await validateRequestCsrf(request, session.id);
-    if (csrfResult.kind === "error") {
-      return jsonError(403, csrfResult.reason, messageForCsrfError(csrfResult.reason));
-    }
-    const admin = session.user;
-    const rateLimitResult = await enforceAdminMutationRateLimit(request, admin.id);
-    if (rateLimitResult.kind === "blocked") {
-      return jsonRateLimitError(rateLimitResult);
+    const admin = await prepareAdminRestrictionMutation(request);
+    if (admin instanceof NextResponse) {
+      return admin;
     }
     const params = await context.params;
     const parsed = await readJsonRequest(request, {
@@ -44,17 +35,9 @@ export async function POST(request: Request, context: { readonly params: Promise
     }
     const restrictionDays = parsed.data.days ?? null;
 
-    const target = await prisma.user.findUnique({ where: { id: params.id } });
-    if (!target) {
-      return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
-    }
-    const guard = assertRestrictableUser({ actorId: admin.id, target });
-    if (guard.kind === "error") {
-      return jsonError(
-        403,
-        guard.reason,
-        guard.reason === "self_restriction" ? "자기 자신은 제한할 수 없습니다." : "관리자 계정은 제한할 수 없습니다."
-      );
+    const target = await findRestrictableTarget(admin.id, params.id);
+    if (target instanceof NextResponse) {
+      return target;
     }
 
     let restrictedUntil: Date | null = null;
@@ -82,16 +65,8 @@ export async function POST(request: Request, context: { readonly params: Promise
         data: {
           action: "USER_RESTRICTION_APPLY",
           actorId: admin.id,
-          after: JSON.stringify({
-            bookingStatus: updated.bookingStatus,
-            restrictedUntil: updated.restrictedUntil,
-            restrictionReason: updated.restrictionReason
-          }),
-          before: JSON.stringify({
-            bookingStatus: target.bookingStatus,
-            restrictedUntil: target.restrictedUntil,
-            restrictionReason: target.restrictionReason
-          }),
+          after: stringifyRestrictionSnapshot(updated),
+          before: stringifyRestrictionSnapshot(target),
           ipHash,
           reason: parsed.data.reason,
           targetUserId: params.id
@@ -138,45 +113,24 @@ export async function POST(request: Request, context: { readonly params: Promise
 
     return NextResponse.json({ user });
   } catch (error) {
-    if (error instanceof UnauthorizedSessionError) {
-      return jsonError(401, "unauthorized", error.message);
-    }
-    if (error instanceof ForbiddenSessionError) {
-      return jsonError(403, "forbidden", error.message);
+    const response = adminSessionErrorResponse(error);
+    if (response) {
+      return response;
     }
     throw error;
   }
 }
 
 export async function DELETE(request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
-  const requestSafetyError = requireMutatingRequestSafety(request);
-  if (requestSafetyError) {
-    return jsonMutatingRequestSafetyError(requestSafetyError);
-  }
-
   try {
-    const session = await requireAdminSession();
-    const csrfResult = await validateRequestCsrf(request, session.id);
-    if (csrfResult.kind === "error") {
-      return jsonError(403, csrfResult.reason, messageForCsrfError(csrfResult.reason));
-    }
-    const admin = session.user;
-    const rateLimitResult = await enforceAdminMutationRateLimit(request, admin.id);
-    if (rateLimitResult.kind === "blocked") {
-      return jsonRateLimitError(rateLimitResult);
+    const admin = await prepareAdminRestrictionMutation(request);
+    if (admin instanceof NextResponse) {
+      return admin;
     }
     const params = await context.params;
-    const target = await prisma.user.findUnique({ where: { id: params.id } });
-    if (!target) {
-      return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
-    }
-    const guard = assertRestrictableUser({ actorId: admin.id, target });
-    if (guard.kind === "error") {
-      return jsonError(
-        403,
-        guard.reason,
-        guard.reason === "self_restriction" ? "자기 자신은 제한할 수 없습니다." : "관리자 계정은 제한할 수 없습니다."
-      );
+    const target = await findRestrictableTarget(admin.id, params.id);
+    if (target instanceof NextResponse) {
+      return target;
     }
     const ipHash = hashRequestClientIp(request);
 
@@ -193,16 +147,8 @@ export async function DELETE(request: Request, context: { readonly params: Promi
         data: {
           action: "USER_RESTRICTION_REMOVE",
           actorId: admin.id,
-          after: JSON.stringify({
-            bookingStatus: updated.bookingStatus,
-            restrictedUntil: updated.restrictedUntil,
-            restrictionReason: updated.restrictionReason
-          }),
-          before: JSON.stringify({
-            bookingStatus: target.bookingStatus,
-            restrictedUntil: target.restrictedUntil,
-            restrictionReason: target.restrictionReason
-          }),
+          after: stringifyRestrictionSnapshot(updated),
+          before: stringifyRestrictionSnapshot(target),
           ipHash,
           reason: "관리자 제한 해제",
           targetUserId: params.id
@@ -232,11 +178,9 @@ export async function DELETE(request: Request, context: { readonly params: Promi
     });
     return NextResponse.json({ user });
   } catch (error) {
-    if (error instanceof UnauthorizedSessionError) {
-      return jsonError(401, "unauthorized", error.message);
-    }
-    if (error instanceof ForbiddenSessionError) {
-      return jsonError(403, "forbidden", error.message);
+    const response = adminSessionErrorResponse(error);
+    if (response) {
+      return response;
     }
     throw error;
   }
