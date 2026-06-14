@@ -5,8 +5,11 @@ import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { buildPeriodSettingsPatchAdminAction } from "@/lib/admin-operation-audit";
+import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
+import { getMockAdminPeriodSettings, updateMockAdminPeriodSettings } from "@/lib/mock-period-settings";
 import { ensurePeriodSettings, getPeriodSummaries } from "@/lib/period-settings";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
 import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
@@ -29,6 +32,9 @@ export async function GET(request: Request): Promise<NextResponse> {
   try {
     await requireAdmin();
     const date = new URL(request.url).searchParams.get("date") ?? toKstDate(new Date());
+    if (isNoDatabaseMockMode()) {
+      return NextResponse.json({ periods: getMockAdminPeriodSettings(date) });
+    }
     await ensurePeriodSettings(date);
     return NextResponse.json({ periods: await getPeriodSummaries(date) });
   } catch (error) {
@@ -48,14 +54,20 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     if (csrfResult.kind === "error") {
       return jsonError(403, csrfResult.reason, messageForCsrfError(csrfResult.reason));
     }
+    const parsed = await readJsonRequest(request, {
+      message: "시간대 설정 형식이 올바르지 않습니다.",
+      schema: PeriodPatchSchema
+    });
+    if (parsed.kind === "error") {
+      return parsed.response;
+    }
+    if (isNoDatabaseMockMode()) {
+      return NextResponse.json({ periods: updateMockAdminPeriodSettings(parsed.data.date, parsed.data.periods) });
+    }
     const admin = session.user;
     const rateLimitResult = await enforceAdminMutationRateLimit(request, admin.id);
     if (rateLimitResult.kind === "blocked") {
       return jsonRateLimitError(rateLimitResult);
-    }
-    const parsed = PeriodPatchSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return jsonError(400, "bad_request", "시간대 설정 형식이 올바르지 않습니다.");
     }
     const ipHash = hashRequestClientIp(request);
 

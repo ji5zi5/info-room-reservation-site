@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 
@@ -14,26 +14,18 @@ const USER_STATUS_LABELS: Record<AdminUserStatusFilter, string> = {
 };
 
 export function AdminUsersPanel({
-  onApplyRestriction,
-  onRemoveRestriction,
   onSelectUser,
-  onSetDraft,
   onSetQuery,
   onSetStatus,
   query,
-  restrictionDrafts,
   selectedUserId,
   status,
   users
 }: {
-  readonly onApplyRestriction: (userId: string) => void;
-  readonly onRemoveRestriction: (userId: string) => void;
   readonly onSelectUser: (userId: string) => void;
-  readonly onSetDraft: (userId: string, patch: { readonly days?: string; readonly reason?: string; readonly status?: "BANNED" | "RESTRICTED" }) => void;
   readonly onSetQuery: (query: string) => void;
   readonly onSetStatus: (status: AdminUserStatusFilter) => void;
   readonly query: string;
-  readonly restrictionDrafts: Readonly<Record<string, { readonly days: string; readonly reason: string; readonly status: "BANNED" | "RESTRICTED" }>>;
   readonly selectedUserId: string | null;
   readonly status: AdminUserStatusFilter;
   readonly users: readonly AdminUser[];
@@ -43,7 +35,6 @@ export function AdminUsersPanel({
       <div className="topbar">
         <div>
           <h2>학생 관리</h2>
-          <p className="muted">검색 · 예약 제한 · 제한 해제</p>
         </div>
         <ShieldCheck aria-hidden="true" size={22} />
       </div>
@@ -62,52 +53,25 @@ export function AdminUsersPanel({
         </label>
       </div>
       <div className="user-list">
-        {users.map((user) => {
-          const draft = restrictionDrafts[user.id] ?? { days: "7", reason: "정보실 예약 제한", status: "RESTRICTED" };
-          return (
-            <div className="user-line" data-selected={selectedUserId === user.id} key={user.id}>
-              <div>
-                <strong>{user.name}</strong>
-                <p className="muted">{user.studentNumber} · {statusLabel(user.bookingStatus)}</p>
-                {user.restrictionReason ? <p className="muted">{user.restrictionReason}</p> : null}
-              </div>
-              <div className="restriction-controls">
-                <select value={draft.status} onChange={(event) => onSetDraft(user.id, { status: parseRestrictionStatus(event.currentTarget.value) })}>
-                  <option value="RESTRICTED">기간 제한</option>
-                  <option value="BANNED">차단</option>
-                </select>
-                <input value={draft.days} onChange={(event) => onSetDraft(user.id, { days: event.currentTarget.value })} />
-                <input value={draft.reason} onChange={(event) => onSetDraft(user.id, { reason: event.currentTarget.value })} />
-                <button className="danger-button" type="button" onClick={() => onApplyRestriction(user.id)}>
-                  <Ban size={16} />
-                  제한
-                </button>
-                <button className="ghost-button" type="button" onClick={() => onSelectUser(user.id)}>
-                  자세히
-                </button>
-                {user.bookingStatus !== "ACTIVE" ? (
-                  <button className="ghost-button" type="button" onClick={() => onRemoveRestriction(user.id)}>
-                    해제
-                  </button>
-                ) : null}
-              </div>
+        {users.map((user) => (
+          <div className="user-line" data-selected={selectedUserId === user.id} key={user.id}>
+            <div className="user-line-main">
+              <strong>{user.name}</strong>
+              <p className="muted">{user.studentNumber} · {user.generation}기</p>
             </div>
-          );
-        })}
+            <div className="user-line-summary">
+              <span className="status-chip" data-status={user.bookingStatus}>{statusLabel(user.bookingStatus)}</span>
+              <p className="muted">{user.restrictionReason ?? "제재 없음"}</p>
+            </div>
+            <button className="ghost-button" type="button" onClick={() => onSelectUser(user.id)}>
+              상세 보기
+            </button>
+          </div>
+        ))}
         {users.length === 0 ? <div className="table-line muted">검색된 학생이 없습니다.</div> : null}
       </div>
     </section>
   );
-}
-
-function parseRestrictionStatus(value: string): "BANNED" | "RESTRICTED" {
-  switch (value) {
-    case "BANNED":
-      return "BANNED";
-    case "RESTRICTED":
-    default:
-      return "RESTRICTED";
-  }
 }
 
 function statusLabel(status: string): string {

@@ -148,7 +148,45 @@ test("reserved periods show a cancel action and refresh applicants after cancel"
     await expect(eighthCard.getByRole("button", { name: "예약 취소" })).toHaveCount(0);
     await eighthCard.getByRole("button", { name: "8면학 예약" }).click();
     await expect(page.getByRole("dialog", { name: "8면학 예약할까요?" })).toHaveCount(0);
-    await expect(page.getByText("예약 이용이 제한되었습니다.")).toBeVisible();
+    const studentToast = page.locator(".student-toast").filter({ hasText: "예약 이용이 제한되었습니다." });
+    await expect(studentToast).toBeVisible();
+    await page.getByRole("button", { name: "왼쪽 패널 접기" }).click();
+    await expect(studentToast).toBeVisible();
+    const toastBox = await studentToast.boundingBox();
+    const viewport = page.viewportSize();
+    expect(toastBox?.y, "student toast should stay near the top edge").toBeLessThan(120);
+    expect(Math.abs((toastBox?.x ?? 0) + (toastBox?.width ?? 0) / 2 - (viewport?.width ?? 0) / 2)).toBeLessThan(80);
+  } finally {
+    await logout(page);
+    await login(page, "admin");
+    await patchPeriodSettings(page, date, originalPeriods);
+  }
+});
+
+test("closed reservation periods show disabled closed action instead of reserve", async ({ page }) => {
+  const date = todayKst();
+  await login(page, "admin");
+  const originalPeriods = await fetchPeriodSettings(page, date);
+  await patchPeriodSettings(
+    page,
+    date,
+    originalPeriods.map((period) => ({
+      ...period,
+      capacity: 10,
+      closeTime: "00:00",
+      enabled: true,
+      openTime: "00:00"
+    }))
+  );
+  await logout(page);
+
+  try {
+    await login(page, `closed-card-${Date.now()}`);
+    const eighthCard = page.locator(".period-card").filter({ hasText: "8면학" }).first();
+    await expect(eighthCard.getByRole("button", { name: "8면학 예약" })).toHaveCount(0);
+    const closedAction = eighthCard.getByRole("button", { name: "마감" });
+    await expect(closedAction).toBeVisible();
+    await expect(closedAction).toBeDisabled();
   } finally {
     await logout(page);
     await login(page, "admin");

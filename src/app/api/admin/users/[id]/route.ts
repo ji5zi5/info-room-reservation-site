@@ -6,12 +6,22 @@ import { orderAdminUserReservations, summarizeAdminUserReservations } from "@/li
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
+import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
+import { getMockAdminUserDetail } from "@/lib/mock-reservation-data";
 import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 
 export async function GET(_request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
   try {
     await requireAdmin();
     const params = await context.params;
+    if (isNoDatabaseMockMode()) {
+      const detail = getMockAdminUserDetail(params.id);
+      if (!detail) {
+        return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
+      }
+      return NextResponse.json(detail);
+    }
+
     const user = await prisma.user.findUnique({
       include: {
         auditLogs: {

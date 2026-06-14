@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { canAdminCancelReservation } from "@/lib/admin-reservation-transition";
 import { prisma } from "@/lib/db";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
@@ -30,7 +31,10 @@ export async function POST(request: Request, context: { readonly params: Promise
     const result = await prisma.$transaction(async (transaction) => {
       const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
       if (!reservation) {
-        return null;
+        return { kind: "not_found" } as const;
+      }
+      if (!canAdminCancelReservation(reservation.status)) {
+        return { kind: "invalid_status" } as const;
       }
       const updated = await transaction.reservation.update({
         data: { status: "CANCELLED" },
@@ -55,12 +59,15 @@ export async function POST(request: Request, context: { readonly params: Promise
           userId: reservation.userId
         }
       });
-      return updated;
+      return { kind: "ok", reservation: updated } as const;
     });
-    if (!result) {
+    if (result.kind === "not_found") {
       return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");
     }
-    return NextResponse.json({ reservation: result });
+    if (result.kind === "invalid_status") {
+      return jsonError(409, "bad_request", "이미 처리된 예약은 관리자 취소로 변경할 수 없습니다.");
+    }
+    return NextResponse.json({ reservation: result.reservation });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);

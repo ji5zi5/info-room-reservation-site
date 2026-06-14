@@ -1,6 +1,8 @@
+import { memoryRateLimitStore } from "./memory-rate-limit-store";
+import { isNoDatabaseMockMode } from "./mock-dev-mode";
 import { prismaRateLimitStore } from "./prisma-rate-limit-store";
 import { checkRateLimit, rateLimitKey } from "./rate-limit";
-import type { RateLimitResult, RateLimitRule } from "./rate-limit";
+import type { RateLimitResult, RateLimitRule, RateLimitStore } from "./rate-limit";
 import { getRequestClientIp } from "./request-source";
 
 const LOGIN_MINUTE_LIMIT = 5;
@@ -17,7 +19,7 @@ export function enforceLoginRateLimit(request: Request, loginId: string): Promis
   return checkRateLimit({
     now: new Date(),
     rules: buildLoginRateLimitRules({ clientIp, loginId }),
-    store: prismaRateLimitStore
+    store: getRouteRateLimitStore()
   });
 }
 
@@ -26,7 +28,7 @@ export function enforceReservationRateLimit(request: Request, userId: string): P
   return checkRateLimit({
     now: new Date(),
     rules: buildReservationRateLimitRules({ clientIp, userId }),
-    store: prismaRateLimitStore
+    store: getRouteRateLimitStore()
   });
 }
 
@@ -35,8 +37,12 @@ export function enforceAdminMutationRateLimit(request: Request, adminId: string)
   return checkRateLimit({
     now: new Date(),
     rules: buildAdminMutationRateLimitRules({ adminId, clientIp }),
-    store: prismaRateLimitStore
+    store: getRouteRateLimitStore()
   });
+}
+
+export function getRouteRateLimitStore(): RateLimitStore {
+  return isNoDatabaseMockMode() ? memoryRateLimitStore : prismaRateLimitStore;
 }
 
 export function buildLoginRateLimitRules(input: {

@@ -23,7 +23,7 @@ export type AdminSection = "audit" | "dashboard" | "reservations" | "settings" |
 
 export const DEFAULT_RESTRICTION_DRAFT = {
   days: "7",
-  reason: "정보실 예약 제한",
+  reason: "",
   status: "RESTRICTED"
 } satisfies UserRestrictionDraft;
 
@@ -33,8 +33,6 @@ export type AdminConsoleState = {
   readonly auditActions: readonly AdminAuditAction[];
   readonly auditQuery: string;
   readonly applyRestriction: (userId: string) => Promise<void>;
-  readonly applyRestrictionPreset: (userId: string, days: number) => Promise<void>;
-  readonly banUser: (userId: string) => Promise<void>;
   readonly cancelReservation: (reservationId: string) => Promise<void>;
   readonly clearSelectedUser: () => void;
   readonly copyReservationsCsv: () => Promise<void>;
@@ -44,7 +42,6 @@ export type AdminConsoleState = {
   readonly periods: readonly AdminPeriodSetting[];
   readonly refresh: () => Promise<void>;
   readonly removeRestriction: (userId: string) => Promise<void>;
-  readonly revokeSessions: (userId: string) => Promise<void>;
   readonly reservationPeriodFilter: AdminReservationStudyPeriodFilter;
   readonly reservationQuery: string;
   readonly reservations: readonly AdminReservation[];

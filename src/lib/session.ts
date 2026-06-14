@@ -1,18 +1,23 @@
+import { Buffer } from "node:buffer";
 import { createHash, randomBytes } from "node:crypto";
 
 import { cookies } from "next/headers";
+import { z } from "zod";
 
 import { prisma } from "./db";
+import { isNoDatabaseMockMode } from "./mock-dev-mode";
 
 export const SESSION_COOKIE_NAME = "info_room_session";
 
 const SESSION_TTL_DAYS = 14;
+const MOCK_SESSION_TOKEN_PREFIX = "mock.";
 
 export type SessionUser = {
   readonly bookingStatus: string;
   readonly generation: number;
   readonly id: string;
   readonly name: string;
+  readonly restrictedUntil: string | null;
   readonly role: string;
   readonly studentNumber: string;
 };
@@ -21,6 +26,21 @@ export type CurrentSession = {
   readonly id: string;
   readonly user: SessionUser;
 };
+
+const SessionUserSchema = z.object({
+  bookingStatus: z.string(),
+  generation: z.number(),
+  id: z.string(),
+  name: z.string(),
+  restrictedUntil: z.string().nullable().optional(),
+  role: z.string(),
+  studentNumber: z.string()
+});
+
+const MockSessionPayloadSchema = z.object({
+  id: z.string(),
+  user: SessionUserSchema
+});
 
 export async function createSession(userId: string): Promise<string> {
   const token = randomBytes(32).toString("base64url");
@@ -34,6 +54,14 @@ export async function createSession(userId: string): Promise<string> {
   return token;
 }
 
+export function createMockSessionToken(user: SessionUser): string {
+  const payload = {
+    id: `mock-session-${user.id}`,
+    user
+  };
+  return `${MOCK_SESSION_TOKEN_PREFIX}${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}`;
+}
+
 export async function getCurrentUser(): Promise<SessionUser | null> {
   const session = await getCurrentSession();
   return session?.user ?? null;
@@ -44,6 +72,10 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (!token) {
     return null;
+  }
+
+  if (isNoDatabaseMockMode()) {
+    return readMockSessionToken(token);
   }
 
   const session = await prisma.session.findUnique({
@@ -62,6 +94,7 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
       generation: session.user.generation,
       id: session.user.id,
       name: session.user.name,
+      restrictedUntil: session.user.restrictedUntil ? session.user.restrictedUntil.toISOString() : null,
       role: session.user.role,
       studentNumber: session.user.studentNumber
     }
@@ -103,6 +136,9 @@ export async function requireAdminSession(): Promise<CurrentSession> {
 export async function clearCurrentSession(): Promise<void> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (isNoDatabaseMockMode()) {
+    return;
+  }
   if (token) {
     await prisma.session.deleteMany({ where: { tokenHash: hashSessionToken(token) } });
   }
@@ -122,6 +158,30 @@ export function clearSessionCookie(response: Response): void {
 
 export function hashSessionToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function readMockSessionToken(token: string): CurrentSession | null {
+  if (!token.startsWith(MOCK_SESSION_TOKEN_PREFIX)) {
+    return null;
+  }
+
+  try {
+    const encodedPayload = token.slice(MOCK_SESSION_TOKEN_PREFIX.length);
+    const parsedJson = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+    const parsedPayload = MockSessionPayloadSchema.safeParse(parsedJson);
+    if (!parsedPayload.success) {
+      return null;
+    }
+    return {
+      id: parsedPayload.data.id,
+      user: {
+        ...parsedPayload.data.user,
+        restrictedUntil: parsedPayload.data.user.restrictedUntil ?? null
+      }
+    };
+  } catch {
+    return null;
+  }
 }
 
 export class UnauthorizedSessionError extends Error {

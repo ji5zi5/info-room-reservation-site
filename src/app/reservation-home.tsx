@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { getAdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
 import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
 import { ReservationActionDialog, type ReservationPendingAction } from "@/components/reservation-action-dialog";
+import { ReservationToast } from "@/components/reservation-toast";
 import { ReservationWarningPanel } from "@/components/reservation-warning-panel";
 import { AdminConsole } from "./admin/admin-console";
+import { readApiErrorMessage, readCurrentUser, readLoginPayload, readPeriodSummaries } from "./client-api-response";
 import { csrfFetch, resetCsrfToken } from "./csrf-fetch";
 import { ReservationSidebar, type ReservationSidebarUser } from "./reservation-sidebar";
 
@@ -59,14 +61,12 @@ export function ReservationHomePage(): React.ReactElement {
 
   async function refreshMe(): Promise<void> {
     const response = await fetch("/api/me");
-    const payload = (await response.json()) as { readonly user: ReservationSidebarUser | null };
-    setUser(payload.user);
+    setUser(await readCurrentUser(response));
   }
 
   async function refreshPeriods(date: string): Promise<void> {
     const response = await fetch(`/api/periods?date=${date}`);
-    const payload = (await response.json()) as { readonly periods: readonly PeriodSummary[] };
-    setPeriods(payload.periods);
+    setPeriods(await readPeriodSummaries(response));
   }
 
   async function login(): Promise<void> {
@@ -77,10 +77,10 @@ export function ReservationHomePage(): React.ReactElement {
       headers: { "content-type": "application/json" },
       method: "POST"
     });
-    const payload = (await response.json()) as { readonly error?: { readonly message: string }; readonly user?: ReservationSidebarUser };
+    const payload = await readLoginPayload(response);
     setLoading(false);
     if (!response.ok || !payload.user) {
-      setToast(payload.error?.message ?? "로그인에 실패했습니다.");
+      setToast(payload.errorMessage ?? "로그인에 실패했습니다.");
       return;
     }
     setUser(payload.user);
@@ -88,7 +88,11 @@ export function ReservationHomePage(): React.ReactElement {
   }
 
   async function logout(): Promise<void> {
-    await csrfFetch("/api/auth/logout", { method: "POST" });
+    const response = await csrfFetch("/api/auth/logout", { method: "POST" });
+    if (!response.ok) {
+      setToast((await readApiErrorMessage(response)) ?? "로그아웃에 실패했습니다.");
+      return;
+    }
     resetCsrfToken();
     setUser(null);
     setPeriods([]);
@@ -130,10 +134,10 @@ export function ReservationHomePage(): React.ReactElement {
       headers: { "content-type": "application/json" },
       method: "POST"
     });
-    const payload = (await response.json()) as { readonly error?: { readonly message: string } };
+    const errorMessage = await readApiErrorMessage(response);
     setLoading(false);
     if (!response.ok) {
-      setToast(payload.error?.message ?? "예약에 실패했습니다.");
+      setToast(errorMessage ?? "예약에 실패했습니다.");
       return;
     }
     setToast("예약이 확정되었습니다.");
@@ -143,9 +147,9 @@ export function ReservationHomePage(): React.ReactElement {
   async function cancelReservation(reservationId: string): Promise<void> {
     setLoading(true);
     const response = await csrfFetch(`/api/reservations/${reservationId}`, { method: "DELETE" });
-    const payload = (await response.json()) as { readonly error?: { readonly message: string } };
+    const errorMessage = await readApiErrorMessage(response);
     setLoading(false);
-    setToast(response.ok ? "예약이 취소되었습니다. 3일간 예약이 제한됩니다." : payload.error?.message ?? "예약 취소에 실패했습니다.");
+    setToast(response.ok ? "예약이 취소되었습니다. 3일간 예약이 제한됩니다." : errorMessage ?? "예약 취소에 실패했습니다.");
     await refreshMe();
     await refreshPeriods(targetDate);
   }
@@ -162,7 +166,6 @@ export function ReservationHomePage(): React.ReactElement {
           loading={loading}
           password={password}
           sidebarOpen={sidebarOpen}
-          toast={toast}
           user={user}
           onIdChange={setId}
           onLogin={() => void login()}
@@ -229,6 +232,7 @@ export function ReservationHomePage(): React.ReactElement {
           )}
         </section>
       </div>
+      <ReservationToast message={toast} />
       <ReservationActionDialog
         action={pendingAction}
         loading={loading}
@@ -252,11 +256,19 @@ function consumeAdminRedirectMessage(): string | null {
 function reservationRestrictionMessage(user: ReservationSidebarUser | null): string | null {
   switch (user?.bookingStatus) {
     case "BANNED":
-    case "RESTRICTED":
       return "예약 이용이 제한되었습니다.";
+    case "RESTRICTED":
+      return isRestrictionCurrentlyActive(user.restrictedUntil) ? "예약 이용이 제한되었습니다." : null;
     case "ACTIVE":
     case undefined:
     default:
       return null;
   }
+}
+
+function isRestrictionCurrentlyActive(restrictedUntil: string | null): boolean {
+  if (!restrictedUntil) {
+    return true;
+  }
+  return Date.parse(restrictedUntil) > Date.now();
 }

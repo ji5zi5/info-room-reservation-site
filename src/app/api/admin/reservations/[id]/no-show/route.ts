@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { canMarkReservationNoShow } from "@/lib/admin-reservation-transition";
 import { prisma } from "@/lib/db";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
 import { buildNoShowBan } from "@/lib/reservation-service";
@@ -32,9 +34,12 @@ export async function POST(request: Request, context: { readonly params: Promise
       return jsonRateLimitError(rateLimitResult);
     }
     const params = await context.params;
-    const parsed = NoShowRequestSchema.safeParse(await request.json().catch(() => ({})));
-    if (!parsed.success) {
-      return jsonError(400, "bad_request", "노쇼 요청 형식이 올바르지 않습니다.");
+    const parsed = await readJsonRequest(request, {
+      message: "노쇼 요청 형식이 올바르지 않습니다.",
+      schema: NoShowRequestSchema
+    });
+    if (parsed.kind === "error") {
+      return parsed.response;
     }
     const ipHash = hashRequestClientIp(request);
 
@@ -42,6 +47,9 @@ export async function POST(request: Request, context: { readonly params: Promise
       const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
       if (!reservation) {
         return { kind: "not_found" } as const;
+      }
+      if (!canMarkReservationNoShow(reservation.status)) {
+        return { kind: "invalid_status" } as const;
       }
       const target = await transaction.user.findUnique({ where: { id: reservation.userId } });
       if (!target) {
@@ -82,6 +90,18 @@ export async function POST(request: Request, context: { readonly params: Promise
           targetUserId: user.id
         }
       });
+      await transaction.userSanction.updateMany({
+        data: {
+          revokedAt: new Date(),
+          revokedById: admin.id,
+          revokedReason: "노쇼 제재로 대체",
+          status: "REVOKED"
+        },
+        where: {
+          status: "ACTIVE",
+          userId: user.id
+        }
+      });
       await transaction.userSanction.create({
         data: {
           actorId: admin.id,
@@ -106,6 +126,9 @@ export async function POST(request: Request, context: { readonly params: Promise
 
     if (result.kind === "not_found") {
       return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");
+    }
+    if (result.kind === "invalid_status") {
+      return jsonError(409, "bad_request", "확정 상태가 아닌 예약은 노쇼 처리할 수 없습니다.");
     }
     if (result.kind === "admin_target") {
       return jsonError(403, "admin_target", "관리자 계정은 노쇼 제재 대상이 아닙니다.");

@@ -8,6 +8,7 @@ import { sendDiscordWebhook } from "@/lib/discord-notifications";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { prismaClosedPeriodNotificationRepository } from "@/lib/prisma-notification-repository";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
 import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
@@ -35,9 +36,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (rateLimitResult.kind === "blocked") {
       return jsonRateLimitError(rateLimitResult);
     }
-    const parsed = ManualSendSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return jsonError(400, "bad_request", "마감 명단 전송 요청 형식이 올바르지 않습니다.");
+    const parsed = await readJsonRequest(request, {
+      message: "마감 명단 전송 요청 형식이 올바르지 않습니다.",
+      schema: ManualSendSchema
+    });
+    if (parsed.kind === "error") {
+      return parsed.response;
     }
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     if (!webhookUrl) {

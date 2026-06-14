@@ -5,6 +5,8 @@ import { buildAdminStatistics } from "@/lib/admin-statistics";
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
+import { getMockAdminStatistics } from "@/lib/mock-admin-data";
+import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 
 const StatisticsQuerySchema = z.object({
@@ -29,6 +31,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     const to = parsed.data.to ?? from;
     if (from > to) {
       return jsonError(400, "bad_request", "시작 날짜는 종료 날짜보다 늦을 수 없습니다.");
+    }
+    if (isNoDatabaseMockMode()) {
+      return NextResponse.json({ statistics: getMockAdminStatistics({ from, to }) });
     }
 
     const [reservations, settings] = await Promise.all([

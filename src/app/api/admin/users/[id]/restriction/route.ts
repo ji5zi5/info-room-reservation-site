@@ -5,6 +5,7 @@ import { assertRestrictableUser } from "@/lib/admin-users";
 import { prisma } from "@/lib/db";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
 import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
@@ -34,9 +35,12 @@ export async function POST(request: Request, context: { readonly params: Promise
       return jsonRateLimitError(rateLimitResult);
     }
     const params = await context.params;
-    const parsed = RestrictionRequestSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return jsonError(400, "bad_request", "사용자 제한 요청 형식이 올바르지 않습니다.");
+    const parsed = await readJsonRequest(request, {
+      message: "사용자 제한 요청 형식이 올바르지 않습니다.",
+      schema: RestrictionRequestSchema
+    });
+    if (parsed.kind === "error") {
+      return parsed.response;
     }
     const restrictionDays = parsed.data.days ?? null;
 
@@ -54,6 +58,9 @@ export async function POST(request: Request, context: { readonly params: Promise
     }
 
     let restrictedUntil: Date | null = null;
+    if (parsed.data.status === "BANNED" && restrictionDays !== null) {
+      return jsonError(400, "bad_request", "영구 차단에는 기간을 설정할 수 없습니다.");
+    }
     if (parsed.data.status === "RESTRICTED") {
       if (restrictionDays === null) {
         return jsonError(400, "bad_request", "기간 제한 일수가 필요합니다.");
@@ -88,6 +95,18 @@ export async function POST(request: Request, context: { readonly params: Promise
           ipHash,
           reason: parsed.data.reason,
           targetUserId: params.id
+        }
+      });
+      await transaction.userSanction.updateMany({
+        data: {
+          revokedAt: new Date(),
+          revokedById: admin.id,
+          revokedReason: "새 관리자 제재로 대체",
+          status: "REVOKED"
+        },
+        where: {
+          status: "ACTIVE",
+          userId: params.id
         }
       });
       await transaction.userSanction.create({

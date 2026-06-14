@@ -1,13 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { memoryRateLimitStore } from "./memory-rate-limit-store";
+import { prismaRateLimitStore } from "./prisma-rate-limit-store";
 import { rateLimitKey } from "./rate-limit";
 import {
   buildAdminMutationRateLimitRules,
   buildLoginRateLimitRules,
-  buildReservationRateLimitRules
+  buildReservationRateLimitRules,
+  getRouteRateLimitStore
 } from "./route-rate-limit";
 
 describe("route rate-limit rules", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("adds both login-specific and IP-only login buckets", () => {
     const rules = buildLoginRateLimitRules({ clientIp: "203.0.113.8", loginId: " StudentA " });
 
@@ -57,5 +64,19 @@ describe("route rate-limit rules", () => {
         windowMs: 60_000
       }
     ]);
+  });
+
+  it("uses an in-memory store in no-database mock mode", () => {
+    vi.stubEnv("RIRO_MOCK_LOGIN", "true");
+    vi.stubEnv("DATABASE_URL", "");
+
+    expect(getRouteRateLimitStore()).toBe(memoryRateLimitStore);
+  });
+
+  it("uses the Prisma store outside no-database mock mode", () => {
+    vi.stubEnv("RIRO_MOCK_LOGIN", "true");
+    vi.stubEnv("DATABASE_URL", "postgresql://user:pass@example.test:5432/info_room");
+
+    expect(getRouteRateLimitStore()).toBe(prismaRateLimitStore);
   });
 });

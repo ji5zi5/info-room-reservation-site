@@ -25,7 +25,6 @@ export function AdminDashboardPanel({
       <div className="topbar">
         <div>
           <h2>운영 대시보드</h2>
-          <p className="muted">신청 현황 · 마감 상태 · Discord 발송</p>
         </div>
         <div className="admin-action-row">
           {statistics ? (

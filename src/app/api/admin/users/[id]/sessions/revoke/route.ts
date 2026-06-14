@@ -6,6 +6,7 @@ import { summarizeUserSessions } from "@/lib/admin-session-control";
 import { prisma } from "@/lib/db";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
 import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
@@ -36,9 +37,12 @@ export async function POST(
       return jsonRateLimitError(rateLimitResult);
     }
     const params = await context.params;
-    const parsed = RevokeSessionsRequestSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return jsonError(400, "bad_request", "세션 종료 요청 형식이 올바르지 않습니다.");
+    const parsed = await readJsonRequest(request, {
+      message: "세션 종료 요청 형식이 올바르지 않습니다.",
+      schema: RevokeSessionsRequestSchema
+    });
+    if (parsed.kind === "error") {
+      return parsed.response;
     }
     const ipHash = hashRequestClientIp(request);
 
