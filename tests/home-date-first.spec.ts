@@ -286,10 +286,11 @@ test("admin users see the operations console after normal login", async ({ page 
 
 test("advance reservation is unavailable on Friday", async ({ page }) => {
   await mockClientDate(page, "2026-06-12T09:00:00+09:00");
-  await login(page);
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "사전예약" }).click();
 
   await expect(page.getByRole("heading", { name: "사전예약 불가" })).toBeVisible();
+  await expect(page.getByText("금요일 이후에는 이번 주 사전예약이 마감됩니다.")).toBeVisible();
   await expect(page.getByLabel("사전예약 날짜")).toHaveCount(0);
   await expect(page.locator(".period-card")).toHaveCount(0);
 });

@@ -213,7 +213,7 @@ export function ReservationHomePage(): React.ReactElement {
           {advanceUnavailable ? (
             <div className="advance-unavailable" role="status">
               <h3>사전예약 불가</h3>
-              <p className="muted">금요일에는 이번 주 사전예약이 마감됩니다.</p>
+              <p className="muted">금요일 이후에는 이번 주 사전예약이 마감됩니다.</p>
             </div>
           ) : (
             <div className="period-grid">
