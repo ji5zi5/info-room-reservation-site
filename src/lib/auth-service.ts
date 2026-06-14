@@ -1,8 +1,11 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 import { prisma } from "./db";
+import { isLocalAdminLoginEnabled, isMockLoginEnabled } from "./env";
+import { isNoDatabaseMockMode } from "./mock-dev-mode";
+import { upsertMockReservationUser } from "./mock-reservation-data";
 import { loginWithRiroSchool, type RiroAuthResult, type RiroProfile } from "./riro-auth";
-import { createSession } from "./session";
+import { createMockSessionToken, createSession, type SessionUser } from "./session";
 
 type LoginInput = {
   readonly id: string;
@@ -27,14 +30,7 @@ export type LoginResult =
   | {
       readonly kind: "success";
       readonly token: string;
-      readonly user: {
-        readonly bookingStatus: string;
-        readonly generation: number;
-        readonly id: string;
-        readonly name: string;
-        readonly role: string;
-        readonly studentNumber: string;
-      };
+      readonly user: SessionUser;
     }
   | {
       readonly kind: "error";
@@ -49,6 +45,16 @@ export async function loginUserWithRiro(input: LoginInput): Promise<LoginResult>
   }
 
   const role = resolveAppRole(authResult.profile);
+  if (isNoDatabaseMockMode()) {
+    const user = buildNoDatabaseMockUser(authResult.profile, role);
+    upsertMockReservationUser(user);
+    return {
+      kind: "success",
+      token: createMockSessionToken(user),
+      user
+    };
+  }
+
   const user = await prisma.user.upsert({
     create: {
       bookingStatus: "ACTIVE",
@@ -76,17 +82,30 @@ export async function loginUserWithRiro(input: LoginInput): Promise<LoginResult>
       generation: user.generation,
       id: user.id,
       name: user.name,
+      restrictedUntil: user.restrictedUntil ? user.restrictedUntil.toISOString() : null,
       role: user.role,
       studentNumber: user.studentNumber
     }
   };
 }
 
+function buildNoDatabaseMockUser(profile: RiroProfile, role: "ADMIN" | "STUDENT"): SessionUser {
+  return {
+    bookingStatus: "ACTIVE",
+    generation: profile.generation,
+    id: `mock-${profile.studentNumber}`,
+    name: profile.name,
+    restrictedUntil: null,
+    role,
+    studentNumber: profile.studentNumber
+  };
+}
+
 async function authenticate(input: LoginInput): Promise<RiroAuthResult> {
   return authenticateWithConfiguredMode(input, {
     localAdminAccount: getLocalAdminAccountFromEnv(),
-    localAdminEnabled: isLocalAdminEnabled(),
-    mockLoginEnabled: process.env.RIRO_MOCK_LOGIN === "true",
+    localAdminEnabled: isLocalAdminLoginEnabled(),
+    mockLoginEnabled: isMockLoginEnabled(),
     riroAuthenticator: (authInput) => loginWithRiroSchool({ id: authInput.id, password: authInput.password })
   });
 }
@@ -98,7 +117,7 @@ export async function authenticateWithConfiguredMode(
   const localAdminResult = authenticateLocalAdmin(
     input,
     options.localAdminAccount ?? null,
-    options.localAdminEnabled ?? options.mockLoginEnabled
+    options.localAdminEnabled ?? false
   );
   if (localAdminResult) {
     return localAdminResult;
@@ -160,10 +179,6 @@ function getLocalAdminAccountFromEnv(): LocalAdminAccount | null {
     return null;
   }
   return { id, password };
-}
-
-function isLocalAdminEnabled(): boolean {
-  return process.env.RIRO_MOCK_LOGIN === "true" || process.env.ENABLE_LOCAL_ADMIN === "true";
 }
 
 function constantTimeEqual(left: string, right: string): boolean {

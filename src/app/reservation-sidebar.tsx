@@ -16,6 +16,7 @@ export type ReservationSidebarUser = {
   readonly generation: number;
   readonly id: string;
   readonly name: string;
+  readonly restrictedUntil: string | null;
   readonly role: string;
   readonly studentNumber: string;
 };
@@ -30,7 +31,6 @@ type ReservationSidebarProps = {
   readonly onToggle: () => void;
   readonly password: string;
   readonly sidebarOpen: boolean;
-  readonly toast: string | null;
   readonly user: ReservationSidebarUser | null;
 };
 
@@ -44,7 +44,6 @@ export function ReservationSidebar({
   onToggle,
   password,
   sidebarOpen,
-  toast,
   user
 }: ReservationSidebarProps): ReactElement {
   return (
@@ -107,7 +106,6 @@ export function ReservationSidebar({
             </button>
           </form>
         )}
-        {toast ? <div className="toast">{toast}</div> : null}
       </div>
     </section>
   );

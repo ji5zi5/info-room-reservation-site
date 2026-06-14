@@ -7,6 +7,7 @@ import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 
 import {
   applyUserRestriction,
+  type AdminReadResult,
   cancelAdminReservation,
   fetchAdminAuditActions,
   fetchAdminDashboard,
@@ -17,7 +18,6 @@ import {
   fetchAdminUsers,
   markReservationNoShow,
   removeUserRestriction,
-  revokeUserSessions,
   saveAdminSettings,
   sendClosedPeriodNotification,
   updatePeriodSetting
@@ -94,8 +94,12 @@ export function useAdminConsole(): AdminConsoleState {
 
   async function refresh(): Promise<void> {
     const settingsPayload = await fetchAdminSettings(date);
-    if (settingsPayload === "unauthorized") {
+    if (settingsPayload.kind === "unauthorized") {
       setToast("관리자 로그인이 필요합니다.");
+      return;
+    }
+    if (settingsPayload.kind === "error") {
+      setToast(settingsPayload.message);
       return;
     }
     const [dashboardPayload, reservationsPayload, statisticsPayload, usersPayload, auditPayload] = await Promise.all([
@@ -110,12 +114,23 @@ export function useAdminConsole(): AdminConsoleState {
       fetchAdminUsers({ query: userQuery, status: userStatusFilter }),
       fetchAdminAuditActions({ action: auditActionFilter, query: auditQuery })
     ]);
-    setPeriods(settingsPayload);
-    setDashboardPeriods(dashboardPayload);
-    setReservations(reservationsPayload);
-    setStatistics(statisticsPayload);
-    setUsers(usersPayload);
-    setAuditActions(auditPayload);
+    const readError = firstAdminReadError([
+      dashboardPayload,
+      reservationsPayload,
+      statisticsPayload,
+      usersPayload,
+      auditPayload
+    ]);
+    if (readError) {
+      setToast(readError);
+      return;
+    }
+    setPeriods(settingsPayload.data);
+    setDashboardPeriods(dashboardPayload.kind === "ok" ? dashboardPayload.data : []);
+    setReservations(reservationsPayload.kind === "ok" ? reservationsPayload.data : []);
+    setStatistics(statisticsPayload.kind === "ok" ? statisticsPayload.data : null);
+    setUsers(usersPayload.kind === "ok" ? usersPayload.data : []);
+    setAuditActions(auditPayload.kind === "ok" ? auditPayload.data : []);
     if (selectedUserId) {
       await refreshSelectedUser(selectedUserId);
     }
@@ -153,39 +168,18 @@ export function useAdminConsole(): AdminConsoleState {
 
   async function applyRestriction(userId: string): Promise<void> {
     const draft = restrictionDrafts[userId] ?? DEFAULT_RESTRICTION_DRAFT;
+    const reason = draft.reason.trim();
+    if (!reason) {
+      setToast("제재 사유를 입력하세요.");
+      return;
+    }
     const parsedDays = Number.parseInt(draft.days, 10);
     const ok = await applyUserRestriction(userId, {
       days: draft.status === "RESTRICTED" ? Math.max(parsedDays || 7, 1) : null,
-      reason: draft.reason,
+      reason,
       status: draft.status
     });
     setToast(ok ? "예약 제한을 적용했습니다." : "예약 제한 적용 실패");
-    await refresh();
-  }
-
-  async function applyRestrictionPreset(userId: string, days: number): Promise<void> {
-    const ok = await applyUserRestriction(userId, {
-      days,
-      reason: "정보실 예약 제한",
-      status: "RESTRICTED"
-    });
-    setToast(ok ? `${days}일 예약 제한을 적용했습니다.` : "예약 제한 적용 실패");
-    await refresh();
-  }
-
-  async function banUser(userId: string): Promise<void> {
-    const ok = await applyUserRestriction(userId, {
-      days: null,
-      reason: "정보실 예약 영구 차단",
-      status: "BANNED"
-    });
-    setToast(ok ? "학생을 영구 차단했습니다." : "영구 차단 실패");
-    await refresh();
-  }
-
-  async function revokeSessions(userId: string): Promise<void> {
-    const ok = await revokeUserSessions(userId);
-    setToast(ok ? "학생의 로그인 세션을 종료했습니다." : "세션 종료 실패");
     await refresh();
   }
 
@@ -212,7 +206,12 @@ export function useAdminConsole(): AdminConsoleState {
   }
 
   async function refreshSelectedUser(userId: string): Promise<void> {
-    setSelectedUserDetail(await fetchAdminUserDetail(userId));
+    const result = await fetchAdminUserDetail(userId);
+    if (result.kind === "ok") {
+      setSelectedUserDetail(result.data);
+      return;
+    }
+    setToast(result.kind === "unauthorized" ? "관리자 로그인이 필요합니다." : result.message);
   }
 
   async function copyReservationsCsv(): Promise<void> {
@@ -233,8 +232,6 @@ export function useAdminConsole(): AdminConsoleState {
     auditActions,
     auditQuery,
     applyRestriction,
-    applyRestrictionPreset,
-    banUser,
     cancelReservation,
     clearSelectedUser,
     copyReservationsCsv,
@@ -244,7 +241,6 @@ export function useAdminConsole(): AdminConsoleState {
     periods,
     refresh,
     removeRestriction,
-    revokeSessions,
     reservationPeriodFilter,
     reservationQuery,
     reservations,
@@ -272,4 +268,16 @@ export function useAdminConsole(): AdminConsoleState {
     users,
     viewUser
   };
+}
+
+function firstAdminReadError(results: readonly AdminReadResult<unknown>[]): string | null {
+  for (const result of results) {
+    if (result.kind === "unauthorized") {
+      return "관리자 로그인이 필요합니다.";
+    }
+    if (result.kind === "error") {
+      return result.message;
+    }
+  }
+  return null;
 }

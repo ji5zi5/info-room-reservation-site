@@ -10,6 +10,7 @@ import { ADMIN_AUDIT_ACTION_FILTERS, type AdminAuditActionFilter } from "@/lib/a
 import { ADMIN_USER_STATUS_FILTERS, type AdminUserStatusFilter } from "@/lib/admin-users";
 
 const StudyPeriodSchema = z.union([z.literal("EIGHTH"), z.literal("FIRST")]);
+const PeriodWindowStateSchema = z.union([z.literal("not_open_yet"), z.literal("open"), z.literal("closed")]);
 
 export const AdminPeriodSettingSchema = z.object({
   capacity: z.number(),
@@ -20,7 +21,8 @@ export const AdminPeriodSettingSchema = z.object({
   label: z.string(),
   openTime: z.string(),
   remaining: z.number(),
-  studyPeriod: StudyPeriodSchema
+  studyPeriod: StudyPeriodSchema,
+  windowState: PeriodWindowStateSchema
 });
 
 const AdminDashboardNotificationSchema = z.object({

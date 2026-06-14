@@ -9,6 +9,7 @@ import { AdminReservationsPanel } from "./admin-reservations-panel";
 import { AdminSettingsPanel } from "./admin-settings-panel";
 import { AdminStudentDetail } from "./admin-student-detail";
 import { AdminUsersPanel } from "./admin-users-panel";
+import { DEFAULT_RESTRICTION_DRAFT } from "./admin-console-state";
 import { csrfFetch, resetCsrfToken } from "../csrf-fetch";
 import { type AdminSection, useAdminConsole } from "./use-admin-console";
 
@@ -33,6 +34,7 @@ const SECTIONS: readonly {
 
 export function AdminConsole(): ReactElement {
   const consoleState = useAdminConsole();
+  const detailOpen = consoleState.activeSection === "students" && consoleState.selectedUserDetail !== null;
 
   async function logout(): Promise<void> {
     await csrfFetch("/api/auth/logout", { method: "POST" });
@@ -52,7 +54,6 @@ export function AdminConsole(): ReactElement {
           </div>
           <div className="admin-title-block">
             <h1>관리자</h1>
-            <p className="muted">현황 · 명단 · 학생 제재 · 설정</p>
           </div>
           <nav className="admin-section-nav" aria-label="관리자 메뉴">
             {SECTIONS.map((section) => (
@@ -76,7 +77,7 @@ export function AdminConsole(): ReactElement {
             로그아웃
           </button>
         </aside>
-        <div className="admin-workspace">
+        <div className="admin-workspace" data-detail={detailOpen ? "open" : "closed"}>
           <section className="admin-main-panel" aria-live="polite">
             {consoleState.activeSection === "dashboard" ? (
               <AdminDashboardPanel
@@ -104,14 +105,10 @@ export function AdminConsole(): ReactElement {
             {consoleState.activeSection === "students" ? (
               <AdminUsersPanel
                 query={consoleState.userQuery}
-                restrictionDrafts={consoleState.restrictionDrafts}
                 selectedUserId={consoleState.selectedUserId}
                 status={consoleState.userStatusFilter}
                 users={consoleState.users}
-                onApplyRestriction={(userId) => void consoleState.applyRestriction(userId)}
-                onRemoveRestriction={(userId) => void consoleState.removeRestriction(userId)}
                 onSelectUser={(userId) => void consoleState.viewUser(userId)}
-                onSetDraft={consoleState.setRestrictionDraft}
                 onSetQuery={consoleState.setUserQuery}
                 onSetStatus={consoleState.setUserStatusFilter}
               />
@@ -128,23 +125,26 @@ export function AdminConsole(): ReactElement {
             ) : null}
             {consoleState.activeSection === "settings" ? (
               <AdminSettingsPanel
-                date={consoleState.date}
                 periods={consoleState.periods}
-                onDateChange={consoleState.setDate}
-                onLogout={() => void logout()}
                 onSave={() => void consoleState.saveSettings()}
                 onUpdatePeriod={consoleState.updatePeriod}
               />
             ) : null}
           </section>
-          <AdminStudentDetail
-            detail={consoleState.selectedUserDetail}
-            onApplyPreset={(userId, days) => void consoleState.applyRestrictionPreset(userId, days)}
-            onBan={(userId) => void consoleState.banUser(userId)}
-            onClose={consoleState.clearSelectedUser}
-            onRelease={(userId) => void consoleState.removeRestriction(userId)}
-            onRevokeSessions={(userId) => void consoleState.revokeSessions(userId)}
-          />
+          {consoleState.activeSection === "students" ? (
+            <AdminStudentDetail
+              detail={consoleState.selectedUserDetail}
+              restrictionDraft={
+                consoleState.selectedUserId
+                  ? consoleState.restrictionDrafts[consoleState.selectedUserId] ?? DEFAULT_RESTRICTION_DRAFT
+                  : DEFAULT_RESTRICTION_DRAFT
+              }
+              onApplyRestriction={(userId) => void consoleState.applyRestriction(userId)}
+              onClose={consoleState.clearSelectedUser}
+              onRelease={(userId) => void consoleState.removeRestriction(userId)}
+              onSetRestrictionDraft={consoleState.setRestrictionDraft}
+            />
+          ) : null}
           {consoleState.toast ? <div className="toast admin-toast">{consoleState.toast}</div> : null}
         </div>
       </div>

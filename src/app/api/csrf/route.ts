@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { mintCsrfToken } from "@/lib/csrf";
+import { getCsrfTokenStore } from "@/lib/csrf-token-store";
 import { jsonError } from "@/lib/http";
-import { prismaCsrfTokenStore } from "@/lib/prisma-csrf-store";
 import { getCurrentSession } from "@/lib/session";
 
 export async function GET(): Promise<NextResponse> {
@@ -12,6 +12,6 @@ export async function GET(): Promise<NextResponse> {
   }
 
   return NextResponse.json({
-    csrfToken: await mintCsrfToken({ now: new Date(), sessionId: session.id, store: prismaCsrfTokenStore })
+    csrfToken: await mintCsrfToken({ now: new Date(), sessionId: session.id, store: getCsrfTokenStore() })
   });
 }

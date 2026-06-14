@@ -20,6 +20,16 @@ import {
   type StudyPeriod
 } from "./admin-types";
 import { csrfFetch } from "../csrf-fetch";
+import { z } from "zod";
+
+type JsonResponseSchema<T> = {
+  readonly parse: (value: unknown) => T;
+};
+
+export type AdminReadResult<T> =
+  | { readonly data: T; readonly kind: "ok" }
+  | { readonly kind: "error"; readonly message: string }
+  | { readonly kind: "unauthorized" };
 
 export type AdminRestrictionPayload = {
   readonly days: number | null;
@@ -27,26 +37,29 @@ export type AdminRestrictionPayload = {
   readonly status: "BANNED" | "RESTRICTED";
 };
 
-export async function fetchAdminSettings(date: string): Promise<readonly AdminPeriodSetting[] | "unauthorized"> {
+export async function fetchAdminSettings(date: string): Promise<AdminReadResult<readonly AdminPeriodSetting[]>> {
   const response = await fetch(`/api/admin/period-settings?date=${date}`);
   if (response.status === 401 || response.status === 403) {
-    return "unauthorized";
+    return { kind: "unauthorized" };
   }
-  return AdminSettingsPayloadSchema.parse(await response.json()).periods;
+  const result = await readJsonResponse(response, AdminSettingsPayloadSchema);
+  return result.kind === "ok" ? { data: result.data.periods, kind: "ok" } : result;
 }
 
-export async function fetchAdminDashboard(date: string): Promise<readonly AdminDashboardPeriod[]> {
+export async function fetchAdminDashboard(date: string): Promise<AdminReadResult<readonly AdminDashboardPeriod[]>> {
   const response = await fetch(`/api/admin/dashboard?date=${date}`);
-  return AdminDashboardPayloadSchema.parse(await response.json()).periods;
+  const result = await readJsonResponse(response, AdminDashboardPayloadSchema);
+  return result.kind === "ok" ? { data: result.data.periods, kind: "ok" } : result;
 }
 
-export async function fetchAdminStatistics(input: { readonly from: string; readonly to: string }): Promise<AdminStatistics | null> {
+export async function fetchAdminStatistics(input: {
+  readonly from: string;
+  readonly to: string;
+}): Promise<AdminReadResult<AdminStatistics | null>> {
   const params = new URLSearchParams({ from: input.from, to: input.to });
   const response = await fetch(`/api/admin/statistics?${params.toString()}`);
-  if (!response.ok) {
-    return null;
-  }
-  return AdminStatisticsPayloadSchema.parse(await response.json()).statistics;
+  const result = await readJsonResponse(response, AdminStatisticsPayloadSchema);
+  return result.kind === "ok" ? { data: result.data.statistics, kind: "ok" } : result;
 }
 
 export async function fetchAdminReservations(input: {
@@ -55,7 +68,7 @@ export async function fetchAdminReservations(input: {
   readonly status: AdminReservationStatusFilter;
   readonly studyPeriod: AdminReservationStudyPeriodFilter;
   readonly userId?: string | null;
-}): Promise<readonly AdminReservation[]> {
+}): Promise<AdminReadResult<readonly AdminReservation[]>> {
   const params = new URLSearchParams({
     date: input.date,
     query: input.query,
@@ -66,30 +79,34 @@ export async function fetchAdminReservations(input: {
     params.set("userId", input.userId);
   }
   const response = await fetch(`/api/admin/reservations?${params.toString()}`);
-  return AdminReservationsPayloadSchema.parse(await response.json()).reservations;
+  const result = await readJsonResponse(response, AdminReservationsPayloadSchema);
+  return result.kind === "ok" ? { data: result.data.reservations, kind: "ok" } : result;
 }
 
 export async function fetchAdminUsers(input: {
   readonly query: string;
   readonly status: AdminUserStatusFilter;
-}): Promise<readonly AdminUser[]> {
+}): Promise<AdminReadResult<readonly AdminUser[]>> {
   const params = new URLSearchParams({ bookingStatus: input.status, query: input.query });
   const response = await fetch(`/api/admin/users?${params.toString()}`);
-  return AdminUsersPayloadSchema.parse(await response.json()).users;
+  const result = await readJsonResponse(response, AdminUsersPayloadSchema);
+  return result.kind === "ok" ? { data: result.data.users, kind: "ok" } : result;
 }
 
-export async function fetchAdminUserDetail(userId: string): Promise<AdminUserDetail> {
+export async function fetchAdminUserDetail(userId: string): Promise<AdminReadResult<AdminUserDetail | null>> {
   const response = await fetch(`/api/admin/users/${userId}`);
-  return AdminUserDetailSchema.parse(await response.json());
+  const result = await readJsonResponse(response, AdminUserDetailSchema);
+  return result.kind === "ok" ? { data: result.data, kind: "ok" } : result;
 }
 
 export async function fetchAdminAuditActions(input: {
   readonly action: AdminAuditActionFilter;
   readonly query: string;
-}): Promise<readonly AdminAuditAction[]> {
+}): Promise<AdminReadResult<readonly AdminAuditAction[]>> {
   const params = new URLSearchParams({ action: input.action, query: input.query });
   const response = await fetch(`/api/admin/actions?${params.toString()}`);
-  return AdminAuditActionsPayloadSchema.parse(await response.json()).actions;
+  const result = await readJsonResponse(response, AdminAuditActionsPayloadSchema);
+  return result.kind === "ok" ? { data: result.data.actions, kind: "ok" } : result;
 }
 
 export async function saveAdminSettings(input: {
@@ -156,4 +173,40 @@ export function updatePeriodSetting(
   patch: Partial<AdminPeriodSetting>
 ): readonly AdminPeriodSetting[] {
   return periods.map((period) => (period.studyPeriod === studyPeriod ? { ...period, ...patch } : period));
+}
+
+async function readJsonResponse<T>(response: Response, schema: JsonResponseSchema<T>): Promise<AdminReadResult<T>> {
+  if (!response.ok) {
+    return { kind: "error", message: (await readErrorMessage(response)) ?? "관리자 데이터를 불러오지 못했습니다." };
+  }
+  const body = await response.text();
+  if (!body.trim()) {
+    return { kind: "error", message: "관리자 데이터 응답이 비어 있습니다." };
+  }
+  const payload = parseJsonBody(body);
+  if (payload === null) {
+    return { kind: "error", message: "관리자 데이터 응답 형식이 올바르지 않습니다." };
+  }
+  return { data: schema.parse(payload), kind: "ok" };
+}
+
+function parseJsonBody(body: string): unknown | null {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
+}
+
+async function readErrorMessage(response: Response): Promise<string | null> {
+  const body = await response.text();
+  if (!body.trim()) {
+    return null;
+  }
+  const payload = parseJsonBody(body);
+  const parsed = z.object({ error: z.object({ message: z.string() }).optional() }).safeParse(payload);
+  if (!parsed.success) {
+    return null;
+  }
+  return parsed.data.error?.message ?? null;
 }

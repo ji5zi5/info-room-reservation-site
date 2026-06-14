@@ -65,9 +65,13 @@
 .admin-workspace {
   display: grid;
   gap: 20px;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   padding: 28px;
+}
+
+.admin-workspace[data-detail="open"] {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
 }
 
 .admin-main-panel {
@@ -268,7 +272,7 @@
   border: 1px solid transparent;
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(150px, 0.9fr) minmax(0, 2fr);
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1fr) auto;
   min-height: 76px;
   padding: 14px;
   transition:
@@ -283,6 +287,27 @@
 .user-line[data-selected="true"] {
   background: color-mix(in srgb, var(--blue) 7%, var(--white));
   border-color: color-mix(in srgb, var(--blue) 28%, var(--silver));
+}
+
+.user-line-main,
+.user-line-summary {
+  min-width: 0;
+}
+
+.user-line-main strong,
+.user-line-summary p {
+  overflow-wrap: anywhere;
+}
+
+.user-line-summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.user-line-summary .muted {
+  margin: 0;
 }
 
 .restriction-controls {
@@ -316,12 +341,6 @@
   overflow: auto;
   padding: 20px;
   scrollbar-gutter: stable;
-}
-
-.empty-detail {
-  color: var(--pewter);
-  place-content: center;
-  text-align: center;
 }
 
 .student-detail-head {
@@ -378,11 +397,42 @@
 }
 
 .detail-actions {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
 }
 
-.detail-actions .primary-button {
-  grid-column: 1 / -1;
+.restriction-form {
+  background: color-mix(in srgb, var(--fog) 62%, var(--white));
+  border: 1px solid var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.restriction-duration-presets {
+  border: 0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+}
+
+.restriction-duration-presets legend {
+  color: var(--graphite);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.restriction-duration-presets button[data-active="true"] {
+  background: color-mix(in srgb, var(--blue) 10%, var(--white));
+  border-color: color-mix(in srgb, var(--blue) 35%, var(--silver));
+  color: var(--blue);
+}
+
+.restriction-form .danger-button {
+  width: 100%;
 }
 
 .detail-section {
@@ -449,6 +499,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .admin-workspace[data-detail="open"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .student-detail-panel {
     max-height: none;
   }
@@ -495,7 +549,7 @@
   }
 
   .student-detail-panel[data-open="true"] {
-    order: -1;
+    order: 0;
   }
 }
 
@@ -565,20 +619,14 @@
     padding: 0 10px;
   }
 
-  .student-detail-panel.empty-detail {
-    display: none;
-  }
-
   .admin-dashboard-grid {
     grid-template-columns: 1fr;
   }
 
   .student-detail-panel[data-open="true"] {
     gap: 12px;
-    max-height: min(76svh, 760px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
+    max-height: none;
+    overflow: visible;
   }
 
   .student-detail-panel[data-open="true"] .detail-metrics {
@@ -586,11 +634,11 @@
   }
 
   .student-detail-panel[data-open="true"] .detail-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
-  .student-detail-panel[data-open="true"] .detail-actions .primary-button {
-    grid-column: 1 / -1;
+  .student-detail-panel[data-open="true"] .restriction-duration-presets {
+    grid-template-columns: 1fr;
   }
 
   .student-detail-panel[data-open="true"] .notice-panel {

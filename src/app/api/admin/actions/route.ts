@@ -9,6 +9,7 @@ import {
 } from "@/lib/admin-audit-actions";
 import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
+import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 
 const AdminActionsQuerySchema = z.object({
@@ -31,6 +32,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     }
 
     const filter = parseAdminAuditActionFilter(parsed.data.action);
+    if (isNoDatabaseMockMode()) {
+      return NextResponse.json({ actions: [] });
+    }
     const rows = await prisma.adminAction.findMany({
       include: {
         actor: { select: { id: true, name: true, studentNumber: true } },

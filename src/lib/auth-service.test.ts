@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { authenticateWithConfiguredMode, resolveAppRole } from "./auth-service";
+import { authenticateWithConfiguredMode, loginUserWithRiro, resolveAppRole } from "./auth-service";
 import type { RiroAuthResult } from "./riro-auth";
 
 const successFromRealAuthenticator: RiroAuthResult = {
@@ -70,6 +70,28 @@ describe("authenticateWithConfiguredMode", () => {
 
     expect(calls).toEqual(["site-admin:local-secret"]);
     expect(result).toBe(successFromRealAuthenticator);
+  });
+
+  it("does not enable local admin accounts through mock mode", async () => {
+    const result = await authenticateWithConfiguredMode(
+      { id: "site-admin", password: "local-secret" },
+      {
+        localAdminAccount: { id: "site-admin", password: "local-secret" },
+        mockLoginEnabled: true,
+        riroAuthenticator: async () => successFromRealAuthenticator
+      }
+    );
+
+    expect(result).toEqual({
+      kind: "success",
+      profile: {
+        generation: 31,
+        name: "테스트학생",
+        role: "STUDENT",
+        student: "2학년 3반",
+        studentNumber: "90000"
+      }
+    });
   });
 
   it("uses a configured local admin account before real Riro auth", async () => {
@@ -155,5 +177,29 @@ describe("resolveAppRole", () => {
   it("allows teachers and configured student numbers to become admins", () => {
     expect(resolveAppRole({ ...successFromRealAuthenticator.profile, role: "TEACHER" })).toBe("ADMIN");
     expect(resolveAppRole(successFromRealAuthenticator.profile, new Set(["12345"]))).toBe("ADMIN");
+  });
+});
+
+describe("loginUserWithRiro", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns a mock session without touching the database in no-DB mock mode", async () => {
+    vi.stubEnv("RIRO_MOCK_LOGIN", "true");
+    vi.stubEnv("DATABASE_URL", "");
+
+    const result = await loginUserWithRiro({ id: "12345", password: "password" });
+
+    expect(result.kind).toBe("success");
+    if (result.kind !== "success") {
+      throw new Error("Expected mock login to succeed");
+    }
+    expect(result.token).toMatch(/^mock\./u);
+    expect(result.user).toMatchObject({
+      bookingStatus: "ACTIVE",
+      role: "STUDENT",
+      studentNumber: "12345"
+    });
   });
 });

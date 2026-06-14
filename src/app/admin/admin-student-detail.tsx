@@ -1,33 +1,29 @@
 "use client";
 
-import { Ban, CalendarCheck, LogOut, ShieldOff, UserRoundCheck } from "lucide-react";
+import { ShieldOff } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 
+import type { UserRestrictionDraft } from "./admin-console-state";
+import { AdminStudentRestrictionForm } from "./admin-student-restriction-form";
 import type { AdminUserDetail } from "./admin-types";
 
 export function AdminStudentDetail({
   detail,
-  onApplyPreset,
-  onBan,
+  onApplyRestriction,
   onClose,
   onRelease,
-  onRevokeSessions
+  onSetRestrictionDraft,
+  restrictionDraft
 }: {
   readonly detail: AdminUserDetail | null;
-  readonly onApplyPreset: (userId: string, days: number) => void;
-  readonly onBan: (userId: string) => void;
+  readonly onApplyRestriction: (userId: string) => void;
   readonly onClose?: () => void;
   readonly onRelease: (userId: string) => void;
-  readonly onRevokeSessions: (userId: string) => void;
-}): ReactElement {
+  readonly onSetRestrictionDraft: (userId: string, patch: Partial<UserRestrictionDraft>) => void;
+  readonly restrictionDraft: UserRestrictionDraft;
+}): ReactElement | null {
   if (!detail) {
-    return (
-      <aside className="student-detail-panel empty-detail">
-        <UserRoundCheck size={22} />
-        <h3>학생 선택</h3>
-        <p className="muted">학생 목록이나 예약자 목록에서 학생을 선택하면 상세 이력과 제재 액션이 열립니다.</p>
-      </aside>
-    );
+    return null;
   }
 
   return (
@@ -55,28 +51,19 @@ export function AdminStudentDetail({
           {detail.sanctionSummary.revokedCount}회
         </p>
       </div>
-      <div className="detail-actions">
-        <button className="ghost-button" type="button" onClick={() => onApplyPreset(detail.user.id, 7)}>
-          <CalendarCheck size={16} />
-          7일 제한
-        </button>
-        <button className="ghost-button" type="button" onClick={() => onApplyPreset(detail.user.id, 14)}>14일 제한</button>
-        <button className="ghost-button" type="button" onClick={() => onApplyPreset(detail.user.id, 30)}>30일 제한</button>
-        <button className="danger-button" type="button" onClick={() => onBan(detail.user.id)}>
-          <Ban size={16} />
-          영구 차단
-        </button>
-        <button className="ghost-button" type="button" onClick={() => onRevokeSessions(detail.user.id)}>
-          <LogOut size={16} />
-          로그아웃 처리
-        </button>
-        {detail.user.bookingStatus !== "ACTIVE" ? (
+      <AdminStudentRestrictionForm
+        draft={restrictionDraft}
+        onApply={() => onApplyRestriction(detail.user.id)}
+        onSetDraft={(patch) => onSetRestrictionDraft(detail.user.id, patch)}
+      />
+      {detail.user.bookingStatus !== "ACTIVE" ? (
+        <div className="detail-actions">
           <button className="primary-button" type="button" onClick={() => onRelease(detail.user.id)}>
             <ShieldOff size={16} />
             제한 해제
           </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <DetailSection title="현재 예약">
         {detail.currentReservations.length > 0 ? (
           detail.currentReservations.map((reservation) => (

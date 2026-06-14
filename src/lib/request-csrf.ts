@@ -1,11 +1,11 @@
 import { messageForCsrfError, validateCsrfToken, type CsrfValidationResult } from "./csrf";
-import { prismaCsrfTokenStore } from "./prisma-csrf-store";
+import { getCsrfTokenStore } from "./csrf-token-store";
 
 export async function validateRequestCsrf(request: Request, sessionId: string): Promise<CsrfValidationResult> {
   return validateCsrfToken({
     now: new Date(),
     sessionId,
-    store: prismaCsrfTokenStore,
+    store: getCsrfTokenStore(),
     token: request.headers.get("x-csrf-token")
   });
 }

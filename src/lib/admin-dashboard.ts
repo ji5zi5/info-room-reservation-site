@@ -1,4 +1,4 @@
-import { CLOSED_LIST_NOTIFICATION_KIND, isClosedPeriodForNotification } from "./closed-period-notifications";
+import { CLOSED_LIST_NOTIFICATION_KIND } from "./closed-period-notifications";
 import { prisma } from "./db";
 import { getPeriodSummaries, type PeriodSummary } from "./period-settings";
 import { toDeliveryRecord } from "./prisma-notification-repository";
@@ -16,7 +16,7 @@ export type AdminDashboardPeriod = PeriodSummary & {
 };
 
 export async function getAdminDashboard(date: string, now: Date): Promise<readonly AdminDashboardPeriod[]> {
-  const periods = await getPeriodSummaries(date, { includeApplicants: true });
+  const periods = await getPeriodSummaries(date, { includeApplicants: true, now });
   const deliveries = await Promise.all(
     periods.map((period) =>
       prisma.notificationDelivery.findUnique({
@@ -34,7 +34,7 @@ export async function getAdminDashboard(date: string, now: Date): Promise<readon
     const delivery = deliveries[index];
     return {
       ...period,
-      isClosed: isClosedPeriodForNotification(period, now),
+      isClosed: period.windowState === "closed",
       notification: delivery
         ? {
             attempts: delivery.attempts,
