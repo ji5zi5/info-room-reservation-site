@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { e2eNow, mockClientDate } from "./e2e-time";
 import { todayKst } from "./kst-date";
 import { csrfRequest, responseErrorCode } from "./playwright-csrf";
 
@@ -15,13 +16,14 @@ type AdminPeriodSetting = {
   readonly studyPeriod: StudyPeriod;
 };
 
-async function login(page: Page, loginId: string): Promise<void> {
+async function login(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
   if (loginId === "admin") {
-    await loginWithApi(page, loginId);
+    await loginWithApi(page, loginId, fixedIso);
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
     return;
   }
+  await mockClientDate(page, fixedIso);
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
@@ -33,29 +35,13 @@ async function logout(page: Page): Promise<void> {
   await csrfRequest(page, "/api/auth/logout", { method: "POST" });
 }
 
-async function loginWithApi(page: Page, loginId: string): Promise<void> {
+async function loginWithApi(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
+  await mockClientDate(page, fixedIso);
   const response = await page.request.post(`${BASE_URL}/api/auth/riro/login`, {
     data: { id: loginId, password: "password" },
     headers: { "x-forwarded-for": `198.51.100.${Math.floor(Math.random() * 200) + 1}` }
   });
   expect(response.ok()).toBeTruthy();
-}
-
-async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
-  await page.addInitScript((iso) => {
-    const fixedNow = new Date(iso).valueOf();
-    const RealDate = Date;
-    class MockDate extends RealDate {
-      public constructor(value?: string | number | Date) {
-        super(value ?? fixedNow);
-      }
-
-      public static override now(): number {
-        return fixedNow;
-      }
-    }
-    globalThis.Date = MockDate as DateConstructor;
-  }, fixedIso);
 }
 
 async function fetchPeriodSettings(page: Page, date: string): Promise<readonly AdminPeriodSetting[]> {
@@ -101,7 +87,6 @@ test("non-admin users are redirected away from admin page", async ({ page }) => 
 
 test("reserved periods show a cancel action and refresh applicants after cancel", async ({ page }) => {
   const date = todayKst();
-  await mockClientDate(page, `${date}T09:00:00+09:00`);
   await login(page, "admin");
   const originalPeriods = await fetchPeriodSettings(page, date);
   await patchPeriodSettings(

@@ -1,8 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { todayKst } from "./kst-date";
 import { csrfRequest } from "./playwright-csrf";
 import { visibleBox, visiblePosition } from "./playwright-layout";
+import { e2eNow, FIXED_FRIDAY_DATE, FIXED_THURSDAY_DATE, mockClientDate, mockOpenPeriodsForDates } from "./e2e-time";
+import { todayKst } from "./kst-date";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
@@ -22,25 +23,27 @@ type ReservationCreateResponse = {
   };
 };
 
-async function login(page: Page, loginId = `date-first-${Date.now()}`): Promise<void> {
+async function login(page: Page, loginId = `date-first-${Date.now()}`, fixedIso = e2eNow()): Promise<void> {
   if (loginId === "admin") {
-    await loginWithApi(page, loginId);
+    await loginWithApi(page, loginId, fixedIso);
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
     return;
   }
-  await loginWithForm(page, loginId);
+  await loginWithForm(page, loginId, fixedIso);
   await page.locator(".period-card .period-badge").first().waitFor();
 }
 
-async function loginWithForm(page: Page, loginId: string): Promise<void> {
+async function loginWithForm(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
+  await mockClientDate(page, fixedIso);
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
 }
 
-async function loginWithApi(page: Page, loginId: string): Promise<void> {
+async function loginWithApi(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
+  await mockClientDate(page, fixedIso);
   const response = await page.request.post(`${BASE_URL}/api/auth/riro/login`, {
     data: { id: loginId, password: "password" },
     headers: { "x-forwarded-for": `203.0.113.${Math.floor(Math.random() * 200) + 1}` }
@@ -83,26 +86,9 @@ async function patchPeriodSettings(
   }
 }
 
-async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
-  await page.addInitScript((iso) => {
-    const fixedNow = new Date(iso).valueOf();
-    const RealDate = Date;
-    class MockDate extends RealDate {
-      public constructor(value?: string | number | Date) {
-        super(value ?? fixedNow);
-      }
-
-      public static override now(): number {
-        return fixedNow;
-      }
-    }
-    globalThis.Date = MockDate as DateConstructor;
-  }, fixedIso);
-}
-
 test("advance reservation shows date picker before period cards", async ({ page }) => {
-  await mockClientDate(page, "2026-06-11T09:00:00+09:00");
-  await login(page);
+  await mockOpenPeriodsForDates(page, FIXED_THURSDAY_DATE, FIXED_FRIDAY_DATE);
+  await login(page, `date-first-${Date.now()}`, e2eNow(FIXED_THURSDAY_DATE));
   await page.getByRole("button", { name: "사전예약" }).click();
 
   const datePicker = page.getByLabel("사전예약 날짜");
@@ -126,7 +112,7 @@ test("home page omits redundant explanatory copy", async ({ page }) => {
 test("mocked client date does not trigger a hydration mismatch", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await mockClientDate(page, "2026-06-11T09:00:00+09:00");
+  await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "예약 현황" })).toBeVisible();
@@ -136,8 +122,8 @@ test("mocked client date does not trigger a hydration mismatch", async ({ page }
 });
 
 test("reservation header copy is compact and tabs keep stable dimensions", async ({ page }) => {
-  await mockClientDate(page, "2026-06-11T09:00:00+09:00");
-  await login(page);
+  await mockOpenPeriodsForDates(page, FIXED_THURSDAY_DATE, FIXED_FRIDAY_DATE);
+  await login(page, `header-${Date.now()}`, e2eNow(FIXED_THURSDAY_DATE));
 
   await expect(page.getByText("8면학 먼저, 다음 1면학")).toHaveCount(0);
   await expect(page.getByText("리로스쿨 인증")).toHaveCount(0);
@@ -157,8 +143,8 @@ test("reservation header copy is compact and tabs keep stable dimensions", async
 });
 
 test("today and advance tabs keep period cards on the same visual rail", async ({ page }) => {
-  await mockClientDate(page, "2026-06-11T09:00:00+09:00");
-  await login(page, `rail-${Date.now()}`);
+  await mockOpenPeriodsForDates(page, FIXED_THURSDAY_DATE, FIXED_FRIDAY_DATE);
+  await login(page, `rail-${Date.now()}`, e2eNow(FIXED_THURSDAY_DATE));
 
   const firstCard = page.locator(".period-card").first();
   const todayPosition = await visiblePosition(firstCard, "today first period card");
@@ -195,7 +181,6 @@ test("period cards show confirmed applicants", async ({ page }) => {
   const studentNumber = String(Math.floor(10_000 + Math.random() * 90_000));
   let reservationId: string | undefined;
   let originalPeriods: readonly AdminPeriodSetting[] = [];
-  await mockClientDate(page, `${date}T09:00:00+09:00`);
   await login(page, "admin");
   originalPeriods = await fetchPeriodSettings(page, date);
   await patchPeriodSettings(
@@ -250,7 +235,6 @@ test("period cards show confirmed applicants", async ({ page }) => {
 });
 
 test("applicant toggle preserves period order and tab dimensions", async ({ page }) => {
-  await mockClientDate(page, "2026-06-11T09:00:00+09:00");
   await login(page, "25-10316");
 
   const todayTab = page.getByRole("button", { name: "당일예약" });
@@ -285,7 +269,7 @@ test("admin users see the operations console after normal login", async ({ page 
 });
 
 test("advance reservation is unavailable on Friday", async ({ page }) => {
-  await mockClientDate(page, "2026-06-12T09:00:00+09:00");
+  await mockClientDate(page, e2eNow(FIXED_FRIDAY_DATE));
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "사전예약" }).click();
 
