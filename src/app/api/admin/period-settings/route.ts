@@ -3,9 +3,17 @@ import { z } from "zod";
 
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
-import { jsonError } from "@/lib/http";
+import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
+import { buildPeriodSettingsPatchAdminAction } from "@/lib/admin-operation-audit";
+import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
+import { getMockAdminPeriodSettings, updateMockAdminPeriodSettings } from "@/lib/mock-period-settings";
 import { ensurePeriodSettings, getPeriodSummaries } from "@/lib/period-settings";
-import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
+import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { readJsonRequest } from "@/lib/request-json";
+import { requireMutatingRequestSafety } from "@/lib/request-security";
+import { hashRequestClientIp } from "@/lib/request-source";
+import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
+import { requireAdmin, requireAdminSession, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 
 const PeriodPatchSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
@@ -24,6 +32,9 @@ export async function GET(request: Request): Promise<NextResponse> {
   try {
     await requireAdmin();
     const date = new URL(request.url).searchParams.get("date") ?? toKstDate(new Date());
+    if (isNoDatabaseMockMode()) {
+      return NextResponse.json({ periods: getMockAdminPeriodSettings(date) });
+    }
     await ensurePeriodSettings(date);
     return NextResponse.json({ periods: await getPeriodSummaries(date) });
   } catch (error) {
@@ -32,14 +43,45 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
+  const requestSafetyError = requireMutatingRequestSafety(request);
+  if (requestSafetyError) {
+    return jsonMutatingRequestSafetyError(requestSafetyError);
+  }
+
   try {
-    const admin = await requireAdmin();
-    const parsed = PeriodPatchSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return jsonError(400, "bad_request", "시간대 설정 형식이 올바르지 않습니다.");
+    const session = await requireAdminSession();
+    const csrfResult = await validateRequestCsrf(request, session.id);
+    if (csrfResult.kind === "error") {
+      return jsonError(403, csrfResult.reason, messageForCsrfError(csrfResult.reason));
     }
+    const parsed = await readJsonRequest(request, {
+      message: "시간대 설정 형식이 올바르지 않습니다.",
+      schema: PeriodPatchSchema
+    });
+    if (parsed.kind === "error") {
+      return parsed.response;
+    }
+    if (isNoDatabaseMockMode()) {
+      return NextResponse.json({ periods: updateMockAdminPeriodSettings(parsed.data.date, parsed.data.periods) });
+    }
+    const admin = session.user;
+    const rateLimitResult = await enforceAdminMutationRateLimit(request, admin.id);
+    if (rateLimitResult.kind === "blocked") {
+      return jsonRateLimitError(rateLimitResult);
+    }
+    const ipHash = hashRequestClientIp(request);
 
     await prisma.$transaction(async (transaction) => {
+      const before = await transaction.periodSetting.findMany({
+        select: {
+          capacity: true,
+          closeTime: true,
+          enabled: true,
+          openTime: true,
+          studyPeriod: true
+        },
+        where: { date: parsed.data.date }
+      });
       for (const period of parsed.data.periods) {
         await transaction.periodSetting.upsert({
           create: {
@@ -64,11 +106,20 @@ export async function PATCH(request: Request): Promise<NextResponse> {
           }
         });
       }
+      const action = await transaction.adminAction.create({
+        data: buildPeriodSettingsPatchAdminAction({
+          actorId: admin.id,
+          after: parsed.data.periods,
+          before,
+          date: parsed.data.date,
+          ipHash
+        })
+      });
       await transaction.auditLog.create({
         data: {
           action: "PERIOD_SETTINGS_PATCH",
           actorId: admin.id,
-          detail: JSON.stringify({ date: parsed.data.date, periods: parsed.data.periods.length })
+          detail: JSON.stringify({ actionId: action.id, date: parsed.data.date, periods: parsed.data.periods.length })
         }
       });
     });

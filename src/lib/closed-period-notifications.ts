@@ -1,3 +1,5 @@
+import { isPeriodWindowClosed } from "./period-window";
+import { toKstDate } from "./date";
 import type { StudyPeriod } from "./study-periods";
 
 export const CLOSED_LIST_NOTIFICATION_KIND = "CLOSED_LIST";
@@ -39,14 +41,10 @@ export function selectClosedPeriodNotificationCandidates(
 }
 
 export function isClosedPeriodForNotification(setting: ClosedPeriodCandidate, now: Date): boolean {
-  const kst = getKstDateTime(now);
-  if (kst.date > setting.date) {
-    return true;
-  }
-  if (kst.date < setting.date) {
+  if (toKstDate(now) < setting.date) {
     return false;
   }
-  return toMinutes(kst.time) > toMinutes(setting.closeTime);
+  return isPeriodWindowClosed(setting, now);
 }
 
 function hasSentDelivery(
@@ -76,47 +74,5 @@ function studyPeriodOrder(studyPeriod: StudyPeriod): number {
       return 0;
     case "FIRST":
       return 1;
-  }
-}
-
-function getKstDateTime(date: Date): { readonly date: string; readonly time: string } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-    minute: "2-digit",
-    month: "2-digit",
-    timeZone: "Asia/Seoul",
-    year: "numeric"
-  }).formatToParts(date);
-
-  const year = getDatePart(parts, "year");
-  const month = getDatePart(parts, "month");
-  const day = getDatePart(parts, "day");
-  const hour = getDatePart(parts, "hour");
-  const minute = getDatePart(parts, "minute");
-
-  return { date: `${year}-${month}-${day}`, time: `${hour}:${minute}` };
-}
-
-function getDatePart(parts: readonly Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): string {
-  const part = parts.find((candidate) => candidate.type === type);
-  if (!part) {
-    throw new ClosedPeriodDateFormatError(type);
-  }
-  return part.value;
-}
-
-function toMinutes(time: string): number {
-  const [hourText, minuteText] = time.split(":");
-  const hour = Number.parseInt(hourText ?? "", 10);
-  const minute = Number.parseInt(minuteText ?? "", 10);
-  return hour * 60 + minute;
-}
-
-class ClosedPeriodDateFormatError extends Error {
-  public constructor(part: Intl.DateTimeFormatPartTypes) {
-    super(`KST date part not found: ${part}`);
-    this.name = "ClosedPeriodDateFormatError";
   }
 }

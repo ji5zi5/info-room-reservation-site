@@ -74,4 +74,10 @@ describe("closed period notification candidate selection", () => {
       isClosedPeriodForNotification(closedEighthSetting, new Date("2026-06-12T07:21:00.000Z"))
     ).toBe(true);
   });
+
+  it("does not close future notification candidates after today's close time", () => {
+    expect(
+      isClosedPeriodForNotification(closedEighthSetting, new Date("2026-06-11T07:21:00.000Z"))
+    ).toBe(false);
+  });
 });

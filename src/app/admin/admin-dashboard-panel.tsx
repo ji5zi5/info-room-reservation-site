@@ -1,25 +1,56 @@
 "use client";
 
-import { Bell, Send } from "lucide-react";
+import { AlertTriangle, Bell, ClipboardList, Send, TrendingUp, Users } from "lucide-react";
 
-import type { AdminDashboardPeriod } from "./admin-types";
+import type { AdminDashboardPeriod, AdminStatistics } from "./admin-types";
+import { buildStatisticsCsv } from "./admin-csv";
 
 export function AdminDashboardPanel({
   onSendNotification,
-  periods
+  periods,
+  statistics
 }: {
   readonly onSendNotification: (period: AdminDashboardPeriod, force: boolean) => void;
   readonly periods: readonly AdminDashboardPeriod[];
+  readonly statistics: AdminStatistics | null;
 }): React.ReactElement {
+  async function copyStatisticsCsv(): Promise<void> {
+    if (statistics) {
+      await navigator.clipboard.writeText(buildStatisticsCsv(statistics));
+    }
+  }
+
   return (
     <section className="admin-panel stack">
       <div className="topbar">
         <div>
           <h2>운영 대시보드</h2>
-          <p className="muted">신청 현황 · 마감 상태 · Discord 발송</p>
         </div>
-        <Bell aria-hidden="true" size={22} />
+        <div className="admin-action-row">
+          {statistics ? (
+            <button className="ghost-button" type="button" onClick={() => void copyStatisticsCsv()}>
+              <ClipboardList size={18} />
+              통계 복사
+            </button>
+          ) : null}
+          <Bell aria-hidden="true" size={22} />
+        </div>
       </div>
+      {statistics ? (
+        <div className="admin-stat-strip" aria-label="운영 통계">
+          <span>
+            <TrendingUp size={16} />
+            총 {statistics.totals.totalCount}건
+          </span>
+          <span>확정 {statistics.totals.confirmedCount}건</span>
+          <span>취소 {statistics.totals.cancelledCount}건</span>
+          <span>노쇼 {statistics.totals.noShowCount}건</span>
+          <span>
+            <Users size={16} />
+            {statistics.totals.uniqueStudentCount}명
+          </span>
+        </div>
+      ) : null}
       <div className="admin-dashboard-grid">
         {periods.map((period) => (
           <article className="metric-card" key={period.studyPeriod}>
@@ -51,6 +82,48 @@ export function AdminDashboardPanel({
           </article>
         ))}
       </div>
+      {statistics ? (
+        <div className="admin-stat-grid">
+          {statistics.periodStats.map((period) => (
+            <article className="stat-summary-card" key={period.studyPeriod}>
+              <div>
+                <h3>{period.label}</h3>
+                <p className="muted">채움률 {period.fillRate}%</p>
+              </div>
+              <div className="stat-mini-grid">
+                <span>정원 {period.capacity}</span>
+                <span>확정 {period.confirmedCount}</span>
+                <span>취소 {period.cancelledCount}</span>
+                <span>노쇼 {period.noShowCount}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {statistics ? (
+        <section className="admin-offender-panel" aria-label="반복 취소 및 노쇼 학생">
+          <div className="period-top">
+            <h3>반복 취소 · 노쇼</h3>
+            <AlertTriangle size={18} />
+          </div>
+          {statistics.repeatedOffenders.length === 0 ? (
+            <p className="muted">반복 기록 없음</p>
+          ) : (
+            <div className="detail-lines">
+              {statistics.repeatedOffenders.map((offender) => (
+                <div className="detail-line" key={offender.userId}>
+                  <span>
+                    {offender.name} ({offender.studentNumber})
+                  </span>
+                  <strong>
+                    총 {offender.totalIncidents}회 · 취소 {offender.cancelledCount} · 노쇼 {offender.noShowCount}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
     </section>
   );
 }

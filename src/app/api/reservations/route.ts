@@ -6,8 +6,14 @@ import { prismaReservationStore } from "@/lib/prisma-reservation-store";
 import { isReservableDate } from "@/lib/advance-reservation-policy";
 import { ensurePeriodSettings } from "@/lib/period-settings";
 import { reserveStudyPeriod } from "@/lib/reservation-service";
-import { jsonError } from "@/lib/http";
-import { requireUser, UnauthorizedSessionError } from "@/lib/session";
+import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
+import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
+import { reserveMockStudyPeriod } from "@/lib/mock-reservation-data";
+import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { readJsonRequest } from "@/lib/request-json";
+import { requireMutatingRequestSafety } from "@/lib/request-security";
+import { enforceReservationRateLimit } from "@/lib/route-rate-limit";
+import { requireSession, UnauthorizedSessionError } from "@/lib/session";
 
 const ReservationRequestSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
@@ -15,20 +21,50 @@ const ReservationRequestSchema = z.object({
 });
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const requestSafetyError = requireMutatingRequestSafety(request);
+  if (requestSafetyError) {
+    return jsonMutatingRequestSafetyError(requestSafetyError);
+  }
+
   try {
-    const user = await requireUser();
+    const session = await requireSession();
+    const csrfResult = await validateRequestCsrf(request, session.id);
+    if (csrfResult.kind === "error") {
+      return jsonError(403, csrfResult.reason, messageForCsrfError(csrfResult.reason));
+    }
+    const user = session.user;
     if (user.role === "ADMIN") {
       return jsonError(403, "admin_not_reservable", "관리자 계정은 예약할 수 없습니다.");
     }
+    const rateLimitResult = await enforceReservationRateLimit(request, user.id);
+    if (rateLimitResult.kind === "blocked") {
+      return jsonRateLimitError(rateLimitResult);
+    }
 
-    const parsed = ReservationRequestSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return jsonError(400, "bad_request", "예약 요청 형식이 올바르지 않습니다.");
+    const parsed = await readJsonRequest(request, {
+      message: "예약 요청 형식이 올바르지 않습니다.",
+      schema: ReservationRequestSchema
+    });
+    if (parsed.kind === "error") {
+      return parsed.response;
     }
 
     const now = new Date();
     if (!isReservableDate(parsed.data.date, now)) {
       return jsonError(409, "advance_unavailable", "사전예약 불가");
+    }
+
+    if (isNoDatabaseMockMode()) {
+      const result = reserveMockStudyPeriod({
+        date: parsed.data.date,
+        now,
+        studyPeriod: parsed.data.studyPeriod,
+        user
+      });
+      if (result.kind === "confirmed") {
+        return NextResponse.json({ reservation: result.reservation }, { status: 201 });
+      }
+      return jsonError(statusForReservationError(result.reason), result.reason, messageForReservationError(result.reason));
     }
 
     await ensurePeriodSettings(parsed.data.date);

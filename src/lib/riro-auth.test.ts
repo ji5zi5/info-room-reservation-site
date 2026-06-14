@@ -11,6 +11,22 @@ describe("riro auth parser", () => {
     });
   });
 
+  it("returns a typed invalid credential result when RiroSchool returns current 400 response", () => {
+    expect(
+      interpretLoginJson({
+        cid: "25000000",
+        code: 400,
+        data: { lock: false, set_app: [], url: "/user.php?action=signin" },
+        msg: "아이디가 없거나 비밀번호가 맞지 않습니다. (2/5회 오류)",
+        token: null
+      })
+    ).toEqual({
+      kind: "error",
+      reason: "invalid_credentials",
+      message: "아이디가 없거나 비밀번호가 맞지 않습니다. (2/5회 오류)"
+    });
+  });
+
   it("parses a normal RiroSchool account profile", () => {
     const html = `
       <span class="m_level3">2학년 3반</span>

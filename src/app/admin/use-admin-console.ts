@@ -7,10 +7,13 @@ import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 
 import {
   applyUserRestriction,
+  type AdminReadResult,
   cancelAdminReservation,
+  fetchAdminAuditActions,
   fetchAdminDashboard,
   fetchAdminReservations,
   fetchAdminSettings,
+  fetchAdminStatistics,
   fetchAdminUserDetail,
   fetchAdminUsers,
   markReservationNoShow,
@@ -19,77 +22,42 @@ import {
   sendClosedPeriodNotification,
   updatePeriodSetting
 } from "./admin-api-client";
+import { todayKst } from "./admin-date";
 import { buildReservationCsv } from "./admin-csv";
 import {
+  DEFAULT_RESTRICTION_DRAFT,
+  type AdminConsoleState,
+  type AdminSection,
+  type UserRestrictionDraft
+} from "./admin-console-state";
+import {
+  type AdminAuditAction,
+  type AdminAuditActionFilter,
   type AdminDashboardPeriod,
   type AdminPeriodSetting,
   type AdminReservation,
   type AdminReservationStatusFilter,
   type AdminReservationStudyPeriodFilter,
+  type AdminStatistics,
   type AdminUser,
   type AdminUserDetail,
   type AdminUserStatusFilter,
   type StudyPeriod
 } from "./admin-types";
 
-type UserRestrictionDraft = {
-  readonly days: string;
-  readonly reason: string;
-  readonly status: "BANNED" | "RESTRICTED";
-};
+export type { AdminSection } from "./admin-console-state";
 
-export type AdminSection = "dashboard" | "reservations" | "settings" | "students";
-
-const DEFAULT_RESTRICTION_DRAFT = {
-  days: "7",
-  reason: "정보실 예약 제한",
-  status: "RESTRICTED"
-} satisfies UserRestrictionDraft;
-
-export function useAdminConsole(): {
-  readonly activeSection: AdminSection;
-  readonly applyRestriction: (userId: string) => Promise<void>;
-  readonly applyRestrictionPreset: (userId: string, days: number) => Promise<void>;
-  readonly banUser: (userId: string) => Promise<void>;
-  readonly cancelReservation: (reservationId: string) => Promise<void>;
-  readonly clearSelectedUser: () => void;
-  readonly copyReservationsCsv: () => Promise<void>;
-  readonly dashboardPeriods: readonly AdminDashboardPeriod[];
-  readonly date: string;
-  readonly markNoShow: (reservationId: string) => Promise<void>;
-  readonly periods: readonly AdminPeriodSetting[];
-  readonly refresh: () => Promise<void>;
-  readonly removeRestriction: (userId: string) => Promise<void>;
-  readonly reservationPeriodFilter: AdminReservationStudyPeriodFilter;
-  readonly reservationQuery: string;
-  readonly reservations: readonly AdminReservation[];
-  readonly restrictionDrafts: Readonly<Record<string, UserRestrictionDraft>>;
-  readonly saveSettings: () => Promise<void>;
-  readonly selectedUserDetail: AdminUserDetail | null;
-  readonly selectedUserId: string | null;
-  readonly selectStatus: (status: AdminReservationStatusFilter) => void;
-  readonly sendNotification: (period: AdminDashboardPeriod, force: boolean) => Promise<void>;
-  readonly setActiveSection: (section: AdminSection) => void;
-  readonly setDate: (date: string) => void;
-  readonly setReservationPeriodFilter: (period: AdminReservationStudyPeriodFilter) => void;
-  readonly setReservationQuery: (query: string) => void;
-  readonly setRestrictionDraft: (userId: string, patch: Partial<UserRestrictionDraft>) => void;
-  readonly setUserQuery: (query: string) => void;
-  readonly setUserStatusFilter: (status: AdminUserStatusFilter) => void;
-  readonly statusFilter: AdminReservationStatusFilter;
-  readonly toast: string | null;
-  readonly updatePeriod: (studyPeriod: StudyPeriod, patch: Partial<AdminPeriodSetting>) => void;
-  readonly userQuery: string;
-  readonly userStatusFilter: AdminUserStatusFilter;
-  readonly users: readonly AdminUser[];
-  readonly viewUser: (userId: string) => Promise<void>;
-} {
+export function useAdminConsole(): AdminConsoleState {
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [date, setDate] = useState(todayKst());
   const [periods, setPeriods] = useState<readonly AdminPeriodSetting[]>([]);
   const [dashboardPeriods, setDashboardPeriods] = useState<readonly AdminDashboardPeriod[]>([]);
   const [reservations, setReservations] = useState<readonly AdminReservation[]>([]);
+  const [statistics, setStatistics] = useState<AdminStatistics | null>(null);
   const [users, setUsers] = useState<readonly AdminUser[]>([]);
+  const [auditActions, setAuditActions] = useState<readonly AdminAuditAction[]>([]);
+  const [auditActionFilter, setAuditActionFilter] = useState<AdminAuditActionFilter>("ALL");
+  const [auditQuery, setAuditQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<AdminReservationStatusFilter>("CONFIRMED");
   const [reservationPeriodFilter, setReservationPeriodFilter] = useState<AdminReservationStudyPeriodFilter>("ALL");
   const [reservationQuery, setReservationQuery] = useState("");
@@ -106,7 +74,17 @@ export function useAdminConsole(): {
 
   useEffect(() => {
     void refresh();
-  }, [date, reservationPeriodFilter, reservationQuery, statusFilter, userQuery, userStatusFilter]);
+  }, [
+    activeSection,
+    auditActionFilter,
+    auditQuery,
+    date,
+    reservationPeriodFilter,
+    reservationQuery,
+    statusFilter,
+    userQuery,
+    userStatusFilter
+  ]);
 
   useEffect(() => {
     if (selectedUserId) {
@@ -116,11 +94,15 @@ export function useAdminConsole(): {
 
   async function refresh(): Promise<void> {
     const settingsPayload = await fetchAdminSettings(date);
-    if (settingsPayload === "unauthorized") {
+    if (settingsPayload.kind === "unauthorized") {
       setToast("관리자 로그인이 필요합니다.");
       return;
     }
-    const [dashboardPayload, reservationsPayload, usersPayload] = await Promise.all([
+    if (settingsPayload.kind === "error") {
+      setToast(settingsPayload.message);
+      return;
+    }
+    const [dashboardPayload, reservationsPayload, statisticsPayload, usersPayload, auditPayload] = await Promise.all([
       fetchAdminDashboard(date),
       fetchAdminReservations({
         date,
@@ -128,12 +110,27 @@ export function useAdminConsole(): {
         status: statusFilter,
         studyPeriod: reservationPeriodFilter
       }),
-      fetchAdminUsers({ query: userQuery, status: userStatusFilter })
+      fetchAdminStatistics({ from: date, to: date }),
+      fetchAdminUsers({ query: userQuery, status: userStatusFilter }),
+      fetchAdminAuditActions({ action: auditActionFilter, query: auditQuery })
     ]);
-    setPeriods(settingsPayload);
-    setDashboardPeriods(dashboardPayload);
-    setReservations(reservationsPayload);
-    setUsers(usersPayload);
+    const readError = firstAdminReadError([
+      dashboardPayload,
+      reservationsPayload,
+      statisticsPayload,
+      usersPayload,
+      auditPayload
+    ]);
+    if (readError) {
+      setToast(readError);
+      return;
+    }
+    setPeriods(settingsPayload.data);
+    setDashboardPeriods(dashboardPayload.kind === "ok" ? dashboardPayload.data : []);
+    setReservations(reservationsPayload.kind === "ok" ? reservationsPayload.data : []);
+    setStatistics(statisticsPayload.kind === "ok" ? statisticsPayload.data : null);
+    setUsers(usersPayload.kind === "ok" ? usersPayload.data : []);
+    setAuditActions(auditPayload.kind === "ok" ? auditPayload.data : []);
     if (selectedUserId) {
       await refreshSelectedUser(selectedUserId);
     }
@@ -171,33 +168,18 @@ export function useAdminConsole(): {
 
   async function applyRestriction(userId: string): Promise<void> {
     const draft = restrictionDrafts[userId] ?? DEFAULT_RESTRICTION_DRAFT;
+    const reason = draft.reason.trim();
+    if (!reason) {
+      setToast("제재 사유를 입력하세요.");
+      return;
+    }
     const parsedDays = Number.parseInt(draft.days, 10);
     const ok = await applyUserRestriction(userId, {
       days: draft.status === "RESTRICTED" ? Math.max(parsedDays || 7, 1) : null,
-      reason: draft.reason,
+      reason,
       status: draft.status
     });
     setToast(ok ? "예약 제한을 적용했습니다." : "예약 제한 적용 실패");
-    await refresh();
-  }
-
-  async function applyRestrictionPreset(userId: string, days: number): Promise<void> {
-    const ok = await applyUserRestriction(userId, {
-      days,
-      reason: "정보실 예약 제한",
-      status: "RESTRICTED"
-    });
-    setToast(ok ? `${days}일 예약 제한을 적용했습니다.` : "예약 제한 적용 실패");
-    await refresh();
-  }
-
-  async function banUser(userId: string): Promise<void> {
-    const ok = await applyUserRestriction(userId, {
-      days: null,
-      reason: "정보실 예약 영구 차단",
-      status: "BANNED"
-    });
-    setToast(ok ? "학생을 영구 차단했습니다." : "영구 차단 실패");
     await refresh();
   }
 
@@ -224,7 +206,12 @@ export function useAdminConsole(): {
   }
 
   async function refreshSelectedUser(userId: string): Promise<void> {
-    setSelectedUserDetail(await fetchAdminUserDetail(userId));
+    const result = await fetchAdminUserDetail(userId);
+    if (result.kind === "ok") {
+      setSelectedUserDetail(result.data);
+      return;
+    }
+    setToast(result.kind === "unauthorized" ? "관리자 로그인이 필요합니다." : result.message);
   }
 
   async function copyReservationsCsv(): Promise<void> {
@@ -241,9 +228,10 @@ export function useAdminConsole(): {
 
   return {
     activeSection,
+    auditActionFilter,
+    auditActions,
+    auditQuery,
     applyRestriction,
-    applyRestrictionPreset,
-    banUser,
     cancelReservation,
     clearSelectedUser,
     copyReservationsCsv,
@@ -263,6 +251,8 @@ export function useAdminConsole(): {
     selectStatus,
     sendNotification,
     setActiveSection,
+    setAuditActionFilter,
+    setAuditQuery,
     setDate,
     setReservationPeriodFilter,
     setReservationQuery,
@@ -270,6 +260,7 @@ export function useAdminConsole(): {
     setUserQuery,
     setUserStatusFilter,
     statusFilter,
+    statistics,
     toast,
     updatePeriod,
     userQuery,
@@ -279,11 +270,14 @@ export function useAdminConsole(): {
   };
 }
 
-function todayKst(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "Asia/Seoul",
-    year: "numeric"
-  }).format(new Date());
+function firstAdminReadError(results: readonly AdminReadResult<unknown>[]): string | null {
+  for (const result of results) {
+    if (result.kind === "unauthorized") {
+      return "관리자 로그인이 필요합니다.";
+    }
+    if (result.kind === "error") {
+      return result.message;
+    }
+  }
+  return null;
 }

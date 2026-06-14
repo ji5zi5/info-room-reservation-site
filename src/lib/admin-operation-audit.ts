@@ -1,0 +1,81 @@
+import { STUDY_PERIODS, type StudyPeriod } from "./study-periods";
+
+export type PeriodSettingsAuditRow = {
+  readonly capacity: number;
+  readonly closeTime: string;
+  readonly enabled: boolean;
+  readonly openTime: string;
+  readonly studyPeriod: string;
+};
+
+export type AdminOperationActionData = {
+  readonly action: "CLOSED_LIST_NOTIFICATION_SEND" | "PERIOD_SETTINGS_PATCH";
+  readonly actorId: string;
+  readonly after: string;
+  readonly before: string | null;
+  readonly ipHash: string;
+  readonly reason: string;
+};
+
+type ClosedListNotificationAuditResult = {
+  readonly delivery: {
+    readonly lastError?: string | null;
+    readonly messageIds?: readonly string[];
+    readonly status: "FAILED" | "SENT";
+  };
+  readonly kind: "failed" | "sent";
+};
+
+export function buildPeriodSettingsPatchAdminAction(input: {
+  readonly actorId: string;
+  readonly after: readonly PeriodSettingsAuditRow[];
+  readonly before: readonly PeriodSettingsAuditRow[];
+  readonly date: string;
+  readonly ipHash: string;
+}): AdminOperationActionData {
+  return {
+    action: "PERIOD_SETTINGS_PATCH",
+    actorId: input.actorId,
+    after: JSON.stringify({ date: input.date, periods: summarizePeriodSettingsForAudit(input.after) }),
+    before: JSON.stringify({ date: input.date, periods: summarizePeriodSettingsForAudit(input.before) }),
+    ipHash: input.ipHash,
+    reason: "시간대 설정 변경"
+  };
+}
+
+export function buildClosedListNotificationAdminAction(input: {
+  readonly actorId: string;
+  readonly date: string;
+  readonly force: boolean;
+  readonly ipHash: string;
+  readonly result: ClosedListNotificationAuditResult;
+  readonly studyPeriod: StudyPeriod;
+}): AdminOperationActionData {
+  return {
+    action: "CLOSED_LIST_NOTIFICATION_SEND",
+    actorId: input.actorId,
+    after: JSON.stringify({
+      date: input.date,
+      force: input.force,
+      kind: input.result.kind,
+      lastError: input.result.delivery.lastError ?? null,
+      messageIds: input.result.delivery.messageIds ?? [],
+      status: input.result.delivery.status,
+      studyPeriod: input.studyPeriod
+    }),
+    before: null,
+    ipHash: input.ipHash,
+    reason: input.force ? "마감 명단 재전송" : "마감 명단 수동 전송"
+  };
+}
+
+export function summarizePeriodSettingsForAudit(
+  settings: readonly PeriodSettingsAuditRow[]
+): readonly PeriodSettingsAuditRow[] {
+  return [...settings].sort((left, right) => periodRank(left.studyPeriod) - periodRank(right.studyPeriod));
+}
+
+function periodRank(studyPeriod: string): number {
+  const index = STUDY_PERIODS.findIndex((period) => period === studyPeriod);
+  return index === -1 ? STUDY_PERIODS.length : index;
+}

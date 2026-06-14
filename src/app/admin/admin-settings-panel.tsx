@@ -1,43 +1,21 @@
 "use client";
 
-import { CalendarClock, LogOut, Save } from "lucide-react";
+import { Save } from "lucide-react";
 
 import type { AdminPeriodSetting, StudyPeriod } from "./admin-types";
 
 export function AdminSettingsPanel({
-  date,
-  onLogout,
-  onDateChange,
   onSave,
   onUpdatePeriod,
   periods
 }: {
-  readonly date: string;
-  readonly onLogout: () => void;
-  readonly onDateChange: (date: string) => void;
   readonly onSave: () => void;
   readonly onUpdatePeriod: (studyPeriod: StudyPeriod, patch: Partial<AdminPeriodSetting>) => void;
   readonly periods: readonly AdminPeriodSetting[];
 }): React.ReactElement {
   return (
     <section className="admin-panel stack">
-      <div className="brand-row">
-        <span className="brand-mark">
-          <CalendarClock size={22} />
-        </span>
-        <button className="ghost-button" type="button" onClick={onLogout}>
-          <LogOut size={18} />
-          로그아웃
-        </button>
-      </div>
-      <div>
-        <h1>관리자</h1>
-        <p className="muted">시간 설정 · 운영 현황 · 학생 관리</p>
-      </div>
-      <label className="field">
-        <span>예약 날짜</span>
-        <input type="date" value={date} onChange={(event) => onDateChange(event.currentTarget.value)} />
-      </label>
+      <h2>시간 설정</h2>
       <div className="stack">
         {periods.map((period) => (
           <div className="period-card" key={period.studyPeriod}>

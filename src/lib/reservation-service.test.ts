@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { createMemoryReservationStore, reserveStudyPeriod } from "./reservation-service";
+import {
+  buildNoShowBan,
+  buildStudentCancellationRestriction,
+  createMemoryReservationStore,
+  reserveStudyPeriod
+} from "./reservation-service";
 
 describe("reservation service", () => {
   it("confirms only 10 concurrent reservations for one study period", async () => {
@@ -137,5 +142,27 @@ describe("reservation service", () => {
         userId: "user-1"
       })
     ).resolves.toMatchObject({ kind: "error", reason: "advance_unavailable" });
+  });
+
+  it("builds a three day restriction for student self cancellation", () => {
+    const now = new Date("2026-06-12T13:30:00+09:00");
+
+    const restriction = buildStudentCancellationRestriction(now);
+
+    expect(restriction).toMatchObject({
+      bookingStatus: "RESTRICTED",
+      restrictionReason: "예약 취소"
+    });
+    expect(restriction.restrictedUntil?.toISOString()).toBe("2026-06-15T04:30:00.000Z");
+  });
+
+  it("builds a permanent ban for no-show processing", () => {
+    const restriction = buildNoShowBan("정보실 예약 노쇼");
+
+    expect(restriction).toEqual({
+      bookingStatus: "BANNED",
+      restrictedUntil: null,
+      restrictionReason: "정보실 예약 노쇼"
+    });
   });
 });
