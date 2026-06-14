@@ -5,7 +5,8 @@ import { z } from "zod";
 const LoginJsonSchema = z
   .object({
     code: z.union([z.string(), z.number()]).optional(),
-    token: z.string().optional()
+    msg: z.string().optional(),
+    token: z.string().nullable().optional()
   })
   .passthrough();
 
@@ -54,10 +55,10 @@ export function interpretLoginJson(input: unknown): RiroAuthResult | { readonly 
   }
 
   const code = parsed.data.code === undefined ? "" : String(parsed.data.code);
-  if (code === "902") {
+  if (code === "400" || code === "902") {
     return {
       kind: "error",
-      message: "아이디 또는 비밀번호가 틀렸습니다.",
+      message: parsed.data.msg ?? "아이디 또는 비밀번호가 틀렸습니다.",
       reason: "invalid_credentials"
     };
   }

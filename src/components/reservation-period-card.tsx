@@ -20,6 +20,7 @@ export type PeriodSummary = {
   readonly openTime: string;
   readonly remaining: number;
   readonly studyPeriod: "EIGHTH" | "FIRST";
+  readonly windowState: "closed" | "not_open_yet" | "open";
 };
 
 type ReservationPeriodCardProps = {
@@ -39,6 +40,17 @@ export function ReservationPeriodCard({
 }: ReservationPeriodCardProps): ReactElement {
   const currentReservationId = period.myReservationId;
   const reserved = currentReservationId !== null;
+  const reserveDisabled =
+    reserved || !userReady || loading || period.remaining <= 0 || !period.enabled || period.windowState !== "open";
+  const reserveButtonLabel = reserved
+    ? "예약됨"
+    : !period.enabled
+      ? "비활성"
+      : period.windowState === "closed" || period.remaining <= 0
+        ? "마감"
+        : period.windowState === "not_open_yet"
+          ? "대기"
+          : `${period.label} 예약`;
 
   return (
     <article className="period-card">
@@ -50,7 +62,7 @@ export function ReservationPeriodCard({
             <p className="muted">{period.closeTime} 마감 · 남은 자리 {period.remaining}/{period.capacity}</p>
           </div>
         </div>
-        <Check color={period.remaining > 0 ? "#3E6AE1" : "#5C5E62"} />
+        <Check color={period.enabled && period.remaining > 0 && period.windowState === "open" ? "#3E6AE1" : "#5C5E62"} />
       </div>
       <div className="meter">
         <span style={{ width: `${Math.round((period.confirmedCount / period.capacity) * 100)}%` }} />
@@ -59,11 +71,11 @@ export function ReservationPeriodCard({
       <div className="period-actions">
         <button
           className="period-button"
-          disabled={reserved || !userReady || loading || period.remaining <= 0 || !period.enabled}
+          disabled={reserveDisabled}
           type="button"
           onClick={() => onReserve(period.studyPeriod)}
         >
-          {reserved ? "예약됨" : period.remaining <= 0 ? "마감" : `${period.label} 예약`}
+          {reserveButtonLabel}
         </button>
         {currentReservationId ? (
           <button

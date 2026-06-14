@@ -1,4 +1,8 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+import { todayKst } from "./kst-date";
+import { csrfRequest } from "./playwright-csrf";
+import { visibleBox, visiblePosition } from "./playwright-layout";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
@@ -19,21 +23,33 @@ type ReservationCreateResponse = {
 };
 
 async function login(page: Page, loginId = `date-first-${Date.now()}`): Promise<void> {
+  if (loginId === "admin") {
+    await loginWithApi(page, loginId);
+    await page.goto(BASE_URL, { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
+    return;
+  }
+  await loginWithForm(page, loginId);
+  await page.locator(".period-card .period-badge").first().waitFor();
+}
+
+async function loginWithForm(page: Page, loginId: string): Promise<void> {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
-  if (loginId === "admin") {
-    await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
-    return;
-  }
-  await page.locator(".period-card .period-badge").first().waitFor();
+}
+
+async function loginWithApi(page: Page, loginId: string): Promise<void> {
+  const response = await page.request.post(`${BASE_URL}/api/auth/riro/login`, {
+    data: { id: loginId, password: "password" },
+    headers: { "x-forwarded-for": `203.0.113.${Math.floor(Math.random() * 200) + 1}` }
+  });
+  expect(response.ok()).toBeTruthy();
 }
 
 async function logout(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-  });
+  await csrfRequest(page, "/api/auth/logout", { method: "POST" });
 }
 
 async function fetchPeriodSettings(page: Page, date: string): Promise<readonly AdminPeriodSetting[]> {
@@ -49,19 +65,22 @@ async function patchPeriodSettings(
   date: string,
   periods: readonly AdminPeriodSetting[]
 ): Promise<void> {
-  await page.evaluate(
-    async ({ targetDate, nextPeriods }) => {
-      const response = await fetch("/api/admin/period-settings", {
-        body: JSON.stringify({ date: targetDate, periods: nextPeriods }),
-        headers: { "content-type": "application/json" },
-        method: "PATCH"
-      });
-      if (!response.ok) {
-        throw new Error("period settings patch failed");
-      }
+  const response = await csrfRequest(page, "/api/admin/period-settings", {
+    json: {
+      date,
+      periods: periods.map((period) => ({
+        capacity: period.capacity,
+        closeTime: period.closeTime,
+        enabled: period.enabled,
+        openTime: period.openTime,
+        studyPeriod: period.studyPeriod
+      }))
     },
-    { nextPeriods: periods, targetDate: date }
-  );
+    method: "PATCH"
+  });
+  if (!response.ok()) {
+    throw new Error("period settings patch failed");
+  }
 }
 
 async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
@@ -79,31 +98,6 @@ async function mockClientDate(page: Page, fixedIso: string): Promise<void> {
     }
     globalThis.Date = MockDate as DateConstructor;
   }, fixedIso);
-}
-
-async function visibleBox(locator: Locator, label: string): Promise<{ readonly height: number; readonly width: number }> {
-  const box = await locator.boundingBox();
-  if (!box) {
-    throw new Error(`${label} should be visible`);
-  }
-  return { height: box.height, width: box.width };
-}
-
-async function visiblePosition(locator: Locator, label: string): Promise<{ readonly x: number; readonly y: number }> {
-  const box = await locator.boundingBox();
-  if (!box) {
-    throw new Error(`${label} should be visible`);
-  }
-  return { x: box.x, y: box.y };
-}
-
-function todayKst(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "Asia/Seoul",
-    year: "numeric"
-  }).format(new Date());
 }
 
 test("advance reservation shows date picker before period cards", async ({ page }) => {
@@ -224,6 +218,8 @@ test("period cards show confirmed applicants", async ({ page }) => {
       (response) => response.url().endsWith("/api/reservations") && response.request().method() === "POST"
     );
     await eighthCard.getByRole("button", { name: "8면학 예약" }).click();
+    await expect(page.getByRole("dialog", { name: "8면학 예약할까요?" })).toBeVisible();
+    await page.getByRole("button", { name: "예약 확정" }).click();
 
     const reservationResponse = await reservationResponsePromise;
     const payload = (await reservationResponse.json()) as ReservationCreateResponse;
@@ -245,9 +241,7 @@ test("period cards show confirmed applicants", async ({ page }) => {
     await expect(eighthCard.getByText(studentNumber)).toBeHidden();
   } finally {
     if (reservationId) {
-      await page.evaluate(async (id) => {
-        await fetch(`/api/reservations/${id}`, { method: "DELETE" });
-      }, reservationId);
+      await csrfRequest(page, `/api/reservations/${reservationId}`, { method: "DELETE" });
     }
     await logout(page);
     await login(page, "admin");
@@ -280,7 +274,7 @@ test("applicant toggle preserves period order and tab dimensions", async ({ page
 });
 
 test("admin users see the operations console after normal login", async ({ page }) => {
-  await login(page, "admin");
+  await loginWithForm(page, "admin");
 
   await expect(page).toHaveURL(new RegExp(`^${BASE_URL.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}/?$`, "u"));
   await expect(page.getByRole("heading", { name: "운영 대시보드" })).toBeVisible();
@@ -292,10 +286,11 @@ test("admin users see the operations console after normal login", async ({ page 
 
 test("advance reservation is unavailable on Friday", async ({ page }) => {
   await mockClientDate(page, "2026-06-12T09:00:00+09:00");
-  await login(page);
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "사전예약" }).click();
 
   await expect(page.getByRole("heading", { name: "사전예약 불가" })).toBeVisible();
+  await expect(page.getByText("금요일 이후에는 이번 주 사전예약이 마감됩니다.")).toBeVisible();
   await expect(page.getByLabel("사전예약 날짜")).toHaveCount(0);
   await expect(page.locator(".period-card")).toHaveCount(0);
 });

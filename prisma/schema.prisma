@@ -22,6 +22,11 @@ model User {
   reservations      Reservation[]
   auditLogs         AuditLog[]
   sessions          Session[]
+  sanctions         UserSanction[] @relation("SanctionTarget")
+  sanctionsAuthored UserSanction[] @relation("SanctionActor")
+  sanctionsRevoked  UserSanction[] @relation("SanctionRevoker")
+  adminActionsAuthored AdminAction[] @relation("AdminActionActor")
+  adminActionsTargeted AdminAction[] @relation("AdminActionTarget")
 }
 
 model Session {
@@ -31,6 +36,18 @@ model Session {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+  csrfTokens CsrfToken[]
+}
+
+model CsrfToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, expiresAt])
 }
 
 model PeriodSetting {
@@ -64,6 +81,17 @@ model NotificationDelivery {
   @@index([date, status])
 }
 
+model RateLimitBucket {
+  key         String   @id
+  windowStart DateTime
+  count       Int      @default(0)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
 model Reservation {
   id          String   @id @default(cuid())
   date        String
@@ -73,9 +101,55 @@ model Reservation {
   user        User     @relation(fields: [userId], references: [id])
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  adminActions AdminAction[]
 
   @@unique([userId, date, studyPeriod])
   @@index([date, studyPeriod, status])
+}
+
+model AdminAction {
+  id           String      @id @default(cuid())
+  actorId      String?
+  actor        User?       @relation("AdminActionActor", fields: [actorId], references: [id])
+  targetUserId String?
+  targetUser   User?       @relation("AdminActionTarget", fields: [targetUserId], references: [id])
+  reservationId String?
+  reservation  Reservation? @relation(fields: [reservationId], references: [id])
+  action       String
+  reason       String?
+  before       String?
+  after        String?
+  ipHash       String?
+  createdAt    DateTime    @default(now())
+  sanctions    UserSanction[]
+
+  @@index([actorId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([action, createdAt])
+}
+
+model UserSanction {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation("SanctionTarget", fields: [userId], references: [id])
+  actorId        String?
+  actor          User?        @relation("SanctionActor", fields: [actorId], references: [id])
+  sourceActionId String?
+  sourceAction   AdminAction? @relation(fields: [sourceActionId], references: [id])
+  type           String
+  status         String       @default("ACTIVE")
+  reason         String
+  startsAt       DateTime     @default(now())
+  endsAt         DateTime?
+  revokedAt      DateTime?
+  revokedById    String?
+  revokedBy      User?        @relation("SanctionRevoker", fields: [revokedById], references: [id])
+  revokedReason  String?
+  createdAt      DateTime     @default(now())
+
+  @@index([userId, status, createdAt])
+  @@index([actorId, createdAt])
+  @@index([type, status])
 }
 
 model AuditLog {

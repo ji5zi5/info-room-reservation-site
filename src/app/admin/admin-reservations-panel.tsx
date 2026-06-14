@@ -55,7 +55,6 @@ export function AdminReservationsPanel({
       <div className="topbar">
         <div>
           <h2>예약자 목록</h2>
-          <p className="muted">검색 · 노쇼 · 관리자 취소 · 명단 복사</p>
         </div>
         <div className="admin-action-row">
           <button className="ghost-button" type="button" onClick={onCopyCsv}>

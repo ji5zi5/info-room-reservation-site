@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { getPeriodWindowState, type PeriodWindowState } from "./period-window";
 import { DEFAULT_PERIOD_CAPACITY, STUDY_PERIODS, getStudyPeriodLabel, parseStudyPeriod, type StudyPeriod } from "./study-periods";
 
 export const DEFAULT_PERIOD_OPEN_TIME = "13:00";
@@ -16,6 +17,7 @@ export type PeriodSummary = {
   readonly openTime: string;
   readonly remaining: number;
   readonly studyPeriod: StudyPeriod;
+  readonly windowState: PeriodWindowState;
 };
 
 export type PeriodApplicant = {
@@ -38,6 +40,7 @@ type PeriodReservationOwner = {
 type PeriodSummaryOptions = {
   readonly currentUserId?: string;
   readonly includeApplicants?: boolean;
+  readonly now?: Date;
 };
 
 export async function getPeriodSummaries(
@@ -46,6 +49,7 @@ export async function getPeriodSummaries(
 ): Promise<readonly PeriodSummary[]> {
   await ensurePeriodSettings(date);
   const settings = await prisma.periodSetting.findMany({ where: { date } });
+  const now = options.now ?? new Date();
   const counts = await prisma.reservation.groupBy({
     by: ["studyPeriod"],
     where: { date, status: "CONFIRMED" },
@@ -71,7 +75,8 @@ export async function getPeriodSummaries(
       myReservationId: findMyReservationId(studyPeriod, applicants, options.currentUserId),
       openTime: setting.openTime,
       remaining: Math.max(setting.capacity - count, 0),
-      studyPeriod
+      studyPeriod,
+      windowState: getPeriodWindowState(setting, now)
     };
   });
 }

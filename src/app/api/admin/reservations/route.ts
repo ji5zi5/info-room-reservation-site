@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
+import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
+import { getMockAdminReservations } from "@/lib/mock-reservation-data";
 import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 import {
   filterAdminReservations,
@@ -21,6 +23,11 @@ export async function GET(request: Request): Promise<NextResponse> {
     const status = parseAdminReservationStatus(url.searchParams.get("status"));
     const studyPeriod = parseAdminReservationStudyPeriod(url.searchParams.get("studyPeriod"));
     const userId = url.searchParams.get("userId");
+    if (isNoDatabaseMockMode()) {
+      return NextResponse.json({
+        reservations: getMockAdminReservations({ date, filters: { query, studyPeriod, userId }, status })
+      });
+    }
     const reservations = await prisma.reservation.findMany({
       include: { user: true },
       where: { date }
