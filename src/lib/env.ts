@@ -13,6 +13,10 @@ const ServerEnvSchema = z.object({
   DIRECT_URL: z.string().optional(),
   DISCORD_WEBHOOK_URL: z.union([z.string().url(), z.literal("")]).optional(),
   ENABLE_LOCAL_ADMIN: BooleanFlagSchema,
+  ENABLE_LOCAL_STUDENT: BooleanFlagSchema,
+  LOCAL_STUDENT_LOGIN_ID: z.string().optional(),
+  LOCAL_STUDENT_LOGIN_PASSWORD: z.string().optional(),
+  LOCAL_STUDENT_NUMBER: z.string().optional(),
   NODE_ENV: z.string().optional(),
   RIRO_MOCK_LOGIN: BooleanFlagSchema,
   SESSION_SECRET: z.string().optional(),
@@ -28,6 +32,10 @@ export type ServerEnv = {
   readonly directUrl: string | null;
   readonly discordWebhookUrl: string | null;
   readonly enableLocalAdmin: boolean;
+  readonly enableLocalStudent: boolean;
+  readonly localStudentLoginId: string | null;
+  readonly localStudentLoginPassword: string | null;
+  readonly localStudentNumber: string | null;
   readonly nodeEnv: string;
   readonly riroMockLogin: boolean;
   readonly sessionSecret: string | null;
@@ -49,6 +57,10 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
     directUrl: normalizeOptional(parsed.data.DIRECT_URL),
     discordWebhookUrl: normalizeOptional(parsed.data.DISCORD_WEBHOOK_URL),
     enableLocalAdmin: parsed.data.ENABLE_LOCAL_ADMIN === "true",
+    enableLocalStudent: parsed.data.ENABLE_LOCAL_STUDENT === "true",
+    localStudentLoginId: normalizeOptional(parsed.data.LOCAL_STUDENT_LOGIN_ID),
+    localStudentLoginPassword: normalizeOptional(raw.LOCAL_STUDENT_LOGIN_PASSWORD),
+    localStudentNumber: normalizeOptional(parsed.data.LOCAL_STUDENT_NUMBER),
     nodeEnv: parsed.data.NODE_ENV ?? "development",
     riroMockLogin: parsed.data.RIRO_MOCK_LOGIN === "true",
     sessionSecret: normalizeOptional(parsed.data.SESSION_SECRET),
@@ -76,6 +88,9 @@ export function assertProductionEnvSafe(raw: ServerEnvInput = process.env): void
   if (env.enableLocalAdmin && env.adminLoginPassword !== null && env.adminLoginPassword.length < 12) {
     throw new ServerEnvError(["ADMIN_LOGIN_PASSWORD"]);
   }
+  if (env.enableLocalStudent && env.localStudentLoginPassword !== null && env.localStudentLoginPassword.length < 12) {
+    throw new ServerEnvError(["LOCAL_STUDENT_LOGIN_PASSWORD"]);
+  }
 }
 
 export function isMockLoginEnabled(raw: ServerEnvInput = process.env): boolean {
@@ -87,6 +102,11 @@ export function isMockLoginEnabled(raw: ServerEnvInput = process.env): boolean {
 export function isLocalAdminLoginEnabled(raw: ServerEnvInput = process.env): boolean {
   assertProductionEnvSafe(raw);
   return parseServerEnv(raw).enableLocalAdmin;
+}
+
+export function isLocalStudentLoginEnabled(raw: ServerEnvInput = process.env): boolean {
+  assertProductionEnvSafe(raw);
+  return parseServerEnv(raw).enableLocalStudent;
 }
 
 export function shouldTrustForwardedIpHeaders(raw: ServerEnvInput = process.env): boolean {

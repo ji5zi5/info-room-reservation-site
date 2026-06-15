@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertProductionEnvSafe,
   isLocalAdminLoginEnabled,
+  isLocalStudentLoginEnabled,
   isMockLoginEnabled,
   parseServerEnv,
   shouldTrustForwardedIpHeaders
@@ -60,6 +61,17 @@ describe("server environment guards", () => {
   it("does not enable the local admin account through mock login", () => {
     expect(isLocalAdminLoginEnabled({ ENABLE_LOCAL_ADMIN: "false", RIRO_MOCK_LOGIN: "true" })).toBe(false);
     expect(isLocalAdminLoginEnabled({ ENABLE_LOCAL_ADMIN: "true", RIRO_MOCK_LOGIN: "false" })).toBe(true);
+  });
+
+  it("does not enable the local student account through mock login", () => {
+    expect(isLocalStudentLoginEnabled({ ENABLE_LOCAL_STUDENT: "false", RIRO_MOCK_LOGIN: "true" })).toBe(false);
+    expect(isLocalStudentLoginEnabled({ ENABLE_LOCAL_STUDENT: "true", RIRO_MOCK_LOGIN: "false" })).toBe(true);
+  });
+
+  it("rejects a weak local student password when student fallback is enabled", () => {
+    expect(() =>
+      assertProductionEnvSafe({ ENABLE_LOCAL_STUDENT: "true", LOCAL_STUDENT_LOGIN_PASSWORD: "short" })
+    ).toThrow("LOCAL_STUDENT_LOGIN_PASSWORD");
   });
 
   it("validates a configured Discord webhook URL", () => {

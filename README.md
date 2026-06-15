@@ -57,6 +57,7 @@ DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 TRUST_FORWARDED_IP_HEADERS="true"
 RIRO_MOCK_LOGIN="false"
 ENABLE_LOCAL_ADMIN="false"
+ENABLE_LOCAL_STUDENT="false"
 ```
 
 선택 로컬 설정:
@@ -64,6 +65,9 @@ ENABLE_LOCAL_ADMIN="false"
 ```env
 ADMIN_LOGIN_ID=""
 ADMIN_LOGIN_PASSWORD=""
+LOCAL_STUDENT_LOGIN_ID=""
+LOCAL_STUDENT_LOGIN_PASSWORD=""
+LOCAL_STUDENT_NUMBER=""
 ```
 
 전체 예시는 `.env.example`을 참고하세요. 실제 리로스쿨 계정, Discord webhook, 세션 비밀값은 커밋하지 않습니다.

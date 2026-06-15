@@ -17,6 +17,8 @@ Optional:
 
 - `ENABLE_LOCAL_ADMIN`: local fallback admin login. Keep `false` in production unless explicitly needed.
 - `ADMIN_LOGIN_ID`, `ADMIN_LOGIN_PASSWORD`: local admin credentials when fallback login is enabled.
+- `ENABLE_LOCAL_STUDENT`: local fallback student login. Keep `false` in production unless explicitly needed.
+- `LOCAL_STUDENT_LOGIN_ID`, `LOCAL_STUDENT_LOGIN_PASSWORD`, `LOCAL_STUDENT_NUMBER`: local student credentials and display number when fallback login is enabled.
 
 ## Vercel Build
 

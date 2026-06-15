@@ -122,6 +122,38 @@ describe("authenticateWithConfiguredMode", () => {
     });
   });
 
+  it("uses a configured local student account before real Riro auth", async () => {
+    const calls: string[] = [];
+    const result = await authenticateWithConfiguredMode(
+      { id: "site-student", password: "local-student-secret" },
+      {
+        localStudentAccount: {
+          id: "site-student",
+          password: "local-student-secret",
+          studentNumber: "91001"
+        },
+        localStudentEnabled: true,
+        mockLoginEnabled: false,
+        riroAuthenticator: async (input) => {
+          calls.push(`${input.id}:${input.password}`);
+          return successFromRealAuthenticator;
+        }
+      }
+    );
+
+    expect(calls).toEqual([]);
+    expect(result).toEqual({
+      kind: "success",
+      profile: {
+        generation: 0,
+        name: "일반 계정",
+        role: "STUDENT",
+        student: "로컬 학생 계정",
+        studentNumber: "91001"
+      }
+    });
+  });
+
   it("rejects a weak local admin password without calling real Riro auth", async () => {
     const calls: string[] = [];
     const result = await authenticateWithConfiguredMode(
