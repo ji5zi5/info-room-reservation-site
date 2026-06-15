@@ -48,8 +48,8 @@ The pooler host can be `aws-0`, `aws-1`, or another Supabase-assigned shard. Cop
 5. Open the site, log in with a real Riro account, and confirm `/api/me` returns the current user.
 6. Open `/admin`, confirm the dashboard loads, and test one reservation close-list resend.
 7. Confirm Vercel cron has both jobs:
-   - `/api/cron/closed-period-notifications`
-   - `/api/cron/maintenance`
+   - `/api/cron/closed-period-notifications` at `0 8 * * *` (17:00 KST)
+   - `/api/cron/maintenance` at `0 19 * * *` (04:00 KST)
 
 ## Cron Endpoints
 
@@ -60,6 +60,8 @@ Authorization: Bearer ${CRON_SECRET}
 ```
 
 `/api/cron/maintenance` removes expired sessions, expired CSRF tokens, expired rate-limit buckets, releases expired temporary reservation restrictions, and revokes expired temporary sanction rows.
+
+The checked-in cron schedules are Vercel Hobby-compatible daily jobs. For near-real-time closed-period Discord delivery, use a Vercel Pro plan with a more frequent schedule or trigger the manual resend action from the admin dashboard.
 
 ## External Integration Smoke Gate
 

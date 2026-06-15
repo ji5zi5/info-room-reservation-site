@@ -4,7 +4,7 @@
   "crons": [
     {
       "path": "/api/cron/closed-period-notifications",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/cron/maintenance",
