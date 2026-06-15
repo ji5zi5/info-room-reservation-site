@@ -12,7 +12,6 @@ import {
 import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
 import { ReservationActionDialog, type ReservationPendingAction } from "@/components/reservation-action-dialog";
 import { ReservationCalendar } from "@/components/reservation-calendar";
-import { ReservationToast } from "@/components/reservation-toast";
 import { ReservationWarningPanel } from "@/components/reservation-warning-panel";
 import { AdminConsole } from "./admin/admin-console";
 import { readApiErrorMessage, readCurrentUser, readLoginPayload, readPeriodSummaries } from "./client-api-response";
@@ -272,6 +271,7 @@ export function ReservationHomePage(): React.ReactElement {
           currentReservations={currentReservations}
           id={id}
           loading={loading}
+          message={toast}
           password={password}
           sidebarOpen={sidebarOpen}
           user={user}
@@ -350,7 +350,6 @@ export function ReservationHomePage(): React.ReactElement {
           )}
         </section>
       </div>
-      <ReservationToast message={toast} />
       <ReservationActionDialog
         action={pendingAction}
         loading={loading}

@@ -29,6 +29,7 @@ type ReservationSidebarProps = {
   readonly currentReservations: readonly StudentCurrentReservation[];
   readonly id: string;
   readonly loading: boolean;
+  readonly message: string | null;
   readonly onIdChange: (value: string) => void;
   readonly onLogin: () => void;
   readonly onLogout: () => void;
@@ -43,6 +44,7 @@ export function ReservationSidebar({
   currentReservations,
   id,
   loading,
+  message,
   onIdChange,
   onLogin,
   onLogout,
@@ -88,6 +90,7 @@ export function ReservationSidebar({
               <LogOut size={18} />
               로그아웃
             </button>
+            {message ? <p className="sidebar-message">{message}</p> : null}
             {user.role === "STUDENT" ? (
               <StudentReservationStatusPanel reservations={currentReservations} user={user} />
             ) : null}
@@ -113,6 +116,7 @@ export function ReservationSidebar({
               <Sparkles size={18} />
               {loading ? "확인 중" : "인증하기"}
             </button>
+            {message ? <p className="sidebar-message">{message}</p> : null}
           </form>
         )}
       </div>

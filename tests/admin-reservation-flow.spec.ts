@@ -143,14 +143,9 @@ test("reserved periods show a cancel action and refresh applicants after cancel"
     await expect(eighthCard.getByRole("button", { name: "예약 취소" })).toHaveCount(0);
     await eighthCard.getByRole("button", { name: "8면학 예약" }).click();
     await expect(page.getByRole("dialog", { name: "8면학 예약할까요?" })).toHaveCount(0);
-    const studentToast = page.locator(".student-toast").filter({ hasText: "예약 이용이 제한되었습니다." });
-    await expect(studentToast).toBeVisible();
-    await page.getByRole("button", { name: "왼쪽 패널 접기" }).click();
-    await expect(studentToast).toBeVisible();
-    const toastBox = await studentToast.boundingBox();
-    const viewport = page.viewportSize();
-    expect(toastBox?.y, "student toast should stay near the top edge").toBeLessThan(120);
-    expect(Math.abs((toastBox?.x ?? 0) + (toastBox?.width ?? 0) / 2 - (viewport?.width ?? 0) / 2)).toBeLessThan(80);
+    const sidebarMessage = page.locator(".login-panel .sidebar-message").filter({ hasText: "예약 이용이 제한되었습니다." });
+    await expect(sidebarMessage).toBeVisible();
+    await expect(page.locator(".student-toast")).toHaveCount(0);
   } finally {
     await logout(page);
     await login(page, "admin");
