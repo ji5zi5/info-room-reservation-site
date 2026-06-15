@@ -1,12 +1,13 @@
 "use client";
 
-import { CalendarDays } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { CalendarDays, LoaderCircle } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getAdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
 import { buildReservationCalendarDays } from "@/lib/reservation-calendar";
 import {
   collectStudentCurrentReservations,
+  formatKstTime,
   previewCancellationRestrictedUntil
 } from "@/lib/student-reservation-status";
 import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
@@ -21,7 +22,18 @@ import { ReservationSidebar, type ReservationSidebarUser } from "./reservation-s
 
 type Tab = "today" | "advance";
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
-const PERIOD_REFRESH_INTERVAL_MS = 20_000;
+type PeriodFetchResult =
+  | {
+      readonly date: string;
+      readonly kind: "ok";
+      readonly periods: readonly PeriodSummary[];
+    }
+  | {
+      readonly date: string;
+      readonly kind: "error";
+    };
+
+const PERIOD_REFRESH_INTERVAL_MS = 60_000;
 
 export function ReservationHomePage(): React.ReactElement {
   const [user, setUser] = useState<ReservationSidebarUser | null>(null);
@@ -36,9 +48,11 @@ export function ReservationHomePage(): React.ReactElement {
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [periodsRefreshing, setPeriodsRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<ReservationPendingAction | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const activePeriodRefreshesRef = useRef(0);
 
   const isAdmin = user?.role === "ADMIN";
   const advanceUnavailable = tab === "advance" && advancePolicy?.kind === "unavailable";
@@ -51,22 +65,45 @@ export function ReservationHomePage(): React.ReactElement {
     setUser(await readCurrentUser(response));
   }, []);
 
+  const beginPeriodRefresh = useCallback((): void => {
+    activePeriodRefreshesRef.current += 1;
+    setPeriodsRefreshing(true);
+  }, []);
+
+  const endPeriodRefresh = useCallback((): void => {
+    activePeriodRefreshesRef.current = Math.max(0, activePeriodRefreshesRef.current - 1);
+    if (activePeriodRefreshesRef.current === 0) {
+      setPeriodsRefreshing(false);
+    }
+  }, []);
+
   const refreshPeriodDates = useCallback(
     async (dates: readonly string[], currentTargetDate?: string): Promise<readonly PeriodSummary[]> => {
       const uniqueDates = [...new Set(dates.filter(Boolean))];
       if (uniqueDates.length === 0) {
         return [];
       }
-      const entries = await Promise.all(uniqueDates.map(fetchPeriodSummariesForDate));
-      const nextByDate = Object.fromEntries(entries);
-      setCalendarPeriodsByDate((current) => ({ ...current, ...nextByDate }));
-      if (currentTargetDate && Object.hasOwn(nextByDate, currentTargetDate)) {
-        setPeriods(nextByDate[currentTargetDate] ?? []);
+      beginPeriodRefresh();
+      try {
+        const entries = await Promise.all(uniqueDates.map(fetchPeriodSummariesForDate));
+        const successfulEntries = entries.filter(
+          (entry): entry is Extract<PeriodFetchResult, { readonly kind: "ok" }> => entry.kind === "ok"
+        );
+        if (successfulEntries.length > 0) {
+          const nextByDate = Object.fromEntries(successfulEntries.map((entry) => [entry.date, entry.periods] as const));
+          setCalendarPeriodsByDate((current) => ({ ...current, ...nextByDate }));
+          if (currentTargetDate && Object.hasOwn(nextByDate, currentTargetDate)) {
+            setPeriods(nextByDate[currentTargetDate] ?? []);
+          }
+          setLastRefreshedAt(new Date().toISOString());
+        }
+        const targetEntry = entries.find((entry) => entry.date === currentTargetDate);
+        return targetEntry?.kind === "ok" ? targetEntry.periods : [];
+      } finally {
+        endPeriodRefresh();
       }
-      setLastRefreshedAt(new Date().toISOString());
-      return currentTargetDate ? nextByDate[currentTargetDate] ?? [] : [];
     },
-    []
+    [beginPeriodRefresh, endPeriodRefresh]
   );
 
   const refreshPeriods = useCallback(
@@ -287,6 +324,20 @@ export function ReservationHomePage(): React.ReactElement {
             <div>
               <h2>예약 현황</h2>
               <p className="muted">{advancePolicy ? (advanceUnavailable ? "사전예약 불가" : targetDate) : "예약 날짜 확인 중"}</p>
+              {user && !advanceUnavailable ? (
+                <p className="refresh-status" data-refreshing={periodsRefreshing}>
+                  <span className="refresh-spinner" aria-hidden="true">
+                    <LoaderCircle size={14} />
+                  </span>
+                  <span>
+                    {periodsRefreshing
+                      ? "갱신 중"
+                      : lastRefreshedAt
+                        ? `마지막 갱신 ${formatKstTime(lastRefreshedAt)}`
+                        : "갱신 대기"}
+                  </span>
+                </p>
+              ) : null}
             </div>
             <CalendarDays color="#3E6AE1" />
           </div>
@@ -360,12 +411,15 @@ export function ReservationHomePage(): React.ReactElement {
   );
 }
 
-async function fetchPeriodSummariesForDate(date: string): Promise<readonly [string, readonly PeriodSummary[]]> {
+async function fetchPeriodSummariesForDate(date: string): Promise<PeriodFetchResult> {
   try {
     const response = await fetch(`/api/periods?date=${date}`);
-    return [date, await readPeriodSummaries(response)];
+    if (!response.ok) {
+      return { date, kind: "error" };
+    }
+    return { date, kind: "ok", periods: await readPeriodSummaries(response) };
   } catch {
-    return [date, []];
+    return { date, kind: "error" };
   }
 }
 

@@ -20,6 +20,51 @@ test("returning to the tab refreshes seat counts and updates the last refresh ti
   await expect(page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: "마감" })).toBeVisible();
 });
 
+test("background refresh shows progress without removing current period cards", async ({ page }) => {
+  let refreshGate: Promise<void> | null = null;
+  let releaseRefresh = (): void => {};
+  await mockPeriodRoutes(
+    page,
+    () => false,
+    () => false,
+    async () => {
+      if (refreshGate) {
+        await refreshGate;
+      }
+    }
+  );
+  await login(page, `refresh-progress-${Date.now()}`);
+
+  refreshGate = new Promise((resolve) => {
+    releaseRefresh = resolve;
+  });
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+
+  await expect(page.locator(".refresh-status")).toContainText("갱신 중");
+  await expect(page.locator(".period-card")).toHaveCount(2);
+  await expect(
+    page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: "8면학 예약" })
+  ).toBeVisible();
+
+  releaseRefresh();
+  refreshGate = null;
+  await expect(page.locator(".refresh-status")).not.toContainText("갱신 중");
+});
+
+test("failed background refresh keeps the last visible period status", async ({ page }) => {
+  let failRefresh = false;
+  await mockPeriodRoutes(page, () => false, () => failRefresh);
+  await login(page, `failed-refresh-${Date.now()}`);
+
+  failRefresh = true;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+
+  await expect(page.locator(".period-card")).toHaveCount(2);
+  await expect(
+    page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: "8면학 예약" })
+  ).toBeVisible();
+});
+
 test("reservation click rechecks the server before opening the confirmation dialog", async ({ page }) => {
   let full = false;
   await mockPeriodRoutes(page, () => full);
@@ -45,9 +90,23 @@ async function login(page: Page, loginId: string): Promise<void> {
   await page.locator(".period-card .period-badge").first().waitFor();
 }
 
-async function mockPeriodRoutes(page: Page, isFull: () => boolean): Promise<void> {
+async function mockPeriodRoutes(
+  page: Page,
+  isFull: () => boolean,
+  shouldFail: () => boolean = () => false,
+  beforeFulfill: () => Promise<void> = () => Promise.resolve()
+): Promise<void> {
   await page.route("**/api/periods**", async (route) => {
     const date = new URL(route.request().url()).searchParams.get("date") ?? FIXED_THURSDAY_DATE;
+    await beforeFulfill();
+    if (shouldFail()) {
+      await route.fulfill({
+        body: JSON.stringify({ error: { message: "refresh failed" } }),
+        contentType: "application/json",
+        status: 500
+      });
+      return;
+    }
     await route.fulfill({
       body: JSON.stringify({
         periods: [

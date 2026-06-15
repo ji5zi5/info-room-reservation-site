@@ -378,6 +378,32 @@
   padding: 20px;
 }
 
+.refresh-status {
+  align-items: center;
+  color: var(--pewter);
+  display: inline-flex;
+  font-size: 0.78rem;
+  gap: 6px;
+  line-height: 1.35;
+  margin: 5px 0 0;
+  min-height: 18px;
+}
+
+.refresh-status[data-refreshing="true"] {
+  color: var(--blue);
+}
+
+.refresh-spinner {
+  display: inline-flex;
+  opacity: 0.48;
+  transform-origin: center;
+}
+
+.refresh-status[data-refreshing="true"] .refresh-spinner {
+  animation: refresh-spin 0.82s linear infinite;
+  opacity: 1;
+}
+
 .advance-unavailable {
   background: var(--white);
   border-radius: var(--radius);
@@ -689,6 +715,12 @@
   }
 }
 
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes confirm-backdrop-in {
   from {
     opacity: 0;
@@ -824,6 +856,7 @@
   }
 
   .period-card,
+  .refresh-status[data-refreshing="true"] .refresh-spinner,
   .toast,
   .confirm-backdrop,
   .confirm-dialog {
