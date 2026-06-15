@@ -109,16 +109,50 @@ export function getLocalAdminAccountFromEnv(): LocalAdminAccount | null {
 }
 
 export function getLocalStudentAccountFromEnv(): LocalStudentAccount | null {
-  const id = normalizeOptional(process.env.LOCAL_STUDENT_LOGIN_ID);
-  const password = process.env.LOCAL_STUDENT_LOGIN_PASSWORD;
-  if (!id || !password) {
-    return null;
+  return getLocalStudentAccountsFromEnv()[0] ?? null;
+}
+
+export function getLocalStudentAccountsFromEnv(): readonly LocalStudentAccount[] {
+  const ids = splitEnvList(process.env.LOCAL_STUDENT_LOGIN_ID);
+  const passwords = splitEnvList(process.env.LOCAL_STUDENT_LOGIN_PASSWORD);
+  if (ids.length === 0 || passwords.length === 0) {
+    return [];
   }
-  return {
-    id,
-    password,
-    studentNumber: normalizeOptional(process.env.LOCAL_STUDENT_NUMBER) ?? DEFAULT_LOCAL_STUDENT_NUMBER
-  };
+
+  const studentNumbers = splitEnvList(process.env.LOCAL_STUDENT_NUMBER);
+  return ids.flatMap((id, index) => {
+    const password = passwords.length === 1 ? passwords[0] : passwords[index];
+    if (password === undefined) {
+      return [];
+    }
+    return [
+      {
+        id,
+        password,
+        studentNumber: studentNumberForLocalAccount({ id, index, studentNumbers, totalAccounts: ids.length })
+      }
+    ];
+  });
+}
+
+function studentNumberForLocalAccount(input: {
+  readonly id: string;
+  readonly index: number;
+  readonly studentNumbers: readonly string[];
+  readonly totalAccounts: number;
+}): string {
+  if (input.studentNumbers.length === 0) {
+    return input.totalAccounts === 1 ? DEFAULT_LOCAL_STUDENT_NUMBER : input.id;
+  }
+  return input.studentNumbers[input.index] ?? input.id;
+}
+
+function splitEnvList(value: string | undefined): readonly string[] {
+  const normalized = normalizeOptional(value);
+  if (!normalized) {
+    return [];
+  }
+  return normalized.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function validateLocalPassword(password: string, message: string): RiroAuthResult | null {

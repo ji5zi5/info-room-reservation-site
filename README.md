@@ -71,6 +71,8 @@ LOCAL_STUDENT_LOGIN_PASSWORD=""
 LOCAL_STUDENT_NUMBER=""
 ```
 
+여러 fallback 학생 계정은 `LOCAL_STUDENT_LOGIN_ID`와 `LOCAL_STUDENT_NUMBER`를 쉼표로 구분하고, `LOCAL_STUDENT_LOGIN_PASSWORD`는 하나의 공유 비밀번호나 ID 개수와 맞는 쉼표 목록을 사용할 수 있습니다.
+
 전체 예시는 `.env.example`을 참고하세요. 실제 리로스쿨 계정, Discord webhook, 세션 비밀값은 커밋하지 않습니다.
 프로덕션에서 리로스쿨 장애 대응용 학생 fallback이 필요할 때만 `ENABLE_PRODUCTION_LOCAL_STUDENT=true`와 `LOCAL_STUDENT_LOGIN_ID`/`LOCAL_STUDENT_LOGIN_PASSWORD`를 함께 설정합니다. `ENABLE_LOCAL_ADMIN`과 `ENABLE_LOCAL_STUDENT`는 프로덕션에서 계속 사용할 수 없습니다.
 

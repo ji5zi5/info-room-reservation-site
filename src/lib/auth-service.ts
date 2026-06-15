@@ -6,6 +6,7 @@ import {
   buildLocalStudentLoginAccount,
   getLocalAdminAccountFromEnv,
   getLocalStudentAccountFromEnv,
+  getLocalStudentAccountsFromEnv,
   type LocalAdminAccount,
   type LocalStudentAccount
 } from "./local-login";
@@ -25,6 +26,7 @@ type AuthModeOptions = {
   readonly localAdminAccount?: LocalAdminAccount | null;
   readonly localAdminEnabled?: boolean;
   readonly localStudentAccount?: LocalStudentAccount | null;
+  readonly localStudentAccounts?: readonly LocalStudentAccount[] | null;
   readonly localStudentEnabled?: boolean;
   readonly mockLoginEnabled: boolean;
   readonly riroAuthenticator: RiroAuthenticator;
@@ -112,6 +114,7 @@ async function authenticate(input: LoginInput): Promise<RiroAuthResult> {
     localAdminAccount: getLocalAdminAccountFromEnv(),
     localAdminEnabled: isLocalAdminLoginEnabled(),
     localStudentAccount: getLocalStudentAccountFromEnv(),
+    localStudentAccounts: getLocalStudentAccountsFromEnv(),
     localStudentEnabled: isLocalStudentLoginEnabled(),
     mockLoginEnabled: isMockLoginEnabled(),
     riroAuthenticator: (authInput) => loginWithRiroSchool({ id: authInput.id, password: authInput.password })
@@ -127,9 +130,8 @@ export async function authenticateWithConfiguredMode(
       options.localAdminAccount ?? null,
       options.localAdminEnabled ?? false
     ),
-    buildLocalStudentLoginAccount(
-      options.localStudentAccount ?? null,
-      options.localStudentEnabled ?? false
+    ...localStudentAccountsForOptions(options).map((account) =>
+      buildLocalStudentLoginAccount(account, options.localStudentEnabled ?? false)
     )
   ]);
   if (localLoginResult) {
@@ -139,6 +141,13 @@ export async function authenticateWithConfiguredMode(
     return mockRiroLogin(input);
   }
   return options.riroAuthenticator(input);
+}
+
+function localStudentAccountsForOptions(options: AuthModeOptions): readonly LocalStudentAccount[] {
+  if (options.localStudentAccounts !== undefined && options.localStudentAccounts !== null) {
+    return options.localStudentAccounts;
+  }
+  return options.localStudentAccount ? [options.localStudentAccount] : [];
 }
 
 function mockRiroLogin(input: LoginInput): RiroAuthResult {

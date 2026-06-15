@@ -145,6 +145,45 @@ describe("server environment guards", () => {
     ).toThrow("LOCAL_STUDENT_LOGIN_PASSWORD");
   });
 
+  it("allows multiple local student fallback ids with a shared strong password", () => {
+    expect(() =>
+      assertProductionEnvSafe({
+        ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
+        LOCAL_STUDENT_LOGIN_ID: "local_student_a,local_student_b",
+        LOCAL_STUDENT_LOGIN_PASSWORD: "shared-secret",
+        NODE_ENV: "production",
+        DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+        TRUST_FORWARDED_IP_HEADERS: "true"
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects overlapping local admin and student fallback ids", () => {
+    expect(() =>
+      assertProductionEnvSafe({
+        ADMIN_LOGIN_ID: "local_student_a",
+        ADMIN_LOGIN_PASSWORD: "local-admin-secret",
+        ENABLE_LOCAL_ADMIN: "true",
+        ENABLE_LOCAL_STUDENT: "true",
+        LOCAL_STUDENT_LOGIN_ID: "local_student_a,local_student_b",
+        LOCAL_STUDENT_LOGIN_PASSWORD: "shared-secret"
+      })
+    ).toThrow("ADMIN_LOGIN_ID");
+  });
+
+  it("rejects any weak password in a multiple local student fallback list", () => {
+    expect(() =>
+      assertProductionEnvSafe({
+        ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
+        LOCAL_STUDENT_LOGIN_ID: "local_student_a,local_student_b",
+        LOCAL_STUDENT_LOGIN_PASSWORD: "short,another-strong-secret",
+        NODE_ENV: "production",
+        DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+        TRUST_FORWARDED_IP_HEADERS: "true"
+      })
+    ).toThrow("LOCAL_STUDENT_LOGIN_PASSWORD");
+  });
+
   it("validates a configured Discord webhook URL", () => {
     expect(() => parseServerEnv({ DISCORD_WEBHOOK_URL: "not-a-url" })).toThrow("DISCORD_WEBHOOK_URL");
   });

@@ -114,7 +114,7 @@ export async function saveAdminSettings(input: {
   readonly periods: readonly AdminPeriodSetting[];
 }): Promise<boolean> {
   const response = await csrfFetch("/api/admin/period-settings", {
-    body: JSON.stringify(input),
+    body: JSON.stringify(normalizeAdminSettingsInput(input)),
     headers: { "content-type": "application/json" },
     method: "PATCH"
   });
@@ -196,6 +196,38 @@ function parseJsonBody(body: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function normalizeAdminSettingsInput(input: {
+  readonly date: string;
+  readonly periods: readonly AdminPeriodSetting[];
+}): {
+  readonly date: string;
+  readonly periods: readonly AdminPeriodSetting[];
+} {
+  return {
+    date: input.date,
+    periods: input.periods.map((period) => ({
+      ...period,
+      closeTime: normalizeTimeField(period.closeTime),
+      openTime: normalizeTimeField(period.openTime)
+    }))
+  };
+}
+
+function normalizeTimeField(value: string): string {
+  const trimmed = value.trim();
+  const match = /^(?<hour>\d{1,2}):(?<minute>\d{2})$/u.exec(trimmed);
+  const groups = match?.groups;
+  if (!groups) {
+    return trimmed;
+  }
+  const hour = groups.hour;
+  const minute = groups.minute;
+  if (hour === undefined || minute === undefined) {
+    return trimmed;
+  }
+  return `${hour.padStart(2, "0")}:${minute}`;
 }
 
 async function readErrorMessage(response: Response): Promise<string | null> {

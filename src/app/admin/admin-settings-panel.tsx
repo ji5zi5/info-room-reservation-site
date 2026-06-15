@@ -33,11 +33,21 @@ export function AdminSettingsPanel({
             <div className="admin-row">
               <label className="field">
                 <span>오픈</span>
-                <input value={period.openTime} onChange={(event) => onUpdatePeriod(period.studyPeriod, { openTime: event.currentTarget.value })} />
+                <input
+                  step={60}
+                  type="time"
+                  value={period.openTime}
+                  onChange={(event) => onUpdatePeriod(period.studyPeriod, { openTime: event.currentTarget.value })}
+                />
               </label>
               <label className="field">
                 <span>마감</span>
-                <input value={period.closeTime} onChange={(event) => onUpdatePeriod(period.studyPeriod, { closeTime: event.currentTarget.value })} />
+                <input
+                  step={60}
+                  type="time"
+                  value={period.closeTime}
+                  onChange={(event) => onUpdatePeriod(period.studyPeriod, { closeTime: event.currentTarget.value })}
+                />
               </label>
               <label className="field">
                 <span>정원</span>

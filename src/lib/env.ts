@@ -100,15 +100,35 @@ export function assertProductionEnvSafe(raw: ServerEnvInput = process.env): void
     throw new ServerEnvError(["ADMIN_LOGIN_PASSWORD"]);
   }
   if (isAnyLocalStudentLoginEnabled(env)) {
+    const localStudentLoginIds = splitEnvList(env.localStudentLoginId);
+    const localStudentLoginPasswords = splitEnvList(env.localStudentLoginPassword);
+    const localStudentNumbers = splitEnvList(env.localStudentNumber);
     const missingKeys = [
-      env.localStudentLoginId === null ? "LOCAL_STUDENT_LOGIN_ID" : null,
-      env.localStudentLoginPassword === null ? "LOCAL_STUDENT_LOGIN_PASSWORD" : null
+      localStudentLoginIds.length === 0 ? "LOCAL_STUDENT_LOGIN_ID" : null,
+      localStudentLoginPasswords.length === 0 ? "LOCAL_STUDENT_LOGIN_PASSWORD" : null
     ].filter((key): key is string => key !== null);
     if (missingKeys.length > 0) {
       throw new ServerEnvError(missingKeys);
     }
+    const shapeErrors = [
+      localStudentLoginPasswords.length !== 1 && localStudentLoginPasswords.length !== localStudentLoginIds.length
+        ? "LOCAL_STUDENT_LOGIN_PASSWORD"
+        : null,
+      localStudentNumbers.length > 0 && localStudentNumbers.length !== localStudentLoginIds.length
+        ? "LOCAL_STUDENT_NUMBER"
+        : null
+    ].filter((key): key is string => key !== null);
+    if (shapeErrors.length > 0) {
+      throw new ServerEnvError(shapeErrors);
+    }
+    if (env.enableLocalAdmin && env.adminLoginId !== null && localStudentLoginIds.includes(env.adminLoginId)) {
+      throw new ServerEnvError(["ADMIN_LOGIN_ID", "LOCAL_STUDENT_LOGIN_ID"]);
+    }
   }
-  if (isAnyLocalStudentLoginEnabled(env) && env.localStudentLoginPassword !== null && env.localStudentLoginPassword.length < 12) {
+  if (
+    isAnyLocalStudentLoginEnabled(env) &&
+    splitEnvList(env.localStudentLoginPassword).some((password) => password.length < 12)
+  ) {
     throw new ServerEnvError(["LOCAL_STUDENT_LOGIN_PASSWORD"]);
   }
 }
@@ -136,6 +156,13 @@ export function shouldTrustForwardedIpHeaders(raw: ServerEnvInput = process.env)
 function normalizeOptional(value: string | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function splitEnvList(value: string | null): readonly string[] {
+  if (value === null) {
+    return [];
+  }
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function isAnyLocalStudentLoginEnabled(env: ServerEnv): boolean {
