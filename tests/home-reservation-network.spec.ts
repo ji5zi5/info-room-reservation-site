@@ -32,14 +32,19 @@ type MockPeriod = {
   readonly windowState: "open";
 };
 
-test("reserve confirmation posts before any dialog-stage period refresh", async ({ page }) => {
+test("reserve click opens dialog and posts without extra period refreshes", async ({ page }) => {
+  let reserveClickStarted = false;
   let dialogVisible = false;
   let postStarted = false;
+  let periodGetsBetweenClickAndDialog = 0;
   let periodGetsBetweenDialogAndPost = 0;
 
   await routeMockCsrf(page);
   await routeMockLogin(page);
   await routeOpenPeriods(page, () => {
+    if (reserveClickStarted && !dialogVisible) {
+      periodGetsBetweenClickAndDialog += 1;
+    }
     if (dialogVisible && !postStarted) {
       periodGetsBetweenDialogAndPost += 1;
     }
@@ -58,6 +63,7 @@ test("reserve confirmation posts before any dialog-stage period refresh", async 
   });
 
   await login(page);
+  reserveClickStarted = true;
   await page.locator(".period-card").first().locator(".period-button").click();
   await expect(page.getByRole("dialog")).toBeVisible();
   dialogVisible = true;
@@ -68,6 +74,7 @@ test("reserve confirmation posts before any dialog-stage period refresh", async 
   await page.locator(".confirm-dialog .primary-button").click();
   await reservationPost;
 
+  expect(periodGetsBetweenClickAndDialog).toBe(0);
   expect(periodGetsBetweenDialogAndPost).toBe(0);
 });
 

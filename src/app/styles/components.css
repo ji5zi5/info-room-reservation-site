@@ -91,26 +91,35 @@
 .student-status-panel {
   background: var(--ash);
   border: 1px solid var(--fog);
-  border-radius: var(--radius);
+  border-radius: 8px;
   display: grid;
-  gap: 14px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
 }
 
 .student-status-head {
-  align-items: start;
+  align-items: center;
   display: flex;
   gap: 10px;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .student-status-head h3 {
-  font-size: 1rem;
+  font-size: 0.94rem;
+}
+
+.student-status-head p {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  margin-top: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .student-status-chip {
   background: color-mix(in srgb, #1f9d55 14%, var(--white));
-  border-radius: var(--radius);
+  border-radius: 999px;
   color: #176c3a;
   flex: 0 0 auto;
   font-size: 0.76rem;
@@ -124,49 +133,58 @@
   color: var(--red);
 }
 
-.student-status-list {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-}
-
-.student-status-list div {
-  display: grid;
-  gap: 4px;
-}
-
-.student-status-list dt {
-  color: var(--pewter);
-  font-size: 0.78rem;
-}
-
-.student-status-list dd {
-  align-items: center;
+.student-status-summary {
+  background: var(--white);
+  border: 1px solid var(--fog);
+  border-radius: 8px;
   color: var(--ink);
-  display: flex;
-  font-size: 0.86rem;
-  gap: 6px;
+  display: grid;
+  gap: 2px;
   margin: 0;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.student-status-summary span {
+  color: var(--pewter);
+  font-size: 0.76rem;
+}
+
+.student-status-summary strong {
+  font-size: 0.86rem;
+  font-weight: 700;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
+.reservation-mode-row {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .tabbar {
+  background: var(--ash);
+  border: 1px solid var(--fog);
+  border-radius: 8px;
   display: grid;
-  gap: 8px;
-  grid-auto-rows: 108px;
+  gap: 4px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 320px;
+  padding: 4px;
+  width: min(100%, 320px);
 }
 
 .tabbar button {
   background: var(--white);
-  border: 3px solid transparent;
-  border-radius: var(--radius);
+  border: 0;
+  border-radius: 6px;
   color: var(--pewter);
-  font-size: 0.88rem;
-  font-weight: 500;
-  height: 100%;
-  min-height: 108px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  min-height: 44px;
+  padding: 0 12px;
   transform: translateY(0);
   transition:
     background-color var(--motion),
@@ -182,18 +200,31 @@
 }
 
 .tabbar button:active {
-  transform: translateY(2px) scale(0.99);
+  transform: translateY(1px) scale(0.99);
 }
 
 .reservation-date-rail {
-  align-items: start;
+  align-items: end;
   display: grid;
-  min-height: 71px;
+  flex: 1 1 220px;
+  min-height: 0;
 }
 
 .advance-date-field {
-  max-width: 360px;
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  max-width: 320px;
   width: 100%;
+}
+
+.advance-date-field span {
+  white-space: nowrap;
+}
+
+.advance-date-field input {
+  min-width: 0;
 }
 
 .advance-date-field input:disabled {
@@ -202,7 +233,7 @@
 }
 
 .advance-date-placeholder {
-  min-height: 71px;
+  min-height: 0;
 }
 
 .reservation-calendar {
@@ -1061,12 +1092,22 @@
     min-height: 104px;
   }
 
+  .reservation-mode-row {
+    align-items: stretch;
+  }
+
   .tabbar {
-    grid-auto-rows: 72px;
+    max-width: none;
+    width: 100%;
   }
 
   .tabbar button {
-    min-height: 72px;
+    min-height: 42px;
+  }
+
+  .reservation-date-rail,
+  .advance-date-field {
+    max-width: none;
   }
 
   .table-line {

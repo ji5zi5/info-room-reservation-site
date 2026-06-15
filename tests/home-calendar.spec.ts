@@ -7,6 +7,17 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 type StudyPeriod = "EIGHTH" | "FIRST";
 type WindowState = "closed" | "not_open_yet" | "open";
 
+type MockUser = {
+  readonly bookingStatus: "ACTIVE";
+  readonly generation: number;
+  readonly id: string;
+  readonly name: string;
+  readonly restrictionReason: null;
+  readonly restrictedUntil: null;
+  readonly role: "STUDENT";
+  readonly studentNumber: string;
+};
+
 type MockPeriodInput = {
   readonly enabled?: boolean;
   readonly label: string;
@@ -59,6 +70,7 @@ test("weekly reservation calendar keeps Friday advance closure visible", async (
 });
 
 async function login(page: Page, loginId: string, fixedIso = e2eNow(FIXED_THURSDAY_DATE)): Promise<void> {
+  await mockAuth(page, loginId);
   await mockClientDate(page, fixedIso);
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
@@ -71,15 +83,45 @@ async function mockPeriods(
   page: Page,
   periodsByDate: Readonly<Record<string, readonly ReturnType<typeof period>[]>>
 ): Promise<void> {
-  for (const [date, periods] of Object.entries(periodsByDate)) {
-    await page.route(`**/api/periods?date=${date}`, async (route) => {
-      await route.fulfill({
-        body: JSON.stringify({ periods: periods.map((mockPeriod) => ({ ...mockPeriod, date })) }),
-        contentType: "application/json",
-        status: 200
-      });
+  await page.route("**/api/periods**", async (route) => {
+    const url = new URL(route.request().url());
+    const date = url.searchParams.get("date") ?? FIXED_THURSDAY_DATE;
+    const periods = periodsByDate[date] ?? [
+      period({ label: "8면학", studyPeriod: "EIGHTH" }),
+      period({ label: "1면학", studyPeriod: "FIRST" })
+    ];
+    await route.fulfill({
+      body: JSON.stringify({ periods: periods.map((mockPeriod) => ({ ...mockPeriod, date })) }),
+      contentType: "application/json",
+      status: 200
     });
-  }
+  });
+}
+
+async function mockAuth(page: Page, loginId: string): Promise<void> {
+  await page.route("**/api/me", async (route) => {
+    await route.fulfill({ body: JSON.stringify({ user: null }), contentType: "application/json", status: 200 });
+  });
+  await page.route("**/api/auth/riro/login", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ user: buildMockUser(loginId) }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+}
+
+function buildMockUser(loginId: string): MockUser {
+  return {
+    bookingStatus: "ACTIVE",
+    generation: 31,
+    id: loginId,
+    name: "테스트학생",
+    restrictionReason: null,
+    restrictedUntil: null,
+    role: "STUDENT",
+    studentNumber: "31-12345"
+  };
 }
 
 function period(input: MockPeriodInput) {

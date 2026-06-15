@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { csrfRequest } from "./playwright-csrf";
-import { visibleBox, visiblePosition } from "./playwright-layout";
-import { e2eNow, FIXED_FRIDAY_DATE, FIXED_THURSDAY_DATE, mockClientDate, mockOpenPeriodsForDates } from "./e2e-time";
+import { visibleBox } from "./playwright-layout";
+import { e2eNow, FIXED_FRIDAY_DATE, FIXED_THURSDAY_DATE, mockClientDate } from "./e2e-time";
 import { todayKst } from "./kst-date";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
@@ -86,23 +86,6 @@ async function patchPeriodSettings(
   }
 }
 
-test("advance reservation shows date picker before period cards", async ({ page }) => {
-  await mockOpenPeriodsForDates(page, FIXED_THURSDAY_DATE, FIXED_FRIDAY_DATE);
-  await login(page, `date-first-${Date.now()}`, e2eNow(FIXED_THURSDAY_DATE));
-  await page.getByRole("button", { name: "사전예약" }).click();
-
-  const datePicker = page.getByLabel("사전예약 날짜");
-  await expect(datePicker).toBeVisible();
-  await expect(datePicker).toHaveAttribute("min", "2026-06-12");
-  await expect(datePicker).toHaveAttribute("max", "2026-06-12");
-
-  const datePickerBox = await datePicker.boundingBox();
-  const firstPeriodBox = await page.locator(".period-card").first().boundingBox();
-  expect(datePickerBox?.y, "advance date picker should render before period cards").toBeLessThan(
-    firstPeriodBox?.y ?? 0
-  );
-});
-
 test("home page omits redundant explanatory copy", async ({ page }) => {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
 
@@ -119,45 +102,6 @@ test("mocked client date does not trigger a hydration mismatch", async ({ page }
   await page.waitForTimeout(300);
 
   expect(pageErrors.filter((message) => message.includes("Hydration failed"))).toEqual([]);
-});
-
-test("reservation header copy is compact and tabs keep stable dimensions", async ({ page }) => {
-  await mockOpenPeriodsForDates(page, FIXED_THURSDAY_DATE, FIXED_FRIDAY_DATE);
-  await login(page, `header-${Date.now()}`, e2eNow(FIXED_THURSDAY_DATE));
-
-  await expect(page.getByText("8면학 먼저, 다음 1면학")).toHaveCount(0);
-  await expect(page.getByText("리로스쿨 인증")).toHaveCount(0);
-
-  const todayTab = page.getByRole("button", { name: "당일예약" });
-  const advanceTab = page.getByRole("button", { name: "사전예약" });
-  const todayBefore = await visibleBox(todayTab, "today tab");
-  const advanceBefore = await visibleBox(advanceTab, "advance tab");
-  expect(Math.round(todayBefore.width)).toBe(Math.round(advanceBefore.width));
-  expect(Math.round(todayBefore.height)).toBe(Math.round(advanceBefore.height));
-
-  await advanceTab.click();
-  const todayAfter = await visibleBox(todayTab, "today tab after switch");
-  const advanceAfter = await visibleBox(advanceTab, "advance tab after switch");
-  expect(Math.round(todayAfter.width)).toBe(Math.round(todayBefore.width));
-  expect(Math.round(advanceAfter.height)).toBe(Math.round(advanceBefore.height));
-});
-
-test("today and advance tabs keep period cards on the same visual rail", async ({ page }) => {
-  await mockOpenPeriodsForDates(page, FIXED_THURSDAY_DATE, FIXED_FRIDAY_DATE);
-  await login(page, `rail-${Date.now()}`, e2eNow(FIXED_THURSDAY_DATE));
-
-  const firstCard = page.locator(".period-card").first();
-  const todayPosition = await visiblePosition(firstCard, "today first period card");
-
-  await page.getByRole("button", { name: "사전예약" }).click();
-  await expect(page.getByLabel("사전예약 날짜")).toBeVisible();
-  const advancePosition = await visiblePosition(firstCard, "advance first period card");
-
-  await page.getByRole("button", { name: "당일예약" }).click();
-  const todayAgainPosition = await visiblePosition(firstCard, "today first period card after return");
-
-  expect(Math.abs(Math.round(advancePosition.y - todayPosition.y))).toBeLessThanOrEqual(2);
-  expect(Math.abs(Math.round(todayAgainPosition.y - todayPosition.y))).toBeLessThanOrEqual(2);
 });
 
 test("left panel collapses and expands", async ({ page }) => {

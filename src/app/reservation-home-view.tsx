@@ -59,7 +59,6 @@ type ReservationHomeViewProps = {
   readonly tab: ReservationHomeTab;
   readonly targetDate: string;
   readonly toast: string | null;
-  readonly todayDate: string;
   readonly user: ReservationSidebarUser | null;
 };
 
@@ -97,7 +96,6 @@ export function ReservationHomeView({
   tab,
   targetDate,
   toast,
-  todayDate,
   user
 }: ReservationHomeViewProps): ReactElement {
   return (
@@ -143,28 +141,17 @@ export function ReservationHomeView({
             </div>
             <CalendarDays color="#3E6AE1" />
           </div>
-          <div className="tabbar" aria-label="예약 종류">
-            <button type="button" data-active={tab === "today"} onClick={() => onTabChange("today")}>
-              당일예약
-            </button>
-            <button type="button" data-active={tab === "advance"} onClick={() => onTabChange("advance")}>
-              사전예약
-            </button>
-          </div>
-          {advancePolicy && user ? (
-            <ReservationCalendar
-              advancePolicy={advancePolicy}
-              periodsByDate={calendarPeriodsByDate}
-              selectedDate={targetDate}
-              onSelectDate={onSelectCalendarDate}
-              onTodayClick={onSelectToday}
-            />
-          ) : null}
-          {advancePolicy ? (
-            <div className="reservation-date-rail">
-              {advanceUnavailable ? (
-                <div className="advance-date-field advance-date-placeholder" aria-hidden="true" />
-              ) : tab === "advance" && advancePolicy.kind === "available" ? (
+          <div className="reservation-mode-row">
+            <div className="tabbar" aria-label="예약 종류">
+              <button type="button" data-active={tab === "today"} onClick={() => onTabChange("today")}>
+                당일예약
+              </button>
+              <button type="button" data-active={tab === "advance"} onClick={() => onTabChange("advance")}>
+                사전예약
+              </button>
+            </div>
+            {advancePolicy && tab === "advance" && advancePolicy.kind === "available" && !advanceUnavailable ? (
+              <div className="reservation-date-rail">
                 <label className="field advance-date-field">
                   <span>사전예약 날짜</span>
                   <input
@@ -175,13 +162,17 @@ export function ReservationHomeView({
                     onChange={(event) => onAdvanceDateChange(event.currentTarget.value)}
                   />
                 </label>
-              ) : (
-                <label className="field advance-date-field">
-                  <span>예약 날짜</span>
-                  <input disabled readOnly type="date" value={todayDate} />
-                </label>
-              )}
-            </div>
+              </div>
+            ) : null}
+          </div>
+          {advancePolicy && user ? (
+            <ReservationCalendar
+              advancePolicy={advancePolicy}
+              periodsByDate={calendarPeriodsByDate}
+              selectedDate={targetDate}
+              onSelectDate={onSelectCalendarDate}
+              onTodayClick={onSelectToday}
+            />
           ) : null}
           <ReservationWarningPanel />
           {advanceUnavailable ? (

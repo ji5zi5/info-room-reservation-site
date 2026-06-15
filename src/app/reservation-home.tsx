@@ -121,16 +121,13 @@ export function ReservationHomePage(): React.ReactElement {
     setToast("로그아웃되었습니다.");
   }
 
-  async function requestReserve(studyPeriod: "EIGHTH" | "FIRST"): Promise<void> {
+  function requestReserve(studyPeriod: "EIGHTH" | "FIRST"): void {
     const restrictionMessage = reservationRestrictionMessage(user);
     if (restrictionMessage) {
       setToast(restrictionMessage);
       return;
     }
-    setLoading(true);
-    const latestPeriods = await refreshPeriods(targetDate);
-    setLoading(false);
-    const period = latestPeriods.find((candidate) => candidate.studyPeriod === studyPeriod);
+    const period = periods.find((candidate) => candidate.studyPeriod === studyPeriod);
     if (!canReservePeriod(period)) {
       setToast("최신 좌석 수를 반영했습니다. 다시 확인하세요.");
       return;
@@ -239,7 +236,6 @@ export function ReservationHomePage(): React.ReactElement {
       tab={tab}
       targetDate={targetDate}
       toast={toast}
-      todayDate={todayDate}
       user={user}
       onAdvanceDateChange={setAdvanceDate}
       onCancel={requestCancel}
