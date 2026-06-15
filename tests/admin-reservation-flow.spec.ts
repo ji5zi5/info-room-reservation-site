@@ -117,6 +117,7 @@ test("reserved periods show a cancel action and refresh applicants after cancel"
     await page.getByRole("button", { name: "예약 확정" }).click();
     await expect(eighthCard.getByRole("button", { name: "예약됨" })).toBeVisible();
     await expect(eighthCard.getByRole("button", { name: "예약 취소" })).toBeVisible();
+    await expect(page.getByText(`${date} · 8면학 · 확정`)).toBeVisible();
 
     await eighthCard.getByRole("button", { name: /신청자 \d+명 보기/u }).click();
     await expect(eighthCard.getByText(loginId.replace(/\D/gu, "").slice(-5))).toBeVisible();
@@ -126,9 +127,18 @@ test("reserved periods show a cancel action and refresh applicants after cancel"
     await page.getByRole("button", { exact: true, name: "닫기" }).click();
     await expect(eighthCard.getByRole("button", { name: "예약 취소" })).toBeVisible();
     await eighthCard.getByRole("button", { name: "예약 취소" }).click();
-    await page.getByRole("button", { name: "취소 확정" }).click();
+    await expect(page.getByText("취소하면 3일간 예약이 제한됩니다.")).toBeVisible();
+    await expect(page.getByText("제한 해제 예정")).toBeVisible();
+    await expect(page.getByText("관리자 취소는 운영자가 처리하며 학생 직접 취소 제한을 적용하지 않습니다.")).toBeVisible();
+    const cancelConfirmButton = page.getByRole("button", { name: "취소 확정" });
+    await expect(cancelConfirmButton).toBeDisabled();
+    await page.getByRole("checkbox", { name: "정말 취소하려면 이 확인란을 선택하세요." }).check();
+    await expect(cancelConfirmButton).toBeEnabled();
+    await cancelConfirmButton.click();
 
     await expect(page.getByText("예약이 취소되었습니다. 3일간 예약이 제한됩니다.")).toBeVisible();
+    await expect(page.getByText("제한 사유")).toBeVisible();
+    await expect(page.getByText("예약 취소", { exact: true })).toBeVisible();
     await expect(eighthCard.getByRole("button", { name: "8면학 예약" })).toBeVisible();
     await expect(eighthCard.getByRole("button", { name: "예약 취소" })).toHaveCount(0);
     await eighthCard.getByRole("button", { name: "8면학 예약" }).click();

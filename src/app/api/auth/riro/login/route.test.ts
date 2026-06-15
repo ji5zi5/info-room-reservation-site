@@ -60,6 +60,7 @@ const successfulLogin: LoginResult = {
     generation: 31,
     id: "user-1",
     name: "테스트학생",
+    restrictionReason: null,
     restrictedUntil: null,
     role: "STUDENT",
     studentNumber: "90001"

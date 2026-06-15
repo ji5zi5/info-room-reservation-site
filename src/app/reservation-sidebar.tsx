@@ -11,17 +11,22 @@ import {
 } from "lucide-react";
 import type { ReactElement } from "react";
 
+import { StudentReservationStatusPanel } from "@/components/student-reservation-status-panel";
+import type { StudentCurrentReservation } from "@/lib/student-reservation-status";
+
 export type ReservationSidebarUser = {
   readonly bookingStatus: string;
   readonly generation: number;
   readonly id: string;
   readonly name: string;
+  readonly restrictionReason: string | null;
   readonly restrictedUntil: string | null;
   readonly role: string;
   readonly studentNumber: string;
 };
 
 type ReservationSidebarProps = {
+  readonly currentReservations: readonly StudentCurrentReservation[];
   readonly id: string;
   readonly loading: boolean;
   readonly onIdChange: (value: string) => void;
@@ -35,6 +40,7 @@ type ReservationSidebarProps = {
 };
 
 export function ReservationSidebar({
+  currentReservations,
   id,
   loading,
   onIdChange,
@@ -82,6 +88,9 @@ export function ReservationSidebar({
               <LogOut size={18} />
               로그아웃
             </button>
+            {user.role === "STUDENT" ? (
+              <StudentReservationStatusPanel reservations={currentReservations} user={user} />
+            ) : null}
             {user.role === "ADMIN" ? <a className="primary-button" href="/admin">관리자 화면</a> : null}
           </div>
         ) : (

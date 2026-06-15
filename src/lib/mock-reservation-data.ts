@@ -205,6 +205,7 @@ export function cancelMockReservation(input: {
       user: {
         ...input.user,
         bookingStatus: nextUser.bookingStatus,
+        restrictionReason: nextUser.restrictionReason,
         restrictedUntil: nextUser.restrictedUntil ? nextUser.restrictedUntil.toISOString() : null
       }
     };

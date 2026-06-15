@@ -21,6 +21,7 @@ const ReservationSidebarUserSchema = z.object({
   generation: z.number(),
   id: z.string(),
   name: z.string(),
+  restrictionReason: z.string().nullable().default(null),
   restrictedUntil: z.string().nullable(),
   role: z.string(),
   studentNumber: z.string()

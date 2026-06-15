@@ -16,6 +16,7 @@ const student = {
   generation: 31,
   id: "mock-12345",
   name: "테스트학생",
+  restrictionReason: null,
   restrictedUntil: null,
   role: "STUDENT",
   studentNumber: "12345"

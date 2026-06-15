@@ -86,6 +86,7 @@ export async function loginUserWithRiro(input: LoginInput): Promise<LoginResult>
       generation: user.generation,
       id: user.id,
       name: user.name,
+      restrictionReason: user.restrictionReason,
       restrictedUntil: user.restrictedUntil ? user.restrictedUntil.toISOString() : null,
       role: user.role,
       studentNumber: user.studentNumber
@@ -99,6 +100,7 @@ function buildNoDatabaseMockUser(profile: RiroProfile, role: "ADMIN" | "STUDENT"
     generation: profile.generation,
     id: `mock-${profile.studentNumber}`,
     name: profile.name,
+    restrictionReason: null,
     restrictedUntil: null,
     role,
     studentNumber: profile.studentNumber

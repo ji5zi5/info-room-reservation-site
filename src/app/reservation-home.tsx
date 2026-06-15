@@ -1,11 +1,17 @@
 "use client";
 
 import { CalendarDays } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { getAdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
+import { buildReservationCalendarDays } from "@/lib/reservation-calendar";
+import {
+  collectStudentCurrentReservations,
+  previewCancellationRestrictedUntil
+} from "@/lib/student-reservation-status";
 import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
 import { ReservationActionDialog, type ReservationPendingAction } from "@/components/reservation-action-dialog";
+import { ReservationCalendar } from "@/components/reservation-calendar";
 import { ReservationToast } from "@/components/reservation-toast";
 import { ReservationWarningPanel } from "@/components/reservation-warning-panel";
 import { AdminConsole } from "./admin/admin-console";
@@ -16,6 +22,7 @@ import { ReservationSidebar, type ReservationSidebarUser } from "./reservation-s
 
 type Tab = "today" | "advance";
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
+const PERIOD_REFRESH_INTERVAL_MS = 20_000;
 
 export function ReservationHomePage(): React.ReactElement {
   const [user, setUser] = useState<ReservationSidebarUser | null>(null);
@@ -24,9 +31,13 @@ export function ReservationHomePage(): React.ReactElement {
   const [tab, setTab] = useState<Tab>("today");
   const [advancePolicy, setAdvancePolicy] = useState<AdvanceReservationPolicy | null>(null);
   const [advanceDate, setAdvanceDate] = useState("");
+  const [calendarPeriodsByDate, setCalendarPeriodsByDate] = useState<{
+    readonly [date: string]: readonly PeriodSummary[] | undefined;
+  }>({});
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<ReservationPendingAction | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -34,6 +45,35 @@ export function ReservationHomePage(): React.ReactElement {
   const advanceUnavailable = tab === "advance" && advancePolicy?.kind === "unavailable";
   const todayDate = advancePolicy?.today ?? "";
   const targetDate = tab === "advance" ? advanceDate : todayDate;
+  const currentReservations = collectStudentCurrentReservations(calendarPeriodsByDate);
+
+  const refreshMe = useCallback(async (): Promise<void> => {
+    const response = await fetch("/api/me");
+    setUser(await readCurrentUser(response));
+  }, []);
+
+  const refreshPeriodDates = useCallback(
+    async (dates: readonly string[], currentTargetDate?: string): Promise<readonly PeriodSummary[]> => {
+      const uniqueDates = [...new Set(dates.filter(Boolean))];
+      if (uniqueDates.length === 0) {
+        return [];
+      }
+      const entries = await Promise.all(uniqueDates.map(fetchPeriodSummariesForDate));
+      const nextByDate = Object.fromEntries(entries);
+      setCalendarPeriodsByDate((current) => ({ ...current, ...nextByDate }));
+      if (currentTargetDate && Object.hasOwn(nextByDate, currentTargetDate)) {
+        setPeriods(nextByDate[currentTargetDate] ?? []);
+      }
+      setLastRefreshedAt(new Date().toISOString());
+      return currentTargetDate ? nextByDate[currentTargetDate] ?? [] : [];
+    },
+    []
+  );
+
+  const refreshPeriods = useCallback(
+    async (date: string): Promise<readonly PeriodSummary[]> => refreshPeriodDates([date], date),
+    [refreshPeriodDates]
+  );
 
   useEffect(() => {
     void refreshMe();
@@ -41,7 +81,7 @@ export function ReservationHomePage(): React.ReactElement {
     if (adminMessage) {
       setToast(adminMessage);
     }
-  }, []);
+  }, [refreshMe]);
 
   useEffect(() => {
     const policy = getAdvanceReservationPolicy(new Date());
@@ -58,17 +98,44 @@ export function ReservationHomePage(): React.ReactElement {
       return;
     }
     void refreshPeriods(targetDate);
-  }, [advanceUnavailable, targetDate, user]);
+  }, [advanceUnavailable, refreshPeriods, targetDate, user?.id, user?.role]);
 
-  async function refreshMe(): Promise<void> {
-    const response = await fetch("/api/me");
-    setUser(await readCurrentUser(response));
-  }
+  useEffect(() => {
+    if (!advancePolicy || !user || user.role === "ADMIN") {
+      setCalendarPeriodsByDate({});
+      return;
+    }
 
-  async function refreshPeriods(date: string): Promise<void> {
-    const response = await fetch(`/api/periods?date=${date}`);
-    setPeriods(await readPeriodSummaries(response));
-  }
+    void refreshPeriodDates(selectableCalendarDates(advancePolicy), advanceUnavailable ? undefined : targetDate);
+  }, [advancePolicy, advanceUnavailable, refreshPeriodDates, targetDate, user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!advancePolicy || !user || user.role === "ADMIN") {
+      return;
+    }
+    const refreshVisibleDates = (): void => {
+      void refreshPeriodDates(selectableCalendarDates(advancePolicy), advanceUnavailable ? undefined : targetDate);
+    };
+    const intervalId = window.setInterval(refreshVisibleDates, PERIOD_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [advancePolicy, advanceUnavailable, refreshPeriodDates, targetDate, user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!advancePolicy || !user || user.role === "ADMIN") {
+      return;
+    }
+    const refreshOnVisible = (): void => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      void refreshMe();
+      void refreshPeriodDates(selectableCalendarDates(advancePolicy), advanceUnavailable ? undefined : targetDate);
+    };
+    document.addEventListener("visibilitychange", refreshOnVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshOnVisible);
+    };
+  }, [advancePolicy, advanceUnavailable, refreshMe, refreshPeriodDates, targetDate, user?.id, user?.role]);
 
   async function login(): Promise<void> {
     setLoading(true);
@@ -100,19 +167,49 @@ export function ReservationHomePage(): React.ReactElement {
     setToast("로그아웃되었습니다.");
   }
 
-  function requestReserve(studyPeriod: "EIGHTH" | "FIRST"): void {
+  async function requestReserve(studyPeriod: "EIGHTH" | "FIRST"): Promise<void> {
     const restrictionMessage = reservationRestrictionMessage(user);
     if (restrictionMessage) {
       setToast(restrictionMessage);
       return;
     }
-    const period = periods.find((candidate) => candidate.studyPeriod === studyPeriod);
+    setLoading(true);
+    const latestPeriods = await refreshPeriods(targetDate);
+    setLoading(false);
+    const period = latestPeriods.find((candidate) => candidate.studyPeriod === studyPeriod);
+    if (!canReservePeriod(period)) {
+      setToast("최신 좌석 수를 반영했습니다. 다시 확인하세요.");
+      return;
+    }
     setPendingAction({ kind: "reserve", label: period?.label ?? "예약", studyPeriod });
   }
 
   function requestCancel(reservationId: string): void {
     const period = periods.find((candidate) => candidate.myReservationId === reservationId);
-    setPendingAction({ kind: "cancel", label: period?.label ?? "예약", reservationId });
+    setPendingAction({
+      kind: "cancel",
+      label: period?.label ?? "예약",
+      reservationId,
+      restrictedUntilPreview: previewCancellationRestrictedUntil()
+    });
+  }
+
+  function selectCalendarDate(date: string): void {
+    if (!advancePolicy) {
+      return;
+    }
+    if (date === advancePolicy.today) {
+      setTab("today");
+      return;
+    }
+    if (advancePolicy.kind === "available" && date >= advancePolicy.minDate && date <= advancePolicy.maxDate) {
+      setAdvanceDate(date);
+      setTab("advance");
+    }
+  }
+
+  function selectToday(): void {
+    setTab("today");
   }
 
   function confirmPendingAction(): void {
@@ -130,17 +227,26 @@ export function ReservationHomePage(): React.ReactElement {
 
   async function reserve(studyPeriod: "EIGHTH" | "FIRST"): Promise<void> {
     setLoading(true);
+    const latestPeriods = await refreshPeriods(targetDate);
+    const period = latestPeriods.find((candidate) => candidate.studyPeriod === studyPeriod);
+    if (!canReservePeriod(period)) {
+      setLoading(false);
+      setToast("최신 좌석 수를 반영했습니다. 다시 확인하세요.");
+      return;
+    }
     const response = await csrfFetch("/api/reservations", {
       body: JSON.stringify({ date: targetDate, studyPeriod }),
       headers: { "content-type": "application/json" },
       method: "POST"
     });
     const errorMessage = await readApiErrorMessage(response);
-    setLoading(false);
     if (!response.ok) {
+      await refreshPeriods(targetDate);
+      setLoading(false);
       setToast(errorMessage ?? "예약에 실패했습니다.");
       return;
     }
+    setLoading(false);
     setToast("예약이 확정되었습니다.");
     await refreshPeriods(targetDate);
   }
@@ -163,6 +269,7 @@ export function ReservationHomePage(): React.ReactElement {
     <main className="app-shell">
       <div className="workspace" data-sidebar={sidebarOpen ? "open" : "closed"}>
         <ReservationSidebar
+          currentReservations={currentReservations}
           id={id}
           loading={loading}
           password={password}
@@ -187,6 +294,15 @@ export function ReservationHomePage(): React.ReactElement {
             <button type="button" data-active={tab === "today"} onClick={() => setTab("today")}>당일예약</button>
             <button type="button" data-active={tab === "advance"} onClick={() => setTab("advance")}>사전예약</button>
           </div>
+          {advancePolicy && user ? (
+            <ReservationCalendar
+              advancePolicy={advancePolicy}
+              periodsByDate={calendarPeriodsByDate}
+              selectedDate={targetDate}
+              onSelectDate={selectCalendarDate}
+              onTodayClick={selectToday}
+            />
+          ) : null}
           {advancePolicy ? (
             <div className="reservation-date-rail">
               {advanceUnavailable ? (
@@ -221,6 +337,7 @@ export function ReservationHomePage(): React.ReactElement {
               {periods.map((period) => (
                 <ReservationPeriodCard
                   key={period.studyPeriod}
+                  lastRefreshedAt={lastRefreshedAt}
                   loading={loading}
                   period={period}
                   userReady={user !== null}
@@ -241,5 +358,30 @@ export function ReservationHomePage(): React.ReactElement {
         onConfirm={confirmPendingAction}
       />
     </main>
+  );
+}
+
+async function fetchPeriodSummariesForDate(date: string): Promise<readonly [string, readonly PeriodSummary[]]> {
+  try {
+    const response = await fetch(`/api/periods?date=${date}`);
+    return [date, await readPeriodSummaries(response)];
+  } catch {
+    return [date, []];
+  }
+}
+
+function selectableCalendarDates(policy: AdvanceReservationPolicy): readonly string[] {
+  return buildReservationCalendarDays(policy)
+    .filter((day) => day.selectable)
+    .map((day) => day.date);
+}
+
+function canReservePeriod(period: PeriodSummary | undefined): boolean {
+  return Boolean(
+    period &&
+      period.enabled &&
+      period.myReservationId === null &&
+      period.remaining > 0 &&
+      period.windowState === "open"
   );
 }

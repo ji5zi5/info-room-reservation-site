@@ -41,6 +41,7 @@ const adminUser: SessionUser = {
   generation: 31,
   id: "admin-1",
   name: "관리자",
+  restrictionReason: null,
   restrictedUntil: null,
   role: "ADMIN",
   studentNumber: "90000"

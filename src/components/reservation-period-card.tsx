@@ -2,6 +2,8 @@ import { Check, ChevronDown } from "lucide-react";
 import type { ReactElement } from "react";
 import { useId, useState } from "react";
 
+import { formatKstTime } from "@/lib/student-reservation-status";
+
 export type PeriodApplicant = {
   readonly name: string;
   readonly reservationId: string;
@@ -24,6 +26,7 @@ export type PeriodSummary = {
 };
 
 type ReservationPeriodCardProps = {
+  readonly lastRefreshedAt: string | null;
   readonly loading: boolean;
   readonly onCancel: (reservationId: string) => void;
   readonly onReserve: (studyPeriod: "EIGHTH" | "FIRST") => void;
@@ -32,6 +35,7 @@ type ReservationPeriodCardProps = {
 };
 
 export function ReservationPeriodCard({
+  lastRefreshedAt,
   loading,
   onCancel,
   onReserve,
@@ -67,6 +71,7 @@ export function ReservationPeriodCard({
       <div className="meter">
         <span style={{ width: `${Math.round((period.confirmedCount / period.capacity) * 100)}%` }} />
       </div>
+      {lastRefreshedAt ? <p className="period-refresh-time">마지막 갱신: {formatKstTime(lastRefreshedAt)}</p> : null}
       <ApplicantList applicants={period.applicants} period={period} />
       <div className="period-actions">
         <button

@@ -17,6 +17,7 @@ export type SessionUser = {
   readonly generation: number;
   readonly id: string;
   readonly name: string;
+  readonly restrictionReason: string | null;
   readonly restrictedUntil: string | null;
   readonly role: string;
   readonly studentNumber: string;
@@ -32,6 +33,7 @@ const SessionUserSchema = z.object({
   generation: z.number(),
   id: z.string(),
   name: z.string(),
+  restrictionReason: z.string().nullable().optional(),
   restrictedUntil: z.string().nullable().optional(),
   role: z.string(),
   studentNumber: z.string()
@@ -94,6 +96,7 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
       generation: session.user.generation,
       id: session.user.id,
       name: session.user.name,
+      restrictionReason: session.user.restrictionReason,
       restrictedUntil: session.user.restrictedUntil ? session.user.restrictedUntil.toISOString() : null,
       role: session.user.role,
       studentNumber: session.user.studentNumber
@@ -176,6 +179,7 @@ function readMockSessionToken(token: string): CurrentSession | null {
       id: parsedPayload.data.id,
       user: {
         ...parsedPayload.data.user,
+        restrictionReason: parsedPayload.data.user.restrictionReason ?? null,
         restrictedUntil: parsedPayload.data.user.restrictedUntil ?? null
       }
     };
