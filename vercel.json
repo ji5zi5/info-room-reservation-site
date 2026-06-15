@@ -4,13 +4,8 @@
   "regions": ["icn1"],
   "crons": [
     {
-      "path": "/api/cron/closed-period-notifications",
-      "schedule": "0 8 * * *"
-    },
-    {
       "path": "/api/cron/maintenance",
       "schedule": "0 19 * * *"
     }
-  ],
-  "regions": ["icn1"]
+  ]
 }
