@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getAdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
+import { getAdvanceReservationPolicy, isSelectableAdvanceDate } from "@/lib/advance-reservation-policy";
 import { collectStudentCurrentReservations, previewCancellationRestrictedUntil } from "@/lib/student-reservation-status";
 import type { ReservationPendingAction } from "@/components/reservation-action-dialog";
 import { AdminConsole } from "./admin/admin-console";
@@ -145,6 +145,12 @@ export function ReservationHomePage(): React.ReactElement {
     });
   }
 
+  function changeAdvanceDate(date: string): void {
+    if (advancePolicy && isSelectableAdvanceDate(date, advancePolicy)) {
+      setAdvanceDate(date);
+    }
+  }
+
   function selectCalendarDate(date: string): void {
     if (!advancePolicy) {
       return;
@@ -153,7 +159,7 @@ export function ReservationHomePage(): React.ReactElement {
       setTab("today");
       return;
     }
-    if (advancePolicy.kind === "available" && date >= advancePolicy.minDate && date <= advancePolicy.maxDate) {
+    if (isSelectableAdvanceDate(date, advancePolicy)) {
       setAdvanceDate(date);
       setTab("advance");
     }
@@ -237,7 +243,7 @@ export function ReservationHomePage(): React.ReactElement {
       targetDate={targetDate}
       toast={toast}
       user={user}
-      onAdvanceDateChange={setAdvanceDate}
+      onAdvanceDateChange={changeAdvanceDate}
       onCancel={requestCancel}
       onClosePendingAction={() => setPendingAction(null)}
       onCloseProfile={() => setProfileState((current) => ({ ...current, open: false }))}

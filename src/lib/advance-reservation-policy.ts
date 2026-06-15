@@ -33,6 +33,10 @@ export function isReservableDate(date: string, now: Date): boolean {
   if (date === policy.today) {
     return true;
   }
+  return isSelectableAdvanceDate(date, policy);
+}
+
+export function isSelectableAdvanceDate(date: string, policy: AdvanceReservationPolicy): boolean {
   if (policy.kind === "unavailable") {
     return false;
   }
