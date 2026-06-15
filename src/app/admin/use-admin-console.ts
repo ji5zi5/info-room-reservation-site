@@ -7,7 +7,6 @@ import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 
 import {
   applyUserRestriction,
-  type AdminReadResult,
   cancelAdminReservation,
   fetchAdminAuditActions,
   fetchAdminDashboard,
@@ -24,6 +23,7 @@ import {
 } from "./admin-api-client";
 import { todayKst } from "./admin-date";
 import { buildReservationCsv } from "./admin-csv";
+import { firstAdminReadError } from "./admin-read-error";
 import {
   DEFAULT_RESTRICTION_DRAFT,
   type AdminConsoleState,
@@ -268,16 +268,4 @@ export function useAdminConsole(): AdminConsoleState {
     users,
     viewUser
   };
-}
-
-function firstAdminReadError(results: readonly AdminReadResult<unknown>[]): string | null {
-  for (const result of results) {
-    if (result.kind === "unauthorized") {
-      return "관리자 로그인이 필요합니다.";
-    }
-    if (result.kind === "error") {
-      return result.message;
-    }
-  }
-  return null;
 }

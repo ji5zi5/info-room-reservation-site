@@ -14,7 +14,8 @@ const ServerEnvSchema = z.object({
   ENABLE_LOCAL_ADMIN: BooleanFlagSchema,
   NODE_ENV: z.string().optional(),
   RIRO_MOCK_LOGIN: BooleanFlagSchema,
-  SESSION_SECRET: z.string().optional()
+  SESSION_SECRET: z.string().optional(),
+  TRUST_FORWARDED_IP_HEADERS: BooleanFlagSchema
 });
 
 export type ServerEnv = {
@@ -28,6 +29,7 @@ export type ServerEnv = {
   readonly nodeEnv: string;
   readonly riroMockLogin: boolean;
   readonly sessionSecret: string | null;
+  readonly trustForwardedIpHeaders: boolean;
 };
 
 export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
@@ -46,14 +48,27 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
     enableLocalAdmin: parsed.data.ENABLE_LOCAL_ADMIN === "true",
     nodeEnv: parsed.data.NODE_ENV ?? "development",
     riroMockLogin: parsed.data.RIRO_MOCK_LOGIN === "true",
-    sessionSecret: normalizeOptional(parsed.data.SESSION_SECRET)
+    sessionSecret: normalizeOptional(parsed.data.SESSION_SECRET),
+    trustForwardedIpHeaders: parsed.data.TRUST_FORWARDED_IP_HEADERS === "true"
   };
 }
 
 export function assertProductionEnvSafe(raw: ServerEnvInput = process.env): void {
   const env = parseServerEnv(raw);
-  if (env.nodeEnv === "production" && env.riroMockLogin) {
-    throw new ServerEnvError(["RIRO_MOCK_LOGIN"]);
+  if (env.nodeEnv === "production") {
+    const invalidKeys: string[] = [];
+    if (env.riroMockLogin) {
+      invalidKeys.push("RIRO_MOCK_LOGIN");
+    }
+    if (env.discordWebhookUrl === null) {
+      invalidKeys.push("DISCORD_WEBHOOK_URL");
+    }
+    if (!env.trustForwardedIpHeaders) {
+      invalidKeys.push("TRUST_FORWARDED_IP_HEADERS");
+    }
+    if (invalidKeys.length > 0) {
+      throw new ServerEnvError(invalidKeys);
+    }
   }
   if (env.enableLocalAdmin && env.adminLoginPassword !== null && env.adminLoginPassword.length < 12) {
     throw new ServerEnvError(["ADMIN_LOGIN_PASSWORD"]);
@@ -69,6 +84,10 @@ export function isMockLoginEnabled(raw: ServerEnvInput = process.env): boolean {
 export function isLocalAdminLoginEnabled(raw: ServerEnvInput = process.env): boolean {
   assertProductionEnvSafe(raw);
   return parseServerEnv(raw).enableLocalAdmin;
+}
+
+export function shouldTrustForwardedIpHeaders(raw: ServerEnvInput = process.env): boolean {
+  return parseServerEnv(raw).trustForwardedIpHeaders;
 }
 
 function normalizeOptional(value: string | undefined): string | null {

@@ -1,4 +1,4 @@
-import type { Prisma, Reservation as PrismaReservation } from "@prisma/client";
+import { Prisma, type Reservation as PrismaReservation } from "@prisma/client";
 
 import {
   type PeriodSetting,
@@ -13,9 +13,28 @@ import type { StudyPeriod } from "./study-periods";
 
 type PrismaTransaction = Prisma.TransactionClient;
 
+const MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS = 3;
+
+type PrismaInteractiveTransactionOptions = {
+  readonly isolationLevel: Prisma.TransactionIsolationLevel;
+  readonly maxWait: number;
+  readonly timeout: number;
+};
+
+export const PRISMA_RESERVATION_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  maxWait: 5_000,
+  timeout: 10_000
+} satisfies PrismaInteractiveTransactionOptions;
+
 export class PrismaReservationStore implements TransactionalReservationStore {
   public async transaction<T>(operation: (store: ReservationStore) => Promise<T>): Promise<T> {
-    return prisma.$transaction(async (transaction) => operation(new PrismaReservationStoreUnit(transaction)));
+    return retrySerializableReservationTransaction(() =>
+      prisma.$transaction(
+        async (transaction) => operation(new PrismaReservationStoreUnit(transaction)),
+        PRISMA_RESERVATION_TRANSACTION_OPTIONS
+      )
+    );
   }
 }
 
@@ -139,4 +158,22 @@ class InvalidStoredValueError extends Error {
     super(`Invalid ${field}: ${value}`);
     this.name = "InvalidStoredValueError";
   }
+}
+
+export async function retrySerializableReservationTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  let attempt = 1;
+  for (;;) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS || !isSerializableTransactionConflict(error)) {
+        throw error;
+      }
+      attempt += 1;
+    }
+  }
+}
+
+export function isSerializableTransactionConflict(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
 }

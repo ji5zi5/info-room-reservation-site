@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
 
+import { shouldTrustForwardedIpHeaders } from "./env";
+
 const UNKNOWN_CLIENT_IP = "unknown";
 
 export function getRequestClientIp(request: Request): string {
+  if (!shouldTrustForwardedIpHeaders()) {
+    return UNKNOWN_CLIENT_IP;
+  }
+
   const forwardedIp = request.headers
     .get("x-forwarded-for")
     ?.split(",")

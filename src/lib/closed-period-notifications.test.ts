@@ -66,6 +66,48 @@ describe("closed period notification candidate selection", () => {
     ]);
   });
 
+  it("does not select a period with an active sending delivery", () => {
+    const freshSendingDelivery = {
+      date: "2026-06-12",
+      kind: CLOSED_LIST_NOTIFICATION_KIND,
+      status: "SENDING",
+      studyPeriod: "EIGHTH",
+      updatedAt: new Date("2026-06-12T07:20:00.000Z")
+    } as const;
+    const deliveries = [
+      freshSendingDelivery
+    ] satisfies readonly ClosedPeriodDeliverySnapshot[];
+
+    const candidates = selectClosedPeriodNotificationCandidates({
+      deliveries,
+      now: new Date("2026-06-12T07:25:00.000Z"),
+      settings: [closedEighthSetting]
+    });
+
+    expect(candidates).toEqual([]);
+  });
+
+  it("selects a period with a stale sending delivery", () => {
+    const staleSendingDelivery = {
+      date: "2026-06-12",
+      kind: CLOSED_LIST_NOTIFICATION_KIND,
+      status: "SENDING",
+      studyPeriod: "EIGHTH",
+      updatedAt: new Date("2026-06-12T07:15:00.000Z")
+    } as const;
+    const deliveries = [
+      staleSendingDelivery
+    ] satisfies readonly ClosedPeriodDeliverySnapshot[];
+
+    const candidates = selectClosedPeriodNotificationCandidates({
+      deliveries,
+      now: new Date("2026-06-12T07:25:00.000Z"),
+      settings: [closedEighthSetting]
+    });
+
+    expect(candidates).toEqual([closedEighthSetting]);
+  });
+
   it("does not treat the exact close minute as closed until the next minute", () => {
     expect(
       isClosedPeriodForNotification(closedEighthSetting, new Date("2026-06-12T07:20:00.000Z"))

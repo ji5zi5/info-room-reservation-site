@@ -1,4 +1,5 @@
-import { getStudyPeriodLabel, isStudyPeriod, STUDY_PERIODS, type StudyPeriod } from "./study-periods";
+import { addDays } from "./date";
+import { DEFAULT_PERIOD_CAPACITY, getStudyPeriodLabel, isStudyPeriod, STUDY_PERIODS, type StudyPeriod } from "./study-periods";
 
 export type AdminStatisticsReservationRow = {
   readonly date: string;
@@ -72,22 +73,32 @@ export function buildAdminStatistics(input: {
   return {
     dailyStats: buildDailyStats(knownReservations),
     from: input.from,
-    periodStats: buildPeriodStats(knownReservations, input.settings),
+    periodStats: buildPeriodStats({
+      from: input.from,
+      reservations: knownReservations,
+      settings: input.settings,
+      to: input.to
+    }),
     repeatedOffenders: buildRepeatedOffenders(knownReservations),
     to: input.to,
     totals: { ...countReservations(knownReservations), uniqueStudentCount: uniqueStudentIds.size }
   };
 }
 
-function buildPeriodStats(
-  reservations: readonly AdminStatisticsReservationRow[],
-  settings: readonly AdminStatisticsPeriodSettingRow[]
-): readonly AdminPeriodStatistics[] {
+function buildPeriodStats(input: {
+  readonly from: string;
+  readonly reservations: readonly AdminStatisticsReservationRow[];
+  readonly settings: readonly AdminStatisticsPeriodSettingRow[];
+  readonly to: string;
+}): readonly AdminPeriodStatistics[] {
+  const dates = dateRange(input.from, input.to);
+  const settingsByDatePeriod = new Map(input.settings.map((setting) => [settingKey(setting.date, setting.studyPeriod), setting]));
   return STUDY_PERIODS.map((studyPeriod) => {
-    const counts = countReservations(reservations.filter((reservation) => reservation.studyPeriod === studyPeriod));
-    const capacity = settings
-      .filter((setting) => setting.studyPeriod === studyPeriod)
-      .reduce((sum, setting) => sum + setting.capacity, 0);
+    const counts = countReservations(input.reservations.filter((reservation) => reservation.studyPeriod === studyPeriod));
+    const capacity = dates.reduce(
+      (sum, date) => sum + (settingsByDatePeriod.get(settingKey(date, studyPeriod))?.capacity ?? DEFAULT_PERIOD_CAPACITY),
+      0
+    );
     return {
       ...counts,
       capacity,
@@ -96,6 +107,18 @@ function buildPeriodStats(
       studyPeriod
     };
   });
+}
+
+function dateRange(from: string, to: string): readonly string[] {
+  const dates: string[] = [];
+  for (let date = from; date <= to; date = addDays(date, 1)) {
+    dates.push(date);
+  }
+  return dates;
+}
+
+function settingKey(date: string, studyPeriod: string): string {
+  return `${date}:${studyPeriod}`;
 }
 
 function buildDailyStats(reservations: readonly AdminStatisticsReservationRow[]): readonly AdminDailyStatistics[] {

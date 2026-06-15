@@ -36,5 +36,21 @@ export const prismaMaintenanceCleanupStore: MaintenanceCleanupStore = {
       }
     });
     return result.count;
+  },
+
+  async revokeExpiredSanctions(now) {
+    const result = await prisma.userSanction.updateMany({
+      data: {
+        revokedAt: now,
+        revokedById: null,
+        revokedReason: "기간 만료",
+        status: "REVOKED"
+      },
+      where: {
+        endsAt: { lte: now },
+        status: "ACTIVE"
+      }
+    });
+    return result.count;
   }
 };

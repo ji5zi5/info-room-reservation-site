@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-Generated: 2026-06-12
-Commit: 21d82ea
+Generated: 2026-06-15
+Commit: 1e33461
 Branch: main
 
 ## OVERVIEW
@@ -12,11 +12,12 @@ Branch: main
 
 ```
 ./
-├── prisma/              # Postgres schema, seed data
+├── prisma/              # Postgres schema, migrations, seed data
+├── scripts/             # Predeploy and external smoke checks
 ├── src/app/             # Next pages, route handlers, CSS, admin UI
-├── src/components/      # Shared UI components, currently reservation card
+├── src/components/      # Shared reservation UI components
 ├── src/lib/             # Reservation/auth/admin/notification domain logic
-└── tests/               # Playwright E2E flows
+└── tests/               # Playwright E2E flows and helpers
 ```
 
 ## WHERE TO LOOK
@@ -25,11 +26,13 @@ Branch: main
 | --- | --- | --- |
 | Public reservation flow | `src/app/reservation-home.tsx`, `src/components/reservation-period-card.tsx` | `src/app/page.tsx` stays a thin entry; split `reservation-home.tsx` before growing it. |
 | Admin console UI | `src/app/admin/` | Server guard is in `src/app/admin/layout.tsx`; shared client fetch helpers are in `admin-api-client.ts`. |
+| API route handlers | `src/app/api/` | Request parsing, auth, CSRF, and rate limits happen at this boundary; see nested `AGENTS.md`. |
 | Reservation business rules | `src/lib/reservation-service.ts`, `src/lib/period-settings.ts`, `src/lib/study-periods.ts` | Keep `8면학` before `1면학`. |
 | Riro login/session | `src/lib/riro-auth.ts`, `src/lib/auth-service.ts`, `src/lib/session.ts` | Mock admin is only for `RIRO_MOCK_LOGIN=true`. |
 | Admin filters/search/detail | `src/lib/admin-reservations.ts`, `src/lib/admin-users.ts`, `src/lib/admin-user-detail.ts` | Unit-tested pure helpers. |
 | Discord close-list notifications | `src/lib/closed-period-*`, `src/lib/discord-notifications.ts`, `src/app/api/cron/closed-period-notifications/route.ts` | Send only after close, not on reservation create. |
-| E2E behavior | `tests/home-date-first.spec.ts`, `tests/admin-reservation-flow.spec.ts` | `home-date-first.spec.ts` is oversized; split by scenario before adding more. |
+| Deployment readiness | `DEPLOYMENT.md`, `scripts/predeploy-check.ts`, `scripts/external-smoke.ts`, `.github/workflows/ci.yml` | Vercel + Postgres path uses Prisma migrate deploy and explicit smoke gates. |
+| E2E behavior | `tests/home-date-first.spec.ts`, `tests/home-auth-refresh.spec.ts`, `tests/admin-reservation-flow.spec.ts`, `tests/admin-ui-polish.spec.ts` | Keep new scenarios focused rather than expanding one large spec. |
 
 ## PROJECT INVARIANTS
 
@@ -45,9 +48,11 @@ Branch: main
 ## DATA AND ENV
 
 - Prisma datasource is PostgreSQL. Local SQLite assumptions are stale.
-- Required envs for realistic local/dev deploy work: `DATABASE_URL`, `SESSION_SECRET`, `RIRO_MOCK_LOGIN`, `ADMIN_STUDENT_NUMBERS`, `CRON_SECRET`, `DISCORD_WEBHOOK_URL`.
-- Vercel cron hits `GET /api/cron/closed-period-notifications`; auth is `Authorization: Bearer ${CRON_SECRET}`.
+- Required production envs: `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_STUDENT_NUMBERS`, `CRON_SECRET`, `DISCORD_WEBHOOK_URL`, `TRUST_FORWARDED_IP_HEADERS=true`.
+- Development toggles: `RIRO_MOCK_LOGIN`, `ENABLE_LOCAL_ADMIN`, `ADMIN_LOGIN_ID`, `ADMIN_LOGIN_PASSWORD`. Production must not rely on these.
+- Vercel cron hits `GET /api/cron/closed-period-notifications` and `GET /api/cron/maintenance`; auth is `Authorization: Bearer ${CRON_SECRET}`.
 - Production sessions should set Secure cookies via `src/lib/session.ts`.
+- External live checks use `npm run smoke:external`; never commit real smoke credentials.
 
 ## COMMANDS
 
@@ -56,8 +61,12 @@ npm run dev
 npm run typecheck
 npm test
 npm run build
+npm run vercel-build
+npm run predeploy:check
+npm run smoke:external
 npm run db:generate
-npm run db:push
+npm run db:migrate
+npm run db:deploy
 npm run db:seed
 ```
 
@@ -72,5 +81,6 @@ npm run db:seed
 
 - `src/app/reservation-home.tsx` mixes login/sidebar/date-tab/reservation concerns; new behavior should be extracted instead of appended.
 - `tests/home-date-first.spec.ts` is already large; add a new spec file for new scenarios.
-- `next-env.d.ts` can flip between `.next/dev/types` and `.next/types` after dev/build. Do not commit that churn unless it is intentional.
+- `next-env.d.ts` can flip between `.next/dev/types` and `.next/types` after dev/build. Do not commit that churn unless CI/build behavior needs the new value.
 - `.omo/` is ignored; planning artifacts there are local and will not appear in normal git status.
+- `prisma/dev.db`, `.next/`, `test-results/`, and `tsconfig.tsbuildinfo` are local artifacts. They do not belong in GitHub.

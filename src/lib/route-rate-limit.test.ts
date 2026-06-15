@@ -5,6 +5,8 @@ import { prismaRateLimitStore } from "./prisma-rate-limit-store";
 import { rateLimitKey } from "./rate-limit";
 import {
   buildAdminMutationRateLimitRules,
+  buildLoginIdentifierRateLimitRules,
+  buildLoginIpRateLimitRules,
   buildLoginRateLimitRules,
   buildReservationRateLimitRules,
   getRouteRateLimitStore
@@ -37,6 +39,47 @@ describe("route rate-limit rules", () => {
       {
         key: rateLimitKey(["login-ip", "hour", "203.0.113.8"]),
         limit: 100,
+        windowMs: 3_600_000
+      }
+    ]);
+    for (const rule of rules) {
+      expect(rule.key).not.toContain("StudentA");
+      expect(rule.key).not.toContain("203.0.113.8");
+    }
+  });
+
+  it("builds IP-only login buckets before a login id has been parsed", () => {
+    const rules = buildLoginIpRateLimitRules({ clientIp: "203.0.113.8" });
+
+    expect(rules).toEqual([
+      {
+        key: rateLimitKey(["login-ip", "minute", "203.0.113.8"]),
+        limit: 30,
+        windowMs: 60_000
+      },
+      {
+        key: rateLimitKey(["login-ip", "hour", "203.0.113.8"]),
+        limit: 100,
+        windowMs: 3_600_000
+      }
+    ]);
+    for (const rule of rules) {
+      expect(rule.key).not.toContain("203.0.113.8");
+    }
+  });
+
+  it("builds parsed login-id buckets without double-counting IP-only buckets", () => {
+    const rules = buildLoginIdentifierRateLimitRules({ clientIp: "203.0.113.8", loginId: " StudentA " });
+
+    expect(rules).toEqual([
+      {
+        key: rateLimitKey(["login", "minute", "203.0.113.8", "studenta"]),
+        limit: 5,
+        windowMs: 60_000
+      },
+      {
+        key: rateLimitKey(["login", "hour", "203.0.113.8", "studenta"]),
+        limit: 20,
         windowMs: 3_600_000
       }
     ]);

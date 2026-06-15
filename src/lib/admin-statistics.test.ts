@@ -40,9 +40,9 @@ describe("buildAdminStatistics", () => {
       studyPeriod: "EIGHTH"
     });
     expect(statistics.periodStats[1]).toMatchObject({
-      capacity: 8,
+      capacity: 18,
       confirmedCount: 1,
-      fillRate: 12.5,
+      fillRate: 5.6,
       label: "1면학",
       studyPeriod: "FIRST"
     });
@@ -59,6 +59,20 @@ describe("buildAdminStatistics", () => {
         totalIncidents: 2,
         userId: "user-b"
       }
+    ]);
+  });
+
+  it("uses default capacity for date-periods without stored settings", () => {
+    const statistics = buildAdminStatistics({
+      from: "2026-06-10",
+      reservations: [],
+      settings: [],
+      to: "2026-06-11"
+    });
+
+    expect(statistics.periodStats.map((period) => ({ capacity: period.capacity, studyPeriod: period.studyPeriod }))).toEqual([
+      { capacity: 20, studyPeriod: "EIGHTH" },
+      { capacity: 20, studyPeriod: "FIRST" }
     ]);
   });
 });

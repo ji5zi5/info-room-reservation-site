@@ -6,7 +6,7 @@ import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
-import { enforceLoginRateLimit } from "@/lib/route-rate-limit";
+import { enforceLoginIpRateLimit, enforceLoginRateLimit } from "@/lib/route-rate-limit";
 import { setSessionCookie } from "@/lib/session";
 
 const LoginRequestSchema = z.object({
@@ -21,6 +21,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       return jsonMutatingRequestSafetyError(requestSafetyError);
     }
 
+    const skipRateLimit = isNoDatabaseMockMode();
+    if (!skipRateLimit) {
+      const ipRateLimitResult = await enforceLoginIpRateLimit(request);
+      if (ipRateLimitResult.kind === "blocked") {
+        return jsonRateLimitError(ipRateLimitResult);
+      }
+    }
+
     const parsed = await readJsonRequest(request, {
       message: "아이디와 비밀번호를 입력해주세요.",
       schema: LoginRequestSchema
@@ -29,7 +37,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       return parsed.response;
     }
 
-    if (!isNoDatabaseMockMode()) {
+    if (!skipRateLimit) {
       const rateLimitResult = await enforceLoginRateLimit(request, parsed.data.id);
       if (rateLimitResult.kind === "blocked") {
         return jsonRateLimitError(rateLimitResult);

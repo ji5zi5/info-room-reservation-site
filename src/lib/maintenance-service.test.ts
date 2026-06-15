@@ -21,6 +21,10 @@ describe("maintenance cleanup service", () => {
       async releaseExpiredRestrictions(now) {
         calls.push(`restrictions:${now.toISOString()}`);
         return 4;
+      },
+      async revokeExpiredSanctions(now) {
+        calls.push(`sanctions:${now.toISOString()}`);
+        return 5;
       }
     };
 
@@ -28,6 +32,7 @@ describe("maintenance cleanup service", () => {
 
     await expect(runMaintenanceCleanup({ now, store })).resolves.toEqual({
       csrfTokensDeleted: 2,
+      expiredSanctionsRevoked: 5,
       rateLimitBucketsDeleted: 3,
       restrictionsReleased: 4,
       sessionsDeleted: 1
@@ -36,7 +41,8 @@ describe("maintenance cleanup service", () => {
       "sessions:2026-06-14T12:00:00.000Z",
       "csrf:2026-06-14T12:00:00.000Z",
       "rate:2026-06-14T12:00:00.000Z",
-      "restrictions:2026-06-14T12:00:00.000Z"
+      "restrictions:2026-06-14T12:00:00.000Z",
+      "sanctions:2026-06-14T12:00:00.000Z"
     ]);
   });
 });

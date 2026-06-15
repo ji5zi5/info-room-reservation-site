@@ -32,7 +32,7 @@ function buildContentSecurityPolicy(environment: RuntimeEnvironment): string {
     scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
-    "font-src 'self' https://cdn.jsdelivr.net data:",
+    "font-src 'self' data:",
     "connect-src 'self' https://iscience.riroschool.kr",
     "form-action 'self'",
     "frame-ancestors 'none'"

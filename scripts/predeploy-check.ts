@@ -4,11 +4,12 @@ const requiredProductionKeys = [
   "DATABASE_URL",
   "SESSION_SECRET",
   "ADMIN_STUDENT_NUMBERS",
-  "CRON_SECRET"
+  "CRON_SECRET",
+  "DISCORD_WEBHOOK_URL",
+  "TRUST_FORWARDED_IP_HEADERS"
 ] as const;
 
 try {
-  assertProductionEnvSafe(process.env);
   const env = parseServerEnv(process.env);
   if (env.nodeEnv === "production") {
     const missing = requiredProductionKeys.filter((key) => process.env[key]?.trim() === undefined || process.env[key]?.trim() === "");
@@ -16,6 +17,7 @@ try {
       throw new ServerEnvError(missing);
     }
   }
+  assertProductionEnvSafe(process.env);
   console.log("Predeploy environment check passed.");
 } catch (error) {
   if (error instanceof ServerEnvError) {

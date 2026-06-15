@@ -5,7 +5,7 @@
 html {
   background: var(--white);
   color: var(--ink);
-  font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+  font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
   letter-spacing: 0;
   line-break: strict;
   scrollbar-gutter: stable;

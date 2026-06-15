@@ -80,4 +80,13 @@ describe("mock admin data", () => {
       }
     });
   });
+
+  it("sums default period capacity across the requested range", () => {
+    const statistics = getMockAdminStatistics({ from: "2026-06-14", to: "2026-06-15" });
+
+    expect(statistics.periodStats.map((period) => ({ capacity: period.capacity, studyPeriod: period.studyPeriod }))).toEqual([
+      { capacity: 20, studyPeriod: "EIGHTH" },
+      { capacity: 20, studyPeriod: "FIRST" }
+    ]);
+  });
 });

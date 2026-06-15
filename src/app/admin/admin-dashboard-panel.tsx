@@ -2,6 +2,8 @@
 
 import { AlertTriangle, Bell, ClipboardList, Send, TrendingUp, Users } from "lucide-react";
 
+import { isStaleSendingDelivery } from "@/lib/closed-period-notifications";
+
 import type { AdminDashboardPeriod, AdminStatistics } from "./admin-types";
 import { buildStatisticsCsv } from "./admin-csv";
 
@@ -71,12 +73,12 @@ export function AdminDashboardPanel({
               {period.notification?.lastError ? <p className="muted">실패 원인 {period.notification.lastError}</p> : null}
               <button
                 className={period.notification?.status === "SENT" ? "ghost-button" : "primary-button"}
-                disabled={!period.isClosed}
+                disabled={!period.isClosed || isFreshSendingNotification(period)}
                 type="button"
-                onClick={() => onSendNotification(period, period.notification?.status === "SENT")}
+                onClick={() => onSendNotification(period, shouldForceNotification(period))}
               >
                 <Send size={16} />
-                {period.notification?.status === "SENT" ? "재전송" : "마감 명단 보내기"}
+                {notificationActionLabel(period)}
               </button>
             </div>
           </article>
@@ -128,6 +130,33 @@ export function AdminDashboardPanel({
   );
 }
 
+function isFreshSendingNotification(period: AdminDashboardPeriod): boolean {
+  const notification = period.notification;
+  if (notification?.status !== "SENDING") {
+    return false;
+  }
+  return !isStaleSendingDelivery({ status: notification.status, updatedAt: new Date(notification.updatedAt) }, new Date());
+}
+
+function isStaleSendingNotification(period: AdminDashboardPeriod): boolean {
+  const notification = period.notification;
+  return notification?.status === "SENDING" && !isFreshSendingNotification(period);
+}
+
+function notificationActionLabel(period: AdminDashboardPeriod): string {
+  if (isFreshSendingNotification(period)) {
+    return "전송 중";
+  }
+  if (period.notification?.status === "SENT" || isStaleSendingNotification(period)) {
+    return "재전송";
+  }
+  return "마감 명단 보내기";
+}
+
+function shouldForceNotification(period: AdminDashboardPeriod): boolean {
+  return period.notification?.status === "SENT" || isStaleSendingNotification(period);
+}
+
 function notificationLabel(period: AdminDashboardPeriod): string {
   if (!period.notification) {
     return "전송 대기";
@@ -135,6 +164,8 @@ function notificationLabel(period: AdminDashboardPeriod): string {
   switch (period.notification.status) {
     case "FAILED":
       return `전송 실패 · ${period.notification.attempts}회`;
+    case "SENDING":
+      return `전송 중 · ${period.notification.attempts}회`;
     case "SENT":
       return `전송됨 · ${period.notification.messageIds.length}건`;
   }

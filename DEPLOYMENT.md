@@ -8,11 +8,12 @@ Target platform: Vercel with managed Postgres.
 - `SESSION_SECRET`: long random secret for session signing.
 - `ADMIN_STUDENT_NUMBERS`: comma-separated student numbers with admin access.
 - `CRON_SECRET`: bearer token used by cron endpoints.
+- `DISCORD_WEBHOOK_URL`: Discord webhook URL for closed-period notifications.
+- `TRUST_FORWARDED_IP_HEADERS`: must be `true` on Vercel production so login rate limits use the real client IP from trusted proxy headers.
 - `RIRO_MOCK_LOGIN`: must be `false` in production.
 
 Optional:
 
-- `DISCORD_WEBHOOK_URL`: Discord webhook URL for closed-period notifications.
 - `ENABLE_LOCAL_ADMIN`: local fallback admin login. Keep `false` in production unless explicitly needed.
 - `ADMIN_LOGIN_ID`, `ADMIN_LOGIN_PASSWORD`: local admin credentials when fallback login is enabled.
 
@@ -33,7 +34,7 @@ That command runs Prisma Client generation, `prisma migrate deploy`, and `next b
 3. Run `npm run predeploy:check` locally with the production env loaded.
 4. Deploy with `npm run vercel-build`.
 5. Open the site, log in with a real Riro account, and confirm `/api/me` returns the current user.
-6. Open `/admin`, confirm the dashboard loads, and test one reservation close-list resend if Discord is configured.
+6. Open `/admin`, confirm the dashboard loads, and test one reservation close-list resend.
 7. Confirm Vercel cron has both jobs:
    - `/api/cron/closed-period-notifications`
    - `/api/cron/maintenance`
@@ -46,7 +47,35 @@ Both cron endpoints require:
 Authorization: Bearer ${CRON_SECRET}
 ```
 
-`/api/cron/maintenance` removes expired sessions, expired CSRF tokens, expired rate-limit buckets, and releases expired temporary reservation restrictions.
+`/api/cron/maintenance` removes expired sessions, expired CSRF tokens, expired rate-limit buckets, releases expired temporary reservation restrictions, and revokes expired temporary sanction rows.
+
+## External Integration Smoke Gate
+
+Run these only with real production secrets and a valid Riro account:
+
+1. Set smoke variables in a private shell. Do not commit them.
+2. Run `npm run smoke:external`; this logs in with Riro and confirms `/api/me`.
+3. To also send one Discord close-list message, set `SMOKE_CONFIRM_DISCORD_SEND=true` with `SMOKE_ADMIN_ID`, `SMOKE_ADMIN_PASSWORD`, `SMOKE_CLOSED_LIST_DATE`, and `SMOKE_CLOSED_LIST_PERIOD`, then run `npm run smoke:external`.
+4. Stop after one failed Riro password response to avoid account lockout.
+
+Required smoke variables:
+
+```bash
+SMOKE_BASE_URL=https://your-production-domain.example
+RIRO_SMOKE_ID=25-00000
+RIRO_SMOKE_PASSWORD=...
+```
+
+Optional Discord send variables:
+
+```bash
+SMOKE_CONFIRM_DISCORD_SEND=true
+SMOKE_ADMIN_ID=...
+SMOKE_ADMIN_PASSWORD=...
+SMOKE_CLOSED_LIST_DATE=2026-06-15
+SMOKE_CLOSED_LIST_PERIOD=EIGHTH
+SMOKE_FORCE_DISCORD_SEND=true
+```
 
 ## Rollback
 

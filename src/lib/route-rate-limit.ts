@@ -14,11 +14,20 @@ const ADMIN_MUTATION_MINUTE_LIMIT = 20;
 const ONE_MINUTE_MS = 60_000;
 const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
 
+export function enforceLoginIpRateLimit(request: Request): Promise<RateLimitResult> {
+  const clientIp = getRequestClientIp(request);
+  return checkRateLimit({
+    now: new Date(),
+    rules: buildLoginIpRateLimitRules({ clientIp }),
+    store: getRouteRateLimitStore()
+  });
+}
+
 export function enforceLoginRateLimit(request: Request, loginId: string): Promise<RateLimitResult> {
   const clientIp = getRequestClientIp(request);
   return checkRateLimit({
     now: new Date(),
-    rules: buildLoginRateLimitRules({ clientIp, loginId }),
+    rules: buildLoginIdentifierRateLimitRules({ clientIp, loginId }),
     store: getRouteRateLimitStore()
   });
 }
@@ -49,6 +58,13 @@ export function buildLoginRateLimitRules(input: {
   readonly clientIp: string;
   readonly loginId: string;
 }): readonly RateLimitRule[] {
+  return [...buildLoginIdentifierRateLimitRules(input), ...buildLoginIpRateLimitRules({ clientIp: input.clientIp })];
+}
+
+export function buildLoginIdentifierRateLimitRules(input: {
+  readonly clientIp: string;
+  readonly loginId: string;
+}): readonly RateLimitRule[] {
   const normalizedLoginId = normalizeRateLimitPart(input.loginId);
   return [
     {
@@ -60,7 +76,12 @@ export function buildLoginRateLimitRules(input: {
       key: rateLimitKey(["login", "hour", input.clientIp, normalizedLoginId]),
       limit: LOGIN_HOUR_LIMIT,
       windowMs: ONE_HOUR_MS
-    },
+    }
+  ];
+}
+
+export function buildLoginIpRateLimitRules(input: { readonly clientIp: string }): readonly RateLimitRule[] {
+  return [
     {
       key: rateLimitKey(["login-ip", "minute", input.clientIp]),
       limit: LOGIN_IP_MINUTE_LIMIT,

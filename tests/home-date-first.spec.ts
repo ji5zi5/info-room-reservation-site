@@ -235,7 +235,7 @@ test("period cards show confirmed applicants", async ({ page }) => {
 });
 
 test("applicant toggle preserves period order and tab dimensions", async ({ page }) => {
-  await login(page, "25-10316");
+  await login(page, "mock-applicant-order");
 
   const todayTab = page.getByRole("button", { name: "당일예약" });
   const advanceTab = page.getByRole("button", { name: "사전예약" });

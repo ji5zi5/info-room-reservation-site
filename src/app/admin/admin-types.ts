@@ -30,7 +30,8 @@ const AdminDashboardNotificationSchema = z.object({
   lastError: z.string().nullable(),
   messageIds: z.array(z.string()),
   sentAt: z.string().nullable(),
-  status: z.union([z.literal("FAILED"), z.literal("SENT")])
+  status: z.union([z.literal("FAILED"), z.literal("SENDING"), z.literal("SENT")]),
+  updatedAt: z.string()
 });
 
 export const AdminDashboardPeriodSchema = AdminPeriodSettingSchema.extend({

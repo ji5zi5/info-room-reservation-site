@@ -27,6 +27,22 @@ describe("riro auth parser", () => {
     });
   });
 
+  it("returns a typed invalid credential result when RiroSchool returns current 103 response", () => {
+    expect(
+      interpretLoginJson({
+        code: 103,
+        data: { lock: false, set_app: [], url: "/user.php?action=signin" },
+        msg: "비밀번호를 다시 확인하세요. (2/5회 오류)",
+        token: null
+      })
+    ).toEqual({
+      kind: "error",
+      message: "비밀번호를 다시 확인하세요. (2/5회 오류)",
+      reason: "invalid_credentials"
+    });
+  });
+
+
   it("parses a normal RiroSchool account profile", () => {
     const html = `
       <span class="m_level3">2학년 3반</span>

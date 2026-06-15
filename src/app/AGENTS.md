@@ -11,7 +11,7 @@ src/app/
 ├── page.tsx             # Thin root entry
 ├── reservation-home.tsx # Public reservation shell and admin handoff
 ├── admin/               # Protected admin console
-├── api/                 # Route handlers and cron endpoint
+├── api/                 # Route handlers and cron endpoints
 ├── styles/              # Global CSS split by role
 ├── layout.tsx
 └── globals.css
@@ -24,9 +24,10 @@ src/app/
 | Login and reservation tabs | `reservation-home.tsx` | Already large; extract components for any substantial change. |
 | Admin page protection | `admin/layout.tsx` | Must call `requireAdmin()` before rendering admin UI. |
 | Admin route UI | `admin/page.tsx`, `admin/admin-console.tsx`, `reservation-home.tsx` | Admins also see `AdminConsole` immediately after normal login. |
+| Route handlers | `api/` | Nested `AGENTS.md` covers request parsing, auth, CSRF, and mutation rules. |
 | Reservation API | `api/reservations/route.ts`, `api/reservations/[id]/route.ts` | Server must be the authority for capacity, duplicates, windows, restrictions. |
 | Period summary API | `api/periods/route.ts` | Must include applicants and current user's `myReservationId`. |
-| Cron | `api/cron/closed-period-notifications/route.ts` | Bearer secret required. |
+| Cron | `api/cron/closed-period-notifications/route.ts`, `api/cron/maintenance/route.ts` | Bearer secret required. |
 
 ## CONVENTIONS
 

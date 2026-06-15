@@ -55,7 +55,7 @@ export function getMockAdminStatistics(input: {
     from: input.from,
     periodStats: STUDY_PERIODS.map((studyPeriod) => ({
       ...zeroCountSummary(),
-      capacity: getCapacity(input.from, studyPeriod),
+      capacity: getCapacity(input.from, input.to, studyPeriod),
       fillRate: 0,
       label: getStudyPeriodLabel(studyPeriod),
       studyPeriod
@@ -69,9 +69,11 @@ export function getMockAdminStatistics(input: {
   };
 }
 
-function getCapacity(date: string, studyPeriod: StudyPeriod): number {
-  const period = getMockAdminPeriodSettings(date).find((candidate) => candidate.studyPeriod === studyPeriod);
-  return period?.capacity ?? 0;
+function getCapacity(from: string, to: string, studyPeriod: StudyPeriod): number {
+  return datesInRange(from, to).reduce((sum, date) => {
+    const period = getMockAdminPeriodSettings(date).find((candidate) => candidate.studyPeriod === studyPeriod);
+    return sum + (period?.capacity ?? 0);
+  }, 0);
 }
 
 function datesInRange(from: string, to: string): readonly string[] {

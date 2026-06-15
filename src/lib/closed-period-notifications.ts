@@ -4,9 +4,13 @@ import type { StudyPeriod } from "./study-periods";
 
 export const CLOSED_LIST_NOTIFICATION_KIND = "CLOSED_LIST";
 
+export const SENDING_DELIVERY_STALE_AFTER_MS = 10 * 60 * 1000;
+
 export type ClosedListNotificationKind = typeof CLOSED_LIST_NOTIFICATION_KIND;
 
-export type ClosedPeriodNotificationStatus = "FAILED" | "SENT";
+export type ClosedPeriodNotificationFinalStatus = "FAILED" | "SENT";
+
+export type ClosedPeriodNotificationStatus = ClosedPeriodNotificationFinalStatus | "SENDING";
 
 export type ClosedPeriodCandidate = {
   readonly capacity: number;
@@ -22,6 +26,7 @@ export type ClosedPeriodDeliverySnapshot = {
   readonly kind: string;
   readonly status: ClosedPeriodNotificationStatus;
   readonly studyPeriod: StudyPeriod;
+  readonly updatedAt?: Date;
 };
 
 export type SelectClosedPeriodNotificationCandidatesInput = {
@@ -36,7 +41,7 @@ export function selectClosedPeriodNotificationCandidates(
   return input.settings
     .filter((setting) => setting.enabled)
     .filter((setting) => isClosedPeriodForNotification(setting, input.now))
-    .filter((setting) => !hasSentDelivery(setting, input.deliveries))
+    .filter((setting) => !hasActiveDelivery(setting, input.deliveries, input.now))
     .sort(compareClosedPeriodCandidates);
 }
 
@@ -47,15 +52,30 @@ export function isClosedPeriodForNotification(setting: ClosedPeriodCandidate, no
   return isPeriodWindowClosed(setting, now);
 }
 
-function hasSentDelivery(
+export function staleSendingDeliveryCutoff(now: Date): Date {
+  return new Date(now.getTime() - SENDING_DELIVERY_STALE_AFTER_MS);
+}
+
+export function isStaleSendingDelivery(
+  delivery: Pick<ClosedPeriodDeliverySnapshot, "status" | "updatedAt">,
+  now: Date
+): boolean {
+  if (delivery.status !== "SENDING" || delivery.updatedAt === undefined) {
+    return false;
+  }
+  return delivery.updatedAt.getTime() <= staleSendingDeliveryCutoff(now).getTime();
+}
+
+function hasActiveDelivery(
   setting: ClosedPeriodCandidate,
-  deliveries: readonly ClosedPeriodDeliverySnapshot[]
+  deliveries: readonly ClosedPeriodDeliverySnapshot[],
+  now: Date
 ): boolean {
   return deliveries.some(
     (delivery) =>
       delivery.date === setting.date &&
       delivery.kind === CLOSED_LIST_NOTIFICATION_KIND &&
-      delivery.status === "SENT" &&
+      (delivery.status === "SENT" || (delivery.status === "SENDING" && !isStaleSendingDelivery(delivery, now))) &&
       delivery.studyPeriod === setting.studyPeriod
   );
 }

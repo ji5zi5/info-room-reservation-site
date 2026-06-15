@@ -14,9 +14,10 @@ jobs:
       SESSION_SECRET: ci-session-secret-replace-in-runtime
       RIRO_MOCK_LOGIN: "false"
       ENABLE_LOCAL_ADMIN: "false"
-      ADMIN_STUDENT_NUMBERS: ""
+      ADMIN_STUDENT_NUMBERS: "99999"
       CRON_SECRET: ci-cron-secret
-      DISCORD_WEBHOOK_URL: ""
+      DISCORD_WEBHOOK_URL: https://discord.com/api/webhooks/123/token
+      TRUST_FORWARDED_IP_HEADERS: "true"
     services:
       postgres:
         image: postgres:16
@@ -42,4 +43,8 @@ jobs:
       - run: npx prisma generate
       - run: npm run typecheck
       - run: npm test
+      - name: Production predeploy check
+        run: npm run predeploy:check
+        env:
+          NODE_ENV: production
       - run: npm run build

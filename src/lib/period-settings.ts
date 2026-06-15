@@ -43,11 +43,19 @@ type PeriodSummaryOptions = {
   readonly now?: Date;
 };
 
+export type PeriodSettingDefaults = {
+  readonly capacity: number;
+  readonly closeTime: string;
+  readonly date: string;
+  readonly enabled: boolean;
+  readonly openTime: string;
+  readonly studyPeriod: StudyPeriod;
+};
+
 export async function getPeriodSummaries(
   date: string,
   options: PeriodSummaryOptions = {}
 ): Promise<readonly PeriodSummary[]> {
-  await ensurePeriodSettings(date);
   const settings = await prisma.periodSetting.findMany({ where: { date } });
   const now = options.now ?? new Date();
   const counts = await prisma.reservation.groupBy({
@@ -58,10 +66,7 @@ export async function getPeriodSummaries(
   const applicants = await getPeriodApplicants(date, options.includeApplicants === true);
 
   return STUDY_PERIODS.map((studyPeriod) => {
-    const setting = settings.find((candidate) => candidate.studyPeriod === studyPeriod);
-    if (!setting) {
-      throw new MissingPeriodSettingError(date, studyPeriod);
-    }
+    const setting = settings.find((candidate) => candidate.studyPeriod === studyPeriod) ?? buildDefaultPeriodSetting(date, studyPeriod);
     const count = counts.find((candidate) => candidate.studyPeriod === studyPeriod)?._count._all ?? 0;
     const periodApplicants = applicantsForPeriod(studyPeriod, applicants);
     return {
@@ -163,9 +168,13 @@ export function parseStoredStudyPeriod(value: string): StudyPeriod {
   return parseStudyPeriod(value);
 }
 
-class MissingPeriodSettingError extends Error {
-  public constructor(date: string, studyPeriod: StudyPeriod) {
-    super(`Missing period setting for ${date} ${studyPeriod}`);
-    this.name = "MissingPeriodSettingError";
-  }
+export function buildDefaultPeriodSetting(date: string, studyPeriod: StudyPeriod): PeriodSettingDefaults {
+  return {
+    capacity: DEFAULT_PERIOD_CAPACITY,
+    closeTime: DEFAULT_PERIOD_CLOSE_TIME,
+    date,
+    enabled: true,
+    openTime: DEFAULT_PERIOD_OPEN_TIME,
+    studyPeriod
+  };
 }

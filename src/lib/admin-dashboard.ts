@@ -1,4 +1,4 @@
-import { CLOSED_LIST_NOTIFICATION_KIND } from "./closed-period-notifications";
+import { CLOSED_LIST_NOTIFICATION_KIND, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
 import { prisma } from "./db";
 import { getPeriodSummaries, type PeriodSummary } from "./period-settings";
 import { toDeliveryRecord } from "./prisma-notification-repository";
@@ -11,7 +11,8 @@ export type AdminDashboardPeriod = PeriodSummary & {
     readonly lastError: string | null;
     readonly messageIds: readonly string[];
     readonly sentAt: string | null;
-    readonly status: "FAILED" | "SENT";
+    readonly status: ClosedPeriodNotificationStatus;
+    readonly updatedAt: string;
   } | null;
 };
 
@@ -41,28 +42,33 @@ export async function getAdminDashboard(date: string, now: Date): Promise<readon
             lastError: delivery.lastError,
             messageIds: toDeliveryRecord(delivery).messageIds ?? [],
             sentAt: delivery.sentAt ? delivery.sentAt.toISOString() : null,
-            status: parseNotificationStatus(delivery.status)
+            status: parseNotificationStatus(delivery.status),
+            updatedAt: delivery.updatedAt.toISOString()
           }
         : null
     };
   });
 }
 
-function parseNotificationStatus(value: string): "FAILED" | "SENT" {
+function parseNotificationStatus(value: string): ClosedPeriodNotificationStatus {
   switch (value) {
-    case "SENT":
-      return "SENT";
     case "FAILED":
       return "FAILED";
+    case "SENDING":
+      return "SENDING";
+    case "SENT":
+      return "SENT";
     default:
       return "FAILED";
   }
 }
 
-export function notificationStatusLabel(status: "FAILED" | "SENT" | null): string {
+export function notificationStatusLabel(status: ClosedPeriodNotificationStatus | null): string {
   switch (status) {
     case "FAILED":
       return "실패";
+    case "SENDING":
+      return "전송 중";
     case "SENT":
       return "전송됨";
     case null:

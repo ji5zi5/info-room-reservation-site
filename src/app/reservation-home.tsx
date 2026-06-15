@@ -11,6 +11,7 @@ import { ReservationWarningPanel } from "@/components/reservation-warning-panel"
 import { AdminConsole } from "./admin/admin-console";
 import { readApiErrorMessage, readCurrentUser, readLoginPayload, readPeriodSummaries } from "./client-api-response";
 import { csrfFetch, resetCsrfToken } from "./csrf-fetch";
+import { consumeAdminRedirectMessage, reservationRestrictionMessage } from "./reservation-home-helpers";
 import { ReservationSidebar, type ReservationSidebarUser } from "./reservation-sidebar";
 
 type Tab = "today" | "advance";
@@ -241,34 +242,4 @@ export function ReservationHomePage(): React.ReactElement {
       />
     </main>
   );
-}
-
-function consumeAdminRedirectMessage(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const reason = params.get("admin");
-  if (reason === "required" || reason === "forbidden") {
-    window.history.replaceState(null, "", window.location.pathname);
-    return reason === "required" ? "로그인이 필요합니다." : "관리자 권한이 필요합니다.";
-  }
-  return null;
-}
-
-function reservationRestrictionMessage(user: ReservationSidebarUser | null): string | null {
-  switch (user?.bookingStatus) {
-    case "BANNED":
-      return "예약 이용이 제한되었습니다.";
-    case "RESTRICTED":
-      return isRestrictionCurrentlyActive(user.restrictedUntil) ? "예약 이용이 제한되었습니다." : null;
-    case "ACTIVE":
-    case undefined:
-    default:
-      return null;
-  }
-}
-
-function isRestrictionCurrentlyActive(restrictedUntil: string | null): boolean {
-  if (!restrictedUntil) {
-    return true;
-  }
-  return Date.parse(restrictedUntil) > Date.now();
 }

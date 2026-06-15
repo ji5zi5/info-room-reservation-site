@@ -10,6 +10,8 @@ const LoginJsonSchema = z
   })
   .passthrough();
 
+const INVALID_CREDENTIAL_CODES = new Set(["103", "400", "902"]);
+
 export type RiroRole = "STUDENT" | "TEACHER";
 
 export type RiroProfile = {
@@ -55,7 +57,7 @@ export function interpretLoginJson(input: unknown): RiroAuthResult | { readonly 
   }
 
   const code = parsed.data.code === undefined ? "" : String(parsed.data.code);
-  if (code === "400" || code === "902") {
+  if (INVALID_CREDENTIAL_CODES.has(code)) {
     return {
       kind: "error",
       message: parsed.data.msg ?? "아이디 또는 비밀번호가 틀렸습니다.",

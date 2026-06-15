@@ -16,12 +16,12 @@ describe("buildSecurityHeaders", () => {
     expect(headers["Permissions-Policy"]).toContain("camera=()");
   });
 
-  it("sets a CSP that blocks framing and only allows the app plus known font/CDN origins", () => {
+  it("sets a CSP that blocks framing and keeps fonts self-hosted or data-only", () => {
     const headers = headersFor("production");
 
     expect(headers["Content-Security-Policy"]).toContain("default-src 'self'");
     expect(headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
-    expect(headers["Content-Security-Policy"]).toContain("font-src 'self' https://cdn.jsdelivr.net data:");
+    expect(headers["Content-Security-Policy"]).toContain("font-src 'self' data:");
     expect(headers["Content-Security-Policy"]).toContain("connect-src 'self' https://iscience.riroschool.kr");
   });
 

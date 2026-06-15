@@ -7,7 +7,7 @@ import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@
 import { buildPeriodSettingsPatchAdminAction } from "@/lib/admin-operation-audit";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { getMockAdminPeriodSettings, updateMockAdminPeriodSettings } from "@/lib/mock-period-settings";
-import { ensurePeriodSettings, getPeriodSummaries } from "@/lib/period-settings";
+import { getPeriodSummaries } from "@/lib/period-settings";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
@@ -35,7 +35,6 @@ export async function GET(request: Request): Promise<NextResponse> {
     if (isNoDatabaseMockMode()) {
       return NextResponse.json({ periods: getMockAdminPeriodSettings(date) });
     }
-    await ensurePeriodSettings(date);
     return NextResponse.json({ periods: await getPeriodSummaries(date) });
   } catch (error) {
     return adminBoundaryError(error);
