@@ -49,6 +49,7 @@ type ReservationCountInput = {
 type ReservationCreateInput = {
   readonly data: {
     readonly date: string;
+    readonly reason: string;
     readonly status: "CONFIRMED";
     readonly studyPeriod: StudyPeriod;
     readonly userId: string;
@@ -63,6 +64,7 @@ type UserBookingRow = {
 type ReservationRow = {
   readonly date: string;
   readonly id: string;
+  readonly reason: string | null;
   readonly status: "CONFIRMED" | "CANCELLED" | "NO_SHOW";
   readonly studyPeriod: StudyPeriod;
   readonly userId: string;
@@ -196,6 +198,7 @@ describe("Prisma reservation store period defaults", () => {
     const result = await reserveStudyPeriod({
       date: "2026-06-16",
       now: new Date("2026-06-16T05:00:00.000Z"),
+      reason: "자습",
       store: prismaReservationStore,
       studyPeriod: "EIGHTH",
       userId: "user-1"
@@ -206,6 +209,7 @@ describe("Prisma reservation store period defaults", () => {
       reservation: {
         date: "2026-06-16",
         id: "reservation-1",
+        reason: "자습",
         status: "CONFIRMED",
         studyPeriod: "EIGHTH",
         userId: "user-1"
@@ -221,6 +225,15 @@ describe("Prisma reservation store period defaults", () => {
     });
     expect(prismaMocks.transactionClient.periodSetting.upsert).not.toHaveBeenCalled();
     expect(prismaMocks.transactionClient.reservation.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.transactionClient.reservation.create).toHaveBeenCalledWith({
+      data: {
+        date: "2026-06-16",
+        reason: "자습",
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId: "user-1"
+      }
+    });
   });
 });
 

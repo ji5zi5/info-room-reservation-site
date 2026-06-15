@@ -31,7 +31,7 @@ describe("Prisma closed-period notification periods", () => {
   });
 
   it("includes confirmed reservations when resolving defaults", async () => {
-    prismaMocks.reservationRows.push({ user: { name: "김도윤", studentNumber: "26001" } });
+    prismaMocks.reservationRows.push({ reason: "자습", user: { name: "김도윤", studentNumber: "26001" } });
 
     const period = await prismaClosedPeriodNotificationRepository.getPeriod({
       date: "2026-06-12",
@@ -39,7 +39,7 @@ describe("Prisma closed-period notification periods", () => {
     });
 
     expect(period?.confirmedCount).toBe(1);
-    expect(period?.applicants).toEqual([{ name: "김도윤", studentNumber: "26001" }]);
+    expect(period?.applicants).toEqual([{ name: "김도윤", reason: "자습", studentNumber: "26001" }]);
     expect(prismaMocks.periodSettingsStore).toHaveLength(0);
   });
 

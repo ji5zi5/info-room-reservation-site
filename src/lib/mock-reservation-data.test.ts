@@ -43,11 +43,13 @@ describe("mock reservation data", () => {
     const result = reserveMockStudyPeriod({
       date: "2026-06-14",
       now: new Date("2026-06-14T00:30:00.000Z"),
+      reason: "자습",
       studyPeriod: "EIGHTH",
       user: student
     });
 
     expect(result.kind).toBe("confirmed");
+    expect(result).toMatchObject({ reservation: { reason: "자습" } });
     expect(getMockAdminUsers({ bookingStatus: "ALL", query: "12345" })).toHaveLength(1);
     expect(getMockPeriodSummariesForUser({ currentUserId: student.id, date: "2026-06-14" })[0]).toMatchObject({
       applicants: [{ name: "테스트학생", studentNumber: "12345" }],
@@ -63,6 +65,7 @@ describe("mock reservation data", () => {
     reserveMockStudyPeriod({
       date: "2026-06-14",
       now: new Date("2026-06-14T00:30:00.000Z"),
+      reason: "자습",
       studyPeriod: "EIGHTH",
       user: student
     });
@@ -87,12 +90,14 @@ describe("mock reservation data", () => {
     reserveMockStudyPeriod({
       date: "2026-06-14",
       now: new Date("2026-06-14T00:30:00.000Z"),
+      reason: "자습",
       studyPeriod: "EIGHTH",
       user: student
     });
     reserveMockStudyPeriod({
       date: "2026-06-14",
       now: new Date("2026-06-14T00:35:00.000Z"),
+      reason: "과제",
       studyPeriod: "FIRST",
       user: student
     });
@@ -125,6 +130,7 @@ describe("mock reservation data", () => {
     reserveMockStudyPeriod({
       date: "2026-06-14",
       now: new Date("2026-06-14T00:30:00.000Z"),
+      reason: "자습",
       studyPeriod: "EIGHTH",
       user: student
     });

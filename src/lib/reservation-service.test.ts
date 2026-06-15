@@ -22,6 +22,7 @@ describe("reservation service", () => {
         reserveStudyPeriod({
           date: "2026-06-11",
           now: new Date("2026-06-11T09:00:00+09:00"),
+          reason: "자습",
           store,
           studyPeriod: "EIGHTH",
           userId: `user-${index + 1}`
@@ -47,6 +48,7 @@ describe("reservation service", () => {
       reserveStudyPeriod({
         date: "2026-06-11",
         now: new Date("2026-06-11T09:00:00+09:00"),
+        reason: "자습",
         store,
         studyPeriod: "FIRST",
         userId: "user-1"
@@ -57,6 +59,7 @@ describe("reservation service", () => {
       reserveStudyPeriod({
         date: "2026-06-11",
         now: new Date("2026-06-11T11:00:00+09:00"),
+        reason: "자습",
         store,
         studyPeriod: "FIRST",
         userId: "user-2"
@@ -67,6 +70,7 @@ describe("reservation service", () => {
       reserveStudyPeriod({
         date: "2026-06-11",
         now: new Date("2026-06-11T11:00:00+09:00"),
+        reason: "자습",
         store,
         studyPeriod: "FIRST",
         userId: "user-1"
@@ -77,6 +81,7 @@ describe("reservation service", () => {
       reserveStudyPeriod({
         date: "2026-06-11",
         now: new Date("2026-06-11T11:01:00+09:00"),
+        reason: "자습",
         store,
         studyPeriod: "FIRST",
         userId: "user-1"
@@ -97,11 +102,33 @@ describe("reservation service", () => {
       reserveStudyPeriod({
         date: "2026-06-12",
         now: new Date("2026-06-11T09:00:00+09:00"),
+        reason: "자습",
         store,
         studyPeriod: "FIRST",
         userId: "user-1"
       })
     ).resolves.toMatchObject({ kind: "confirmed" });
+  });
+
+  it("stores the supplied reservation reason", async () => {
+    const store = createMemoryReservationStore({
+      capacity: 10,
+      date: "2026-06-11",
+      openTime: "08:00",
+      closeTime: "23:00",
+      userCount: 1
+    });
+
+    await expect(
+      reserveStudyPeriod({
+        date: "2026-06-11",
+        now: new Date("2026-06-11T09:00:00+09:00"),
+        reason: "자습",
+        store,
+        studyPeriod: "EIGHTH",
+        userId: "user-1"
+      })
+    ).resolves.toMatchObject({ kind: "confirmed", reservation: { reason: "자습" } });
   });
 
   it("blocks advance reservations after this week's Friday", async () => {
@@ -117,6 +144,7 @@ describe("reservation service", () => {
       reserveStudyPeriod({
         date: "2026-06-13",
         now: new Date("2026-06-11T09:00:00+09:00"),
+        reason: "자습",
         store,
         studyPeriod: "FIRST",
         userId: "user-1"
@@ -137,6 +165,7 @@ describe("reservation service", () => {
       reserveStudyPeriod({
         date: "2026-06-15",
         now: new Date("2026-06-12T09:00:00+09:00"),
+        reason: "자습",
         store,
         studyPeriod: "FIRST",
         userId: "user-1"

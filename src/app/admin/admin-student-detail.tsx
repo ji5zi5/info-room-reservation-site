@@ -67,7 +67,11 @@ export function AdminStudentDetail({
       <DetailSection title="현재 예약">
         {detail.currentReservations.length > 0 ? (
           detail.currentReservations.map((reservation) => (
-            <DetailLine key={reservation.id} left={periodLabel(reservation.studyPeriod)} right={reservation.date} />
+            <DetailLine
+              key={reservation.id}
+              left={`${periodLabel(reservation.studyPeriod)} · ${reservationReasonLabel(reservation.reason)}`}
+              right={reservation.date}
+            />
           ))
         ) : (
           <p className="muted">현재 예약 없음</p>
@@ -77,7 +81,7 @@ export function AdminStudentDetail({
         {detail.reservationHistory.slice(0, 12).map((reservation) => (
           <DetailLine
             key={reservation.id}
-            left={`${reservation.date} · ${periodLabel(reservation.studyPeriod)}`}
+            left={`${reservation.date} · ${periodLabel(reservation.studyPeriod)} · ${reservationReasonLabel(reservation.reason)}`}
             right={statusLabel(reservation.status)}
           />
         ))}
@@ -154,6 +158,11 @@ function DetailLine({ left, right }: { readonly left: string; readonly right: st
       <strong>{right}</strong>
     </div>
   );
+}
+
+function reservationReasonLabel(reason: string | null): string {
+  const normalized = reason?.trim();
+  return normalized ? normalized : "사유 미기록";
 }
 
 function periodLabel(studyPeriod: string): string {

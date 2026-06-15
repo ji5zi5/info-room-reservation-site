@@ -8,8 +8,8 @@ import {
 
 const baseInput = {
   applicants: [
-    { name: "김도윤", studentNumber: "26001" },
-    { name: "박서연", studentNumber: "26002" }
+    { name: "김도윤", reason: "자습", studentNumber: "26001" },
+    { name: "박서연", reason: "과제", studentNumber: "26002" }
   ],
   capacity: 10,
   closeTime: "16:20",
@@ -26,8 +26,8 @@ describe("Discord closed-period notification payload", () => {
     expect(payload.embeds[0]?.title).toBe("8면학 마감 신청자 명단");
     expect(payload.embeds[0]?.description).toContain("2026-06-12");
     expect(payload.embeds[0]?.description).toContain("2/10명");
-    expect(payload.embeds[0]?.fields[0]?.value).toContain("김도윤 (26001)");
-    expect(payload.embeds[0]?.fields[0]?.value).toContain("박서연 (26002)");
+    expect(payload.embeds[0]?.fields[0]?.value).toContain("김도윤 (26001) - 자습");
+    expect(payload.embeds[0]?.fields[0]?.value).toContain("박서연 (26002) - 과제");
   });
 
   it("marks an empty closed list explicitly", () => {
@@ -43,6 +43,7 @@ describe("Discord closed-period notification payload", () => {
   it("chunks a long applicant list inside Discord embed limits", () => {
     const applicants = Array.from({ length: 80 }, (_, index) => ({
       name: `학생${index.toString().padStart(2, "0")}`,
+      reason: "자습",
       studentNumber: `26${index.toString().padStart(3, "0")}`
     }));
     const payload = buildClosedPeriodDiscordPayload({

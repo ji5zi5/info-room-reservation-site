@@ -63,7 +63,14 @@ export function AdminUsersPanel({
               <span className="status-chip" data-status={user.bookingStatus}>{statusLabel(user.bookingStatus)}</span>
               <p className="muted">{user.restrictionReason ?? "제재 없음"}</p>
             </div>
-            <button className="ghost-button" type="button" onClick={() => onSelectUser(user.id)}>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={(event) => {
+                keepUserRowVisible(event.currentTarget);
+                onSelectUser(user.id);
+              }}
+            >
               상세 보기
             </button>
           </div>
@@ -85,4 +92,23 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
+}
+
+function keepUserRowVisible(button: HTMLButtonElement): void {
+  const row = button.closest<HTMLElement>(".user-line");
+  const list = button.closest<HTMLElement>(".user-list");
+  if (!row || !list) {
+    return;
+  }
+  window.requestAnimationFrame(() => {
+    const rowRect = row.getBoundingClientRect();
+    const listRect = list.getBoundingClientRect();
+    if (rowRect.top < listRect.top) {
+      list.scrollTop += rowRect.top - listRect.top;
+      return;
+    }
+    if (rowRect.bottom > listRect.bottom) {
+      list.scrollTop += rowRect.bottom - listRect.bottom;
+    }
+  });
 }

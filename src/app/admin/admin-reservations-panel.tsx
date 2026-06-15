@@ -94,6 +94,7 @@ export function AdminReservationsPanel({
             <div>
               <strong>{reservation.user.name}</strong>
               <p className="muted">{reservation.user.studentNumber}</p>
+              <p className="muted">사유 {reservationReasonLabel(reservation.reason)}</p>
             </div>
             <span>{reservation.studyPeriod === "EIGHTH" ? "8면학" : "1면학"}</span>
             <span>{statusLabel(reservation.status)}</span>
@@ -121,6 +122,11 @@ export function AdminReservationsPanel({
       </div>
     </section>
   );
+}
+
+function reservationReasonLabel(reason: string | null): string {
+  const normalized = reason?.trim();
+  return normalized ? normalized : "미기록";
 }
 
 function parsePeriodFilter(value: string): AdminReservationStudyPeriodFilter {

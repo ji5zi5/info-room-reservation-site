@@ -53,7 +53,7 @@ export type NotificationDeliveryRow = {
 const prismaMocks = vi.hoisted(() => {
   const periodSettingsStore: PeriodSettingRow[] = [];
   const notificationDeliveriesStore: NotificationDeliveryRow[] = [];
-  const reservationRows: { readonly user: { readonly name: string; readonly studentNumber: string } }[] = [];
+  const reservationRows: { readonly reason: string | null; readonly user: { readonly name: string; readonly studentNumber: string } }[] = [];
 
   const periodSettingFindUnique = vi.fn(async (input: { readonly where: { readonly date_studyPeriod: { readonly date: string; readonly studyPeriod: StudyPeriod } } }) =>
     periodSettingsStore.find((setting) => setting.date === input.where.date_studyPeriod.date && setting.studyPeriod === input.where.date_studyPeriod.studyPeriod) ?? null

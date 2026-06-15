@@ -17,12 +17,18 @@ export type ReservationPendingAction =
       readonly studyPeriod: "EIGHTH" | "FIRST";
     };
 
+export type ReservationActionConfirmInput =
+  | { readonly kind: "cancel" }
+  | { readonly kind: "reserve"; readonly reason: string };
+
 type ReservationActionDialogProps = {
   readonly action: ReservationPendingAction | null;
   readonly loading: boolean;
   readonly onClose: () => void;
-  readonly onConfirm: () => void;
+  readonly onConfirm: (input: ReservationActionConfirmInput) => void;
 };
+
+const RESERVATION_REASON_PRESETS = ["자습", "과제", "프린트/자료", "기타"] as const;
 
 export function ReservationActionDialog({
   action,
@@ -31,9 +37,11 @@ export function ReservationActionDialog({
   onConfirm
 }: ReservationActionDialogProps): ReactElement | null {
   const [cancelConfirmed, setCancelConfirmed] = useState(false);
+  const [reservationReason, setReservationReason] = useState("");
 
   useEffect(() => {
     setCancelConfirmed(false);
+    setReservationReason("");
   }, [action]);
 
   if (!action) {
@@ -41,7 +49,8 @@ export function ReservationActionDialog({
   }
 
   const isCancel = action.kind === "cancel";
-  const confirmDisabled = loading || (isCancel && !cancelConfirmed);
+  const trimmedReason = reservationReason.trim();
+  const confirmDisabled = loading || (isCancel ? !cancelConfirmed : trimmedReason.length === 0);
 
   return (
     <div className="confirm-backdrop" role="presentation">
@@ -50,19 +59,22 @@ export function ReservationActionDialog({
         aria-labelledby="reservation-confirm-title"
         aria-modal="true"
         className="confirm-dialog"
+        data-kind={action.kind}
         role="dialog"
       >
         <button aria-label="확인 창 닫기" className="icon-button confirm-close" type="button" onClick={onClose}>
           <X size={18} />
         </button>
-        <div className="confirm-mark" aria-hidden="true">
-          <AlertTriangle size={22} />
-        </div>
+        {isCancel ? (
+          <div className="confirm-mark" aria-hidden="true">
+            <AlertTriangle size={22} />
+          </div>
+        ) : null}
         <h3 id="reservation-confirm-title">{isCancel ? "예약을 취소할까요?" : `${action.label} 예약할까요?`}</h3>
         <p id="reservation-confirm-description" className="muted">
           {isCancel
             ? "취소하면 3일간 예약이 제한됩니다."
-            : "신청 후 미참석 시 정보실 예약이 영구 제한됩니다."}
+            : "이용 사유를 입력하면 신청됩니다."}
         </p>
         {isCancel ? (
           <div className="cancel-policy-preview">
@@ -83,13 +95,46 @@ export function ReservationActionDialog({
               <span>정말 취소하려면 이 확인란을 선택하세요.</span>
             </label>
           </div>
-        ) : null}
+        ) : (
+          <div className="reservation-reason-form">
+            <label className="field">
+              <span>이용 사유</span>
+              <input
+                autoFocus
+                maxLength={80}
+                placeholder="예: 자습, 과제, 자료 출력"
+                value={reservationReason}
+                onChange={(event) => setReservationReason(event.currentTarget.value)}
+              />
+            </label>
+            <div className="reason-preset-row" aria-label="빠른 사유">
+              {RESERVATION_REASON_PRESETS.map((preset) => (
+                <button
+                  className="reason-preset-button"
+                  data-active={trimmedReason === preset}
+                  disabled={loading}
+                  key={preset}
+                  type="button"
+                  onClick={() => setReservationReason(preset)}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <p className="confirm-policy-note">미참석 시 정보실 예약이 영구 제한됩니다.</p>
+          </div>
+        )}
         <div className="confirm-actions">
           <button className="ghost-button" disabled={loading} type="button" onClick={onClose}>
             닫기
           </button>
-          <button className="primary-button danger-aware" disabled={confirmDisabled} type="button" onClick={onConfirm}>
-            {loading ? "처리 중" : isCancel ? "취소 확정" : "예약 확정"}
+          <button
+            className="primary-button danger-aware"
+            disabled={confirmDisabled}
+            type="button"
+            onClick={() => onConfirm(isCancel ? { kind: "cancel" } : { kind: "reserve", reason: trimmedReason })}
+          >
+            {loading ? "처리 중" : isCancel ? "취소 확정" : "신청하기"}
           </button>
         </div>
       </section>

@@ -6,9 +6,10 @@ export function buildReservationCsv(reservations: readonly AdminReservation[]): 
     periodLabel(reservation.studyPeriod),
     reservation.status,
     reservation.user.name,
-    reservation.user.studentNumber
+    reservation.user.studentNumber,
+    reservation.reason ?? ""
   ]);
-  return [["날짜", "시간대", "상태", "이름", "학번"], ...rows]
+  return [["날짜", "시간대", "상태", "이름", "학번", "사유"], ...rows]
     .map((row) => row.map(escapeCsvCell).join(","))
     .join("\n");
 }

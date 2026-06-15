@@ -8,6 +8,15 @@ describe("admin CSV helpers", () => {
     expect(buildReservationCsv([reservation({ name: '김"학생', studentNumber: "24101" })])).toContain('"김""학생"');
   });
 
+  it("exports reservation reasons for admin copy lists", () => {
+    const csv = buildReservationCsv([
+      reservation({ name: "김학생", reason: "프린트, 자료", studentNumber: "24101" })
+    ]);
+
+    expect(csv).toContain("날짜,시간대,상태,이름,학번,사유");
+    expect(csv).toContain('2026-06-12,8면학,CONFIRMED,김학생,24101,"프린트, 자료"');
+  });
+
   it("exports statistics totals, periods, daily rows, and repeated offenders", () => {
     const csv = buildStatisticsCsv(statistics);
 
@@ -80,11 +89,12 @@ const statistics: AdminStatistics = {
   totals: { cancelledCount: 1, confirmedCount: 1, noShowCount: 1, totalCount: 3, uniqueStudentCount: 2 }
 };
 
-function reservation(input: { readonly name: string; readonly studentNumber: string }): AdminReservation {
+function reservation(input: { readonly name: string; readonly reason?: string | null; readonly studentNumber: string }): AdminReservation {
   return {
     createdAt: "2026-06-12T04:00:00.000Z",
     date: "2026-06-12",
     id: "reservation-1",
+    reason: input.reason ?? "자습",
     status: "CONFIRMED",
     studyPeriod: "EIGHTH",
     user: {

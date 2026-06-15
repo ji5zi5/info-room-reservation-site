@@ -86,6 +86,196 @@ function isLocalE2eTarget(value: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }
 
+async function mockAdminStudentManagement(page: Page, selectedStudentNumber: string): Promise<void> {
+  const now = "2026-06-12T12:00:00.000Z";
+  const users = Array.from({ length: 40 }, (_, index) => ({
+    bookingStatus: "ACTIVE",
+    generation: 25,
+    id: `mock-mobile-student-${index}`,
+    name: index === 0 ? "모바일학생" : `학생${String(index + 1).padStart(2, "0")}`,
+    restrictedUntil: null,
+    restrictionReason: null,
+    role: "STUDENT",
+    studentNumber: index === 0 ? selectedStudentNumber : `25-${String(39000 + index).padStart(5, "0")}`
+  }));
+  const selectedUser = users[0];
+  if (!selectedUser) {
+    throw new Error("Expected at least one mocked admin user.");
+  }
+
+  await page.route("**/api/me", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        user: {
+          bookingStatus: "ACTIVE",
+          generation: 0,
+          id: "mock-admin",
+          name: "관리자",
+          restrictedUntil: null,
+          restrictionReason: null,
+          role: "ADMIN",
+          studentNumber: "0"
+        }
+      }
+    });
+  });
+
+  await page.route("**/api/admin/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/admin/period-settings") {
+      await route.fulfill({ contentType: "application/json", json: { periods: mockAdminPeriods() } });
+      return;
+    }
+    if (pathname === "/api/admin/dashboard") {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          periods: mockAdminPeriods().map((period) => ({
+            ...period,
+            applicants: [],
+            isClosed: false,
+            notification: null
+          }))
+        }
+      });
+      return;
+    }
+    if (pathname === "/api/admin/reservations") {
+      await route.fulfill({ contentType: "application/json", json: { reservations: [] } });
+      return;
+    }
+    if (pathname === "/api/admin/statistics") {
+      await route.fulfill({ contentType: "application/json", json: { statistics: mockAdminStatistics() } });
+      return;
+    }
+    if (pathname === "/api/admin/users") {
+      await route.fulfill({ contentType: "application/json", json: { users } });
+      return;
+    }
+    if (pathname === `/api/admin/users/${selectedUser.id}`) {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          adminActions: Array.from({ length: 8 }, (_, index) => mockAdminAction(index, selectedUser.id, now)),
+          auditLogs: Array.from({ length: 8 }, (_, index) => ({
+            action: "USER_DETAIL_VIEWED",
+            actorId: "mock-admin",
+            createdAt: now,
+            detail: `학생 상세 확인 ${index + 1}`,
+            id: `mock-audit-log-${index}`
+          })),
+          currentReservations: Array.from({ length: 2 }, (_, index) => mockUserReservation(index, selectedUser.id, now)),
+          reservationHistory: Array.from({ length: 18 }, (_, index) =>
+            mockUserReservation(index + 2, selectedUser.id, now)
+          ),
+          sanctions: Array.from({ length: 8 }, (_, index) => ({
+            actorId: "mock-admin",
+            createdAt: now,
+            endsAt: null,
+            id: `mock-sanction-${index}`,
+            reason: `모바일 상세 스크롤 확인 ${index + 1}`,
+            revokedAt: null,
+            revokedById: null,
+            revokedReason: null,
+            sourceActionId: null,
+            startsAt: now,
+            status: index === 0 ? "ACTIVE" : "REVOKED",
+            type: index === 0 ? "BANNED" : "RESTRICTED"
+          })),
+          sanctionSummary: { activeCount: 1, permanentCount: 1, revokedCount: 7, totalCount: 8 },
+          sessionSummary: { activeCount: 1, expiredCount: 3, totalCount: 4 },
+          summary: { cancelledCount: 3, confirmedCount: 12, noShowCount: 2 },
+          user: {
+            ...selectedUser,
+            createdAt: now,
+            updatedAt: now
+          }
+        }
+      });
+      return;
+    }
+    if (pathname === "/api/admin/actions") {
+      await route.fulfill({ contentType: "application/json", json: { actions: [] } });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", json: { error: { message: "Unexpected mocked admin route" } }, status: 404 });
+  });
+}
+
+function mockAdminPeriods() {
+  return [
+    {
+      capacity: 10,
+      closeTime: "21:00",
+      confirmedCount: 0,
+      date: FIXED_FRIDAY_DATE,
+      enabled: true,
+      label: "8면학",
+      openTime: "20:00",
+      remaining: 10,
+      studyPeriod: "EIGHTH",
+      windowState: "not_open_yet"
+    },
+    {
+      capacity: 10,
+      closeTime: "22:00",
+      confirmedCount: 0,
+      date: FIXED_FRIDAY_DATE,
+      enabled: true,
+      label: "1면학",
+      openTime: "21:00",
+      remaining: 10,
+      studyPeriod: "FIRST",
+      windowState: "not_open_yet"
+    }
+  ];
+}
+
+function mockAdminStatistics() {
+  return {
+    dailyStats: [],
+    from: FIXED_FRIDAY_DATE,
+    periodStats: [],
+    repeatedOffenders: [],
+    to: FIXED_FRIDAY_DATE,
+    totals: {
+      cancelledCount: 0,
+      confirmedCount: 0,
+      noShowCount: 0,
+      totalCount: 0,
+      uniqueStudentCount: 40
+    }
+  };
+}
+
+function mockAdminAction(index: number, targetUserId: string, now: string) {
+  return {
+    action: "USER_RESTRICTION_UPDATED",
+    actorId: "mock-admin",
+    after: null,
+    before: null,
+    createdAt: now,
+    id: `mock-action-${index}`,
+    reason: `모바일 상세 기록 ${index + 1}`,
+    reservationId: null,
+    targetUserId
+  };
+}
+
+function mockUserReservation(index: number, userId: string, now: string) {
+  return {
+    createdAt: now,
+    date: FIXED_FRIDAY_DATE,
+    id: `mock-user-reservation-${index}`,
+    reason: "테스트",
+    status: index % 5 === 0 ? "NO_SHOW" : index % 3 === 0 ? "CANCELLED" : "CONFIRMED",
+    studyPeriod: index % 2 === 0 ? "EIGHTH" : "FIRST",
+    updatedAt: now,
+    userId
+  };
+}
+
 test("admin student management keeps empty detail from clipping the 390px viewport", async ({ page }) => {
   await page.setViewportSize({ height: 900, width: 390 });
   await login(page, "admin");
@@ -193,12 +383,9 @@ test("mobile left panel collapses to a reopen button and expands again", async (
 });
 
 test("mobile admin student detail flows below the list without clipping", async ({ page }) => {
-  const loginId = `detail-mobile-${Date.now()}`;
-  const studentNumber = expectedStudentNumber(loginId);
+  const studentNumber = "25-39000";
   await page.setViewportSize({ height: 900, width: 390 });
-  await loginWithApi(page, loginId);
-  await logout(page);
-  await loginWithApi(page, "admin");
+  await mockAdminStudentManagement(page, studentNumber);
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
   await page.getByRole("button", { name: "학생" }).click();
@@ -213,6 +400,7 @@ test("mobile admin student detail flows below the list without clipping", async 
     const detailElement = document.querySelector(".student-detail-panel[data-open='true']");
     const actions = document.querySelector(".student-detail-panel[data-open='true'] .detail-actions");
     const metricRow = document.querySelector(".student-detail-panel[data-open='true'] .detail-metrics");
+    const userList = document.querySelector(".user-list");
     const mainPanel = document.querySelector(".admin-main-panel");
     return {
       actionsColumns: actions ? getComputedStyle(actions).gridTemplateColumns.split(" ").length : 0,
@@ -220,19 +408,31 @@ test("mobile admin student detail flows below the list without clipping", async 
       detailOverflowY: detailElement ? getComputedStyle(detailElement).overflowY : null,
       detailScrollHeight: detailElement?.scrollHeight ?? 0,
       detailTop: detailElement?.getBoundingClientRect().top ?? 0,
+      listClientHeight: userList?.clientHeight ?? 0,
+      listOverflowY: userList ? getComputedStyle(userList).overflowY : null,
+      listScrollHeight: userList?.scrollHeight ?? 0,
       mainPanelBottom: mainPanel?.getBoundingClientRect().bottom ?? 0,
       metricsColumns: metricRow ? getComputedStyle(metricRow).gridTemplateColumns.split(" ").length : 0,
       rootClientWidth: document.documentElement.clientWidth,
-      rootScrollWidth: document.documentElement.scrollWidth
+      rootScrollWidth: document.documentElement.scrollWidth,
+      viewportHeight: window.innerHeight
     };
   });
 
   expect(metrics.rootScrollWidth, "admin student detail should not create horizontal clipping").toBeLessThanOrEqual(metrics.rootClientWidth);
-  expect(metrics.metricsColumns).toBe(3);
+  expect(metrics.metricsColumns).toBe(2);
   expect(metrics.actionsColumns).toBe(0);
-  expect(metrics.detailOverflowY, "student detail should use the page scroll on mobile").toBe("visible");
-  expect(metrics.detailScrollHeight, "student detail should not hide lower controls inside an internal scrollbox").toBeLessThanOrEqual(
-    metrics.detailClientHeight + 1
+  expect(metrics.listOverflowY, "student list should be ready to scroll internally on mobile").toBe("auto");
+  expect(metrics.listClientHeight, "student list should not monopolize mobile page height").toBeLessThanOrEqual(
+    Math.ceil(metrics.viewportHeight * 0.48)
+  );
+  expect(metrics.listScrollHeight, "long student list should scroll inside its panel").toBeGreaterThan(metrics.listClientHeight);
+  expect(metrics.detailOverflowY, "student detail should stay bounded on mobile").toBe("auto");
+  expect(metrics.detailClientHeight, "student detail should not become a full-page tail on mobile").toBeLessThanOrEqual(
+    Math.ceil(metrics.viewportHeight * 0.7)
+  );
+  expect(metrics.detailScrollHeight, "long student detail should scroll inside its panel").toBeGreaterThan(
+    metrics.detailClientHeight
   );
   expect(metrics.detailTop, "student detail should sit below the student list on mobile").toBeGreaterThanOrEqual(
     metrics.mainPanelBottom - 1

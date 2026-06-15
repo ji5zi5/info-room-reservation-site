@@ -8,6 +8,7 @@ const DISCORD_SAFE_FIELD_VALUE_LIMIT = 900;
 
 export type ClosedPeriodNotificationApplicant = {
   readonly name: string;
+  readonly reason: string | null;
   readonly studentNumber: string;
 };
 
@@ -99,7 +100,12 @@ function buildApplicantFields(applicants: readonly ClosedPeriodNotificationAppli
 }
 
 function formatApplicantLine(applicant: ClosedPeriodNotificationApplicant, index: number): string {
-  return `${index + 1}. ${applicant.name} (${applicant.studentNumber})`;
+  return `${index + 1}. ${applicant.name} (${applicant.studentNumber}) - ${reservationReasonLabel(applicant.reason)}`;
+}
+
+function reservationReasonLabel(reason: string | null): string {
+  const normalized = reason?.trim();
+  return normalized ? normalized : "사유 미기록";
 }
 
 function chunkApplicantLines(lines: readonly string[]): readonly string[] {

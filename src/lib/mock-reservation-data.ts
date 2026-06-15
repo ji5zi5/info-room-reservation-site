@@ -48,6 +48,7 @@ export function getMockAdminUserDetail(userId: string): object | null {
       createdAt: reservation.createdAt,
       date: reservation.date,
       id: reservation.id,
+      reason: reservation.reason,
       status: reservation.status,
       studyPeriod: reservation.studyPeriod,
       updatedAt: reservation.createdAt,
@@ -110,6 +111,7 @@ export function getMockPeriodSummariesForUser(input: {
 export function reserveMockStudyPeriod(input: {
   readonly date: string;
   readonly now: Date;
+  readonly reason: string;
   readonly studyPeriod: StudyPeriod;
   readonly user: SessionUser;
 }): ReservationResult {
@@ -196,6 +198,7 @@ export function cancelMockReservation(input: {
 function createMockReservation(
   input: {
     readonly date: string;
+    readonly reason: string;
     readonly studyPeriod: StudyPeriod;
     readonly user: SessionUser;
   },
@@ -205,6 +208,7 @@ function createMockReservation(
     createdAt: new Date(),
     date: input.date,
     id: `mock-reservation-${reservations.length + 1}`,
+    reason: input.reason,
     status: "CONFIRMED",
     studyPeriod: input.studyPeriod,
     user: {

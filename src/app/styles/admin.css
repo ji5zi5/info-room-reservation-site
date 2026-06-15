@@ -625,12 +625,14 @@
 
   .student-detail-panel[data-open="true"] {
     gap: 12px;
-    max-height: none;
-    overflow: visible;
+    max-height: min(68svh, 560px);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
   .student-detail-panel[data-open="true"] .detail-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .student-detail-panel[data-open="true"] .detail-actions {
@@ -647,6 +649,40 @@
 
   .admin-action-row,
   .admin-action-row .ghost-button {
+    width: 100%;
+  }
+
+  .student-detail-head {
+    background: var(--white);
+    border-bottom: 1px solid var(--fog);
+    padding-bottom: 8px;
+    position: sticky;
+    top: -16px;
+    z-index: 1;
+  }
+
+  .user-list {
+    max-height: min(46svh, 380px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .user-line {
+    align-items: stretch;
+    gap: 10px;
+    grid-template-columns: 1fr;
+    min-height: auto;
+    padding: 12px;
+  }
+
+  .user-line-summary {
+    width: 100%;
+  }
+
+  .user-line .ghost-button {
+    justify-content: center;
     width: 100%;
   }
 

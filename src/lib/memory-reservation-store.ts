@@ -83,12 +83,14 @@ class MemoryReservationStore implements ReservationStore, TransactionalReservati
 
   public async createReservation(input: {
     readonly date: string;
+    readonly reason: string;
     readonly studyPeriod: StudyPeriod;
     readonly userId: string;
   }): Promise<Reservation> {
     const reservation = {
       date: input.date,
       id: `reservation-${this.reservations.length + 1}`,
+      reason: input.reason,
       status: "CONFIRMED",
       studyPeriod: input.studyPeriod,
       userId: input.userId

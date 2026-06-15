@@ -20,6 +20,7 @@ export type PeriodSetting = {
 export type Reservation = {
   readonly date: string;
   readonly id: string;
+  readonly reason: string | null;
   readonly status: ReservationStatus;
   readonly studyPeriod: StudyPeriod;
   readonly userId: string;
@@ -58,6 +59,7 @@ export interface ReservationStore {
   countConfirmedReservations(date: string, studyPeriod: StudyPeriod): Promise<number>;
   createReservation(input: {
     readonly date: string;
+    readonly reason: string;
     readonly studyPeriod: StudyPeriod;
     readonly userId: string;
   }): Promise<Reservation>;
@@ -77,6 +79,7 @@ export interface TransactionalReservationStore {
 export type ReserveStudyPeriodInput = {
   readonly date: string;
   readonly now: Date;
+  readonly reason: string;
   readonly store: TransactionalReservationStore;
   readonly studyPeriod: StudyPeriod;
   readonly userId: string;
@@ -145,6 +148,7 @@ export async function reserveStudyPeriod(input: ReserveStudyPeriodInput): Promis
 
     const reservation = await store.createReservation({
       date: input.date,
+      reason: input.reason,
       studyPeriod: input.studyPeriod,
       userId: input.userId
     });

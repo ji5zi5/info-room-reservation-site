@@ -53,12 +53,14 @@ class PrismaReservationStoreUnit implements ReservationStore {
 
   public async createReservation(input: {
     readonly date: string;
+    readonly reason: string;
     readonly studyPeriod: StudyPeriod;
     readonly userId: string;
   }): Promise<Reservation> {
     const created = await this.client.reservation.create({
       data: {
         date: input.date,
+        reason: input.reason,
         status: "CONFIRMED",
         studyPeriod: input.studyPeriod,
         userId: input.userId
@@ -121,6 +123,7 @@ function toReservation(reservation: PrismaReservation): Reservation {
   return {
     date: reservation.date,
     id: reservation.id,
+    reason: reservation.reason,
     status: parseReservationStatus(reservation.status),
     studyPeriod: parseStoredStudyPeriod(reservation.studyPeriod),
     userId: reservation.userId

@@ -7,7 +7,10 @@ import { toKstDate } from "./date";
 import { buildDefaultPeriodSetting, type PeriodSettingDefaults } from "./period-settings";
 import { STUDY_PERIODS, parseStudyPeriod, type StudyPeriod } from "./study-periods";
 
-type NotificationReservation = { readonly user: { readonly name: string; readonly studentNumber: string } };
+type NotificationReservation = {
+  readonly reason: string | null;
+  readonly user: { readonly name: string; readonly studentNumber: string };
+};
 
 const FORCE_CLAIMABLE_STATUSES = ["FAILED", "SENT"] as const, NON_FORCE_CLAIMABLE_STATUSES = ["FAILED"] as const;
 
@@ -187,6 +190,7 @@ function toNotificationPeriod(
   return {
     applicants: reservations.map((reservation) => ({
       name: reservation.user.name,
+      reason: reservation.reason,
       studentNumber: reservation.user.studentNumber
     })),
     capacity: setting.capacity,

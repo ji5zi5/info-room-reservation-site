@@ -50,6 +50,7 @@ export const AdminReservationSchema = z.object({
   createdAt: z.string(),
   date: z.string(),
   id: z.string(),
+  reason: z.string().nullable(),
   status: z.string(),
   studyPeriod: z.string(),
   user: z.object({
@@ -154,6 +155,7 @@ const AdminUserReservationSchema = z.object({
   createdAt: z.string(),
   date: z.string(),
   id: z.string(),
+  reason: z.string().nullable(),
   status: z.string(),
   studyPeriod: z.string(),
   updatedAt: z.string(),

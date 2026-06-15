@@ -77,11 +77,18 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await login(page);
+  await expect(page.getByRole("button", { name: "왼쪽 패널 열기" })).toBeVisible();
+  await expect
+    .poll(async () => Math.round((await visibleBox(page.locator(".login-panel"), "collapsed mobile login panel")).height))
+    .toBeLessThanOrEqual(80);
 
   const topbar = page.locator(".tool-panel > .topbar");
   const topbarBox = await visibleBox(topbar, "reservation topbar");
   const topbarTextBox = await visibleBox(topbar.locator("> div").first(), "reservation topbar text");
   const calendarIcon = topbar.locator("> svg").first();
+  const firstPeriodCard = page.locator(".period-card").first();
+  const firstPeriodCardBox = await visibleBox(firstPeriodCard, "mobile first period card");
+  const calendarBox = await visibleBox(page.locator(".reservation-calendar"), "mobile reservation calendar");
 
   if (await calendarIcon.isVisible()) {
     const iconBox = await visibleBox(calendarIcon, "reservation topbar calendar icon");
@@ -97,20 +104,24 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
   }));
   expect(overflow.documentWidth).toBeLessThanOrEqual(overflow.viewportWidth);
   expect(overflow.bodyWidth).toBeLessThanOrEqual(overflow.viewportWidth);
+  expect(firstPeriodCardBox.y, "first reservation card should be reachable on the first mobile screen").toBeLessThanOrEqual(760);
+  expect(calendarBox.y, "mobile calendar should be secondary to reservation cards").toBeGreaterThan(firstPeriodCardBox.y);
 });
 
 async function login(page: Page): Promise<void> {
   await page.getByLabel("리로스쿨 ID").fill("ui-density-student");
   await page.getByLabel("리로스쿨 PW").fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
-  await expect(page.getByRole("button", { name: "로그아웃" })).toBeVisible();
+  await expect(page.locator(".period-card .period-badge").first()).toBeVisible();
 }
 
 async function mockAuth(page: Page): Promise<void> {
+  let currentUser: typeof mockUser | null = null;
   await page.route("**/api/me", async (route) => {
-    await route.fulfill({ contentType: "application/json", json: { user: null } });
+    await route.fulfill({ contentType: "application/json", json: { user: currentUser } });
   });
   await page.route("**/api/auth/riro/login", async (route) => {
+    currentUser = mockUser;
     await route.fulfill({ contentType: "application/json", json: { user: mockUser } });
   });
   await page.route("**/api/csrf", async (route) => {

@@ -32,12 +32,13 @@ type MockPeriod = {
   readonly windowState: "open";
 };
 
-test("reserve click opens dialog and posts without extra period refreshes", async ({ page }) => {
+test("reserve click asks for a reason and posts without extra period refreshes", async ({ page }) => {
   let reserveClickStarted = false;
   let dialogVisible = false;
   let postStarted = false;
   let periodGetsBetweenClickAndDialog = 0;
   let periodGetsBetweenDialogAndPost = 0;
+  let postedReservationBody: unknown = null;
 
   await routeMockCsrf(page);
   await routeMockLogin(page);
@@ -55,6 +56,7 @@ test("reserve click opens dialog and posts without extra period refreshes", asyn
       return;
     }
     postStarted = true;
+    postedReservationBody = JSON.parse(route.request().postData() ?? "{}");
     await route.fulfill({
       body: JSON.stringify({ reservation: { id: "network-reservation" } }),
       contentType: "application/json",
@@ -67,15 +69,21 @@ test("reserve click opens dialog and posts without extra period refreshes", asyn
   await page.locator(".period-card").first().locator(".period-button").click();
   await expect(page.getByRole("dialog")).toBeVisible();
   dialogVisible = true;
+  const confirmButton = page.locator(".confirm-dialog .primary-button");
+  await expect(page.getByLabel("이용 사유")).toBeVisible();
+  await expect(confirmButton).toBeDisabled();
+  await page.getByRole("button", { name: "자습" }).click();
+  await expect(page.getByLabel("이용 사유")).toHaveValue("자습");
 
   const reservationPost = page.waitForResponse(
     (response) => response.url().endsWith("/api/reservations") && response.request().method() === "POST"
   );
-  await page.locator(".confirm-dialog .primary-button").click();
+  await confirmButton.click();
   await reservationPost;
 
   expect(periodGetsBetweenClickAndDialog).toBe(0);
   expect(periodGetsBetweenDialogAndPost).toBe(0);
+  expect(postedReservationBody).toEqual({ date: FIXED_THURSDAY_DATE, reason: "자습", studyPeriod: "EIGHTH" });
 });
 
 async function login(page: Page): Promise<void> {

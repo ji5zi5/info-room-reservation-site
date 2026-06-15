@@ -8,7 +8,7 @@ import type { ClosedPeriodNotificationStatus } from "./closed-period-notificatio
 import type { StudyPeriod } from "./study-periods";
 
 export const testClosedPeriod = {
-  applicants: [{ name: "源?꾩쑄", studentNumber: "26001" }],
+  applicants: [{ name: "源?꾩쑄", reason: "자습", studentNumber: "26001" }],
   capacity: 10,
   closeTime: "16:20",
   confirmedCount: 1,

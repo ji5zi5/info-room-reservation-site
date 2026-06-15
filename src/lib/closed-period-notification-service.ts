@@ -15,6 +15,7 @@ const DISCORD_WEBHOOK_URL_PATTERN =
 export type ClosedPeriodNotificationPeriod = {
   readonly applicants: readonly {
     readonly name: string;
+    readonly reason: string | null;
     readonly studentNumber: string;
   }[];
   readonly capacity: number;

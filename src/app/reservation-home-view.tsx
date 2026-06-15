@@ -3,7 +3,11 @@
 import { CalendarDays, LoaderCircle } from "lucide-react";
 import type { ReactElement } from "react";
 
-import { ReservationActionDialog, type ReservationPendingAction } from "@/components/reservation-action-dialog";
+import {
+  ReservationActionDialog,
+  type ReservationActionConfirmInput,
+  type ReservationPendingAction
+} from "@/components/reservation-action-dialog";
 import { ReservationCalendar } from "@/components/reservation-calendar";
 import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
 import { ReservationWarningPanel } from "@/components/reservation-warning-panel";
@@ -38,7 +42,7 @@ type ReservationHomeViewProps = {
   readonly onCancel: (reservationId: string) => void;
   readonly onClosePendingAction: () => void;
   readonly onCloseProfile: () => void;
-  readonly onConfirmPendingAction: () => void;
+  readonly onConfirmPendingAction: (input: ReservationActionConfirmInput) => void;
   readonly onIdChange: (value: string) => void;
   readonly onLogin: () => void;
   readonly onLogout: () => void;

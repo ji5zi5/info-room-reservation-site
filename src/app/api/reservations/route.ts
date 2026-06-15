@@ -16,6 +16,7 @@ import { requireSession, UnauthorizedSessionError } from "@/lib/session";
 
 const ReservationRequestSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  reason: z.string().trim().min(1).max(80),
   studyPeriod: z.union([z.literal("EIGHTH"), z.literal("FIRST")])
 });
 
@@ -57,6 +58,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       const result = reserveMockStudyPeriod({
         date: parsed.data.date,
         now,
+        reason: parsed.data.reason,
         studyPeriod: parsed.data.studyPeriod,
         user
       });
@@ -69,6 +71,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const result = await reserveStudyPeriod({
       date: parsed.data.date,
       now,
+      reason: parsed.data.reason,
       store: prismaReservationStore,
       studyPeriod: parsed.data.studyPeriod,
       userId: user.id

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getAdvanceReservationPolicy, isSelectableAdvanceDate } from "@/lib/advance-reservation-policy";
 import { collectStudentCurrentReservations, previewCancellationRestrictedUntil } from "@/lib/student-reservation-status";
-import type { ReservationPendingAction } from "@/components/reservation-action-dialog";
+import type { ReservationActionConfirmInput, ReservationPendingAction } from "@/components/reservation-action-dialog";
 import { AdminConsole } from "./admin/admin-console";
 import { readApiErrorMessage, readCurrentUser, readLoginPayload, readStudentProfilePayload } from "./client-api-response";
 import { csrfFetch, resetCsrfToken } from "./csrf-fetch";
@@ -17,6 +17,11 @@ import type { ReservationSidebarUser } from "./reservation-sidebar";
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
 
 const EMPTY_PROFILE_STATE: ReservationHomeProfileState = { errorMessage: null, loading: false, open: false, profile: null };
+const COMPACT_RESERVATION_VIEW_QUERY = "(max-width: 850px)";
+
+function isCompactReservationView(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(COMPACT_RESERVATION_VIEW_QUERY).matches;
+}
 
 export function ReservationHomePage(): React.ReactElement {
   const [user, setUser] = useState<ReservationSidebarUser | null>(null);
@@ -65,6 +70,12 @@ export function ReservationHomePage(): React.ReactElement {
     setAdvanceDate(policy.kind === "available" ? policy.minDate : policy.today);
   }, []);
 
+  useEffect(() => {
+    if (user && user.role !== "ADMIN" && isCompactReservationView()) {
+      setSidebarOpen(false);
+    }
+  }, [user?.id, user?.role]);
+
   async function refreshProfile(): Promise<void> {
     if (profileRefreshPromiseRef.current) {
       await profileRefreshPromiseRef.current;
@@ -105,6 +116,9 @@ export function ReservationHomePage(): React.ReactElement {
       return;
     }
     setUser(payload.user);
+    if (payload.user.role !== "ADMIN" && isCompactReservationView()) {
+      setSidebarOpen(false);
+    }
     setToast(payload.user.role === "ADMIN" ? "관리자 화면을 불러옵니다." : `${payload.user.name}님, 예약 준비 완료`);
   }
 
@@ -169,23 +183,29 @@ export function ReservationHomePage(): React.ReactElement {
     setTab("today");
   }
 
-  function confirmPendingAction(): void {
+  function confirmPendingAction(input: ReservationActionConfirmInput): void {
     const action = pendingAction;
     if (!action) {
       return;
     }
     setPendingAction(null);
     if (action.kind === "reserve") {
-      void reserve(action.studyPeriod);
+      if (input.kind !== "reserve") {
+        return;
+      }
+      void reserve(action.studyPeriod, input.reason);
+      return;
+    }
+    if (input.kind !== "cancel") {
       return;
     }
     void cancelReservation(action.reservationId);
   }
 
-  async function reserve(studyPeriod: "EIGHTH" | "FIRST"): Promise<void> {
+  async function reserve(studyPeriod: "EIGHTH" | "FIRST", reason: string): Promise<void> {
     setLoading(true);
     const response = await csrfFetch("/api/reservations", {
-      body: JSON.stringify({ date: targetDate, studyPeriod }),
+      body: JSON.stringify({ date: targetDate, reason, studyPeriod }),
       headers: { "content-type": "application/json" },
       method: "POST"
     });
