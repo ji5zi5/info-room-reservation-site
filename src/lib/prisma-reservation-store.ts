@@ -8,7 +8,7 @@ import {
   type UserBookingState
 } from "./reservation-service";
 import { prisma } from "./db";
-import { parseStoredStudyPeriod } from "./period-settings";
+import { buildDefaultPeriodSetting, parseStoredStudyPeriod } from "./period-settings";
 import type { StudyPeriod } from "./study-periods";
 
 type PrismaTransaction = Prisma.TransactionClient;
@@ -93,7 +93,7 @@ class PrismaReservationStoreUnit implements ReservationStore {
       }
     });
     if (!setting) {
-      return null;
+      return buildDefaultPeriodSetting(date, studyPeriod);
     }
     return {
       capacity: setting.capacity,

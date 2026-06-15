@@ -1,11 +1,151 @@
 import { Prisma } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { StudyPeriod } from "./study-periods";
+
+type PeriodSettingFindUniqueInput = {
+  readonly where: {
+    readonly date_studyPeriod: {
+      readonly date: string;
+      readonly studyPeriod: StudyPeriod;
+    };
+  };
+};
+
+type PeriodSettingUpsertInput = {
+  readonly create: unknown;
+  readonly update: unknown;
+  readonly where: {
+    readonly date_studyPeriod: {
+      readonly date: string;
+      readonly studyPeriod: StudyPeriod;
+    };
+  };
+};
+
+type UserFindUniqueInput = {
+  readonly where: {
+    readonly id: string;
+  };
+};
+
+type ReservationFindInput = {
+  readonly where: {
+    readonly date: string;
+    readonly status: "CONFIRMED";
+    readonly studyPeriod: StudyPeriod;
+    readonly userId: string;
+  };
+};
+
+type ReservationCountInput = {
+  readonly where: {
+    readonly date: string;
+    readonly status: "CONFIRMED";
+    readonly studyPeriod: StudyPeriod;
+  };
+};
+
+type ReservationCreateInput = {
+  readonly data: {
+    readonly date: string;
+    readonly status: "CONFIRMED";
+    readonly studyPeriod: StudyPeriod;
+    readonly userId: string;
+  };
+};
+
+type UserBookingRow = {
+  readonly bookingStatus: "ACTIVE" | "BANNED" | "RESTRICTED";
+  readonly restrictedUntil: Date | null;
+};
+
+type ReservationRow = {
+  readonly date: string;
+  readonly id: string;
+  readonly status: "CONFIRMED" | "CANCELLED" | "NO_SHOW";
+  readonly studyPeriod: StudyPeriod;
+  readonly userId: string;
+};
+
+type MockPrismaTransaction = {
+  readonly periodSetting: {
+    readonly findUnique: (input: PeriodSettingFindUniqueInput) => Promise<null>;
+    readonly upsert: (input: PeriodSettingUpsertInput) => Promise<never>;
+  };
+  readonly reservation: {
+    readonly count: (input: ReservationCountInput) => Promise<number>;
+    readonly create: (input: ReservationCreateInput) => Promise<ReservationRow>;
+    readonly findFirst: (input: ReservationFindInput) => Promise<null>;
+  };
+  readonly user: {
+    readonly findUnique: (input: UserFindUniqueInput) => Promise<UserBookingRow | null>;
+  };
+};
+
+type TransactionOptions = {
+  readonly isolationLevel: Prisma.TransactionIsolationLevel;
+  readonly maxWait: number;
+  readonly timeout: number;
+};
+
+type PrismaTransactionMock = (
+  operation: (transaction: MockPrismaTransaction) => Promise<unknown>,
+  options: TransactionOptions
+) => Promise<unknown>;
+
+const prismaMocks = vi.hoisted(() => {
+  const transactionClient = {
+    periodSetting: {
+      findUnique: vi.fn(async (_input: PeriodSettingFindUniqueInput): Promise<null> => null),
+      upsert: vi.fn(async (_input: PeriodSettingUpsertInput): Promise<never> => {
+        throw new Error("Period settings should not be precreated by the reservation store");
+      })
+    },
+    reservation: {
+      count: vi.fn(async (_input: ReservationCountInput): Promise<number> => 0),
+      create: vi.fn(async ({ data }: ReservationCreateInput): Promise<ReservationRow> => ({ id: "reservation-1", ...data })),
+      findFirst: vi.fn(async (_input: ReservationFindInput): Promise<null> => null)
+    },
+    user: {
+      findUnique: vi.fn(
+        async (_input: UserFindUniqueInput): Promise<UserBookingRow> => ({
+          bookingStatus: "ACTIVE",
+          restrictedUntil: null
+        })
+      )
+    }
+  } satisfies MockPrismaTransaction;
+
+  return {
+    transaction: vi.fn<PrismaTransactionMock>(async (operation) => operation(transactionClient)),
+    transactionClient
+  };
+});
+
+vi.mock("./db", () => ({
+  prisma: {
+    $transaction: prismaMocks.transaction
+  }
+}));
 
 import {
   isSerializableTransactionConflict,
   PRISMA_RESERVATION_TRANSACTION_OPTIONS,
+  prismaReservationStore,
   retrySerializableReservationTransaction
 } from "./prisma-reservation-store";
+import { reserveStudyPeriod } from "./reservation-service";
+
+beforeEach(() => {
+  prismaMocks.transaction.mockClear();
+  prismaMocks.transactionClient.periodSetting.findUnique.mockClear();
+  prismaMocks.transactionClient.periodSetting.upsert.mockClear();
+  prismaMocks.transactionClient.reservation.count.mockClear();
+  prismaMocks.transactionClient.reservation.create.mockClear();
+  prismaMocks.transactionClient.reservation.findFirst.mockClear();
+  prismaMocks.transactionClient.user.findUnique.mockClear();
+});
 
 describe("Prisma reservation store transaction safety", () => {
   it("uses serializable isolation for capacity checks and reservation inserts", () => {
@@ -48,6 +188,39 @@ describe("Prisma reservation store transaction safety", () => {
     expect(isSerializableTransactionConflict(prismaConflictError("P2034"))).toBe(true);
     expect(isSerializableTransactionConflict(prismaConflictError("P2002"))).toBe(false);
     expect(isSerializableTransactionConflict(new Error("P2034"))).toBe(false);
+  });
+});
+
+describe("Prisma reservation store period defaults", () => {
+  it("confirms a reservation with default period settings when the row is missing", async () => {
+    const result = await reserveStudyPeriod({
+      date: "2026-06-16",
+      now: new Date("2026-06-16T05:00:00.000Z"),
+      store: prismaReservationStore,
+      studyPeriod: "EIGHTH",
+      userId: "user-1"
+    });
+
+    expect(result).toEqual({
+      kind: "confirmed",
+      reservation: {
+        date: "2026-06-16",
+        id: "reservation-1",
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId: "user-1"
+      }
+    });
+    expect(prismaMocks.transactionClient.periodSetting.findUnique).toHaveBeenCalledWith({
+      where: {
+        date_studyPeriod: {
+          date: "2026-06-16",
+          studyPeriod: "EIGHTH"
+        }
+      }
+    });
+    expect(prismaMocks.transactionClient.periodSetting.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.transactionClient.reservation.create).toHaveBeenCalledTimes(1);
   });
 });
 

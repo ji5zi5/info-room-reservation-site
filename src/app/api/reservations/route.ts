@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { prismaReservationStore } from "@/lib/prisma-reservation-store";
 import { isReservableDate } from "@/lib/advance-reservation-policy";
-import { ensurePeriodSettings } from "@/lib/period-settings";
 import { reserveStudyPeriod } from "@/lib/reservation-service";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
@@ -67,7 +66,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       return jsonError(statusForReservationError(result.reason), result.reason, messageForReservationError(result.reason));
     }
 
-    await ensurePeriodSettings(parsed.data.date);
     const result = await reserveStudyPeriod({
       date: parsed.data.date,
       now,

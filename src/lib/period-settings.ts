@@ -56,14 +56,16 @@ export async function getPeriodSummaries(
   date: string,
   options: PeriodSummaryOptions = {}
 ): Promise<readonly PeriodSummary[]> {
-  const settings = await prisma.periodSetting.findMany({ where: { date } });
   const now = options.now ?? new Date();
-  const counts = await prisma.reservation.groupBy({
-    by: ["studyPeriod"],
-    where: { date, status: "CONFIRMED" },
-    _count: { _all: true }
-  });
-  const applicants = await getPeriodApplicants(date, options.includeApplicants === true);
+  const [settings, counts, applicants] = await Promise.all([
+    prisma.periodSetting.findMany({ where: { date } }),
+    prisma.reservation.groupBy({
+      by: ["studyPeriod"],
+      where: { date, status: "CONFIRMED" },
+      _count: { _all: true }
+    }),
+    getPeriodApplicants(date, options.includeApplicants === true)
+  ]);
 
   return STUDY_PERIODS.map((studyPeriod) => {
     const setting = settings.find((candidate) => candidate.studyPeriod === studyPeriod) ?? buildDefaultPeriodSetting(date, studyPeriod);

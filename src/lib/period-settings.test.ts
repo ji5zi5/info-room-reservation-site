@@ -28,14 +28,30 @@ type PeriodSettingUpsert = (input: {
   };
 }) => Promise<PeriodSettingRow>;
 
-type ReservationGroupBy = () => Promise<
-  readonly {
-    readonly _count: {
-      readonly _all: number;
-    };
-    readonly studyPeriod: StudyPeriod;
-  }[]
->;
+type ReservationGroupByRow = { readonly _count: { readonly _all: number }; readonly studyPeriod: StudyPeriod };
+type ReservationGroupBy = () => Promise<readonly ReservationGroupByRow[]>;
+type ReservationApplicantRow = {
+  readonly id: string;
+  readonly studyPeriod: StudyPeriod;
+  readonly user: { readonly name: string; readonly studentNumber: string };
+  readonly userId: string;
+};
+
+type ReservationFindMany = () => Promise<readonly ReservationApplicantRow[]>;
+
+type Deferred<T> = {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+};
+
+function createDeferred<T>(): Deferred<T> {
+  let resolveDeferred: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolveDeferred = resolve;
+  });
+
+  return { promise, resolve: resolveDeferred };
+}
 
 const prismaMocks = vi.hoisted(() => {
   const periodSettingsStore: PeriodSettingRow[] = [];
@@ -54,16 +70,19 @@ const prismaMocks = vi.hoisted(() => {
     return create;
   });
   const reservationGroupBy = vi.fn<ReservationGroupBy>(async () => []);
+  const reservationFindMany = vi.fn<ReservationFindMany>(async () => []);
 
   return {
     periodSettingFindMany,
     periodSettingUpsert,
     periodSettingsStore,
+    reservationFindMany,
     reservationGroupBy,
     reset: () => {
       periodSettingsStore.length = 0;
       periodSettingFindMany.mockClear();
       periodSettingUpsert.mockClear();
+      reservationFindMany.mockClear();
       reservationGroupBy.mockClear();
     }
   };
@@ -76,6 +95,7 @@ vi.mock("./db", () => ({
       upsert: prismaMocks.periodSettingUpsert
     },
     reservation: {
+      findMany: prismaMocks.reservationFindMany,
       groupBy: prismaMocks.reservationGroupBy
     }
   }
@@ -114,6 +134,55 @@ describe("period setting defaults", () => {
 });
 
 describe("period summaries", () => {
+  it("starts settings counts and applicant reads before awaiting period summary DB results", async () => {
+    const settingsDeferred = createDeferred<readonly PeriodSettingRow[]>();
+    const countsDeferred = createDeferred<readonly ReservationGroupByRow[]>();
+    const applicantsDeferred = createDeferred<readonly ReservationApplicantRow[]>();
+
+    prismaMocks.periodSettingFindMany.mockImplementationOnce(() => settingsDeferred.promise);
+    prismaMocks.reservationGroupBy.mockImplementationOnce(() => countsDeferred.promise);
+    prismaMocks.reservationFindMany.mockImplementationOnce(() => applicantsDeferred.promise);
+
+    const summariesPromise = getPeriodSummaries("2026-06-14", {
+      currentUserId: "me",
+      includeApplicants: true,
+      now: new Date("2026-06-14T00:30:00.000Z")
+    });
+
+    try {
+      expect(prismaMocks.periodSettingFindMany).toHaveBeenCalledTimes(1);
+      expect(prismaMocks.reservationGroupBy).toHaveBeenCalledTimes(1);
+      expect(prismaMocks.reservationFindMany).toHaveBeenCalledTimes(1);
+
+      settingsDeferred.resolve([
+        { capacity: 3, closeTime: "10:00", date: "2026-06-14", enabled: true, openTime: "09:00", studyPeriod: "FIRST" }
+      ]);
+      countsDeferred.resolve([
+        { _count: { _all: 1 }, studyPeriod: "FIRST" },
+        { _count: { _all: 2 }, studyPeriod: "EIGHTH" }
+      ]);
+      applicantsDeferred.resolve([
+        { id: "mine-first", studyPeriod: "FIRST", user: { name: "Me", studentNumber: "1001" }, userId: "me" },
+        { id: "other-eighth", studyPeriod: "EIGHTH", user: { name: "Other", studentNumber: "1002" }, userId: "other" },
+        { id: "mine-eighth", studyPeriod: "EIGHTH", user: { name: "Me", studentNumber: "1001" }, userId: "me" }
+      ]);
+
+      const periods = await summariesPromise;
+
+      expect(periods.map((period) => period.studyPeriod)).toEqual(["EIGHTH", "FIRST"]);
+      expect(periods.map((period) => period.myReservationId)).toEqual(["mine-eighth", "mine-first"]);
+      expect(periods.map((period) => period.applicants.map((applicant) => applicant.reservationId))).toEqual([
+        ["other-eighth", "mine-eighth"],
+        ["mine-first"]
+      ]);
+      expect(periods.map((period) => period.remaining)).toEqual([8, 2]);
+    } finally {
+      settingsDeferred.resolve([]);
+      countsDeferred.resolve([]);
+      applicantsDeferred.resolve([]);
+    }
+  });
+
   it("returns default settings without creating missing period setting rows", async () => {
     const rowCountBeforeRead = prismaMocks.periodSettingsStore.length;
 
