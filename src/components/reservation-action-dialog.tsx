@@ -28,8 +28,6 @@ type ReservationActionDialogProps = {
   readonly onConfirm: (input: ReservationActionConfirmInput) => void;
 };
 
-const RESERVATION_REASON_PRESETS = ["자습", "과제", "프린트/자료", "기타"] as const;
-
 export function ReservationActionDialog({
   action,
   loading,
@@ -102,25 +100,11 @@ export function ReservationActionDialog({
               <input
                 autoFocus
                 maxLength={80}
-                placeholder="예: 자습, 과제, 자료 출력"
+                placeholder="이용 사유를 직접 입력"
                 value={reservationReason}
                 onChange={(event) => setReservationReason(event.currentTarget.value)}
               />
             </label>
-            <div className="reason-preset-row" aria-label="빠른 사유">
-              {RESERVATION_REASON_PRESETS.map((preset) => (
-                <button
-                  className="reason-preset-button"
-                  data-active={trimmedReason === preset}
-                  disabled={loading}
-                  key={preset}
-                  type="button"
-                  onClick={() => setReservationReason(preset)}
-                >
-                  {preset}
-                </button>
-              ))}
-            </div>
             <p className="confirm-policy-note">미참석 시 정보실 예약이 영구 제한됩니다.</p>
           </div>
         )}

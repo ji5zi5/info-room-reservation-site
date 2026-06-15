@@ -32,7 +32,7 @@ type MockPeriod = {
   readonly windowState: "open";
 };
 
-test("reserve click asks for a reason and posts without extra period refreshes", async ({ page }) => {
+test("reserve click requires a directly typed reason and posts without extra period refreshes", async ({ page }) => {
   let reserveClickStarted = false;
   let dialogVisible = false;
   let postStarted = false;
@@ -70,10 +70,12 @@ test("reserve click asks for a reason and posts without extra period refreshes",
   await expect(page.getByRole("dialog")).toBeVisible();
   dialogVisible = true;
   const confirmButton = page.locator(".confirm-dialog .primary-button");
-  await expect(page.getByLabel("이용 사유")).toBeVisible();
+  const reasonInput = page.getByLabel("이용 사유");
+  await expect(reasonInput).toBeVisible();
   await expect(confirmButton).toBeDisabled();
-  await page.getByRole("button", { name: "자습" }).click();
-  await expect(page.getByLabel("이용 사유")).toHaveValue("자습");
+  await expect(page.getByRole("button", { name: "자습" })).toBeHidden();
+  await reasonInput.fill("조용한 자리에서 수행평가 준비");
+  await expect(reasonInput).toHaveValue("조용한 자리에서 수행평가 준비");
 
   const reservationPost = page.waitForResponse(
     (response) => response.url().endsWith("/api/reservations") && response.request().method() === "POST"
@@ -83,7 +85,11 @@ test("reserve click asks for a reason and posts without extra period refreshes",
 
   expect(periodGetsBetweenClickAndDialog).toBe(0);
   expect(periodGetsBetweenDialogAndPost).toBe(0);
-  expect(postedReservationBody).toEqual({ date: FIXED_THURSDAY_DATE, reason: "자습", studyPeriod: "EIGHTH" });
+  expect(postedReservationBody).toEqual({
+    date: FIXED_THURSDAY_DATE,
+    reason: "조용한 자리에서 수행평가 준비",
+    studyPeriod: "EIGHTH"
+  });
 });
 
 async function login(page: Page): Promise<void> {
