@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   cancelMockReservation,
   getMockAdminUsers,
+  getMockStudentProfile,
   getMockPeriodSummariesForUser,
   reserveMockStudyPeriod,
   resetMockReservationDataForTests,
@@ -77,5 +78,78 @@ describe("mock reservation data", () => {
       bookingStatus: "RESTRICTED",
       restrictionReason: "예약 취소"
     });
+  });
+
+  it("builds a student profile from mock users and reservations after cancellation", () => {
+    // Given
+    openAllMockPeriods("2026-06-14");
+    upsertMockReservationUser(student);
+    reserveMockStudyPeriod({
+      date: "2026-06-14",
+      now: new Date("2026-06-14T00:30:00.000Z"),
+      studyPeriod: "EIGHTH",
+      user: student
+    });
+    reserveMockStudyPeriod({
+      date: "2026-06-14",
+      now: new Date("2026-06-14T00:35:00.000Z"),
+      studyPeriod: "FIRST",
+      user: student
+    });
+    cancelMockReservation({
+      id: "mock-reservation-1",
+      now: new Date("2026-06-14T00:40:00.000Z"),
+      user: student
+    });
+
+    // When
+    const profile = getMockStudentProfile(student.id, new Date("2026-06-14T00:45:00.000Z"));
+
+    // Then
+    expect(profile).toMatchObject({
+      currentReservations: [{ date: "2026-06-14", status: "CONFIRMED", studyPeriod: "FIRST" }],
+      effectiveStatus: "RESTRICTED",
+      recentSanctions: [],
+      reservationSummary: { cancelledCount: 1, confirmedCount: 1, noShowCount: 0 },
+      sanctionSummary: { activeCount: 0, permanentCount: 0, revokedCount: 0, totalCount: 0 },
+      user: {
+        restrictionReason: "예약 취소"
+      }
+    });
+  });
+
+  it("omits internal identity and admin keys from the mock student profile payload", () => {
+    // Given
+    openAllMockPeriods("2026-06-14");
+    upsertMockReservationUser(student);
+    reserveMockStudyPeriod({
+      date: "2026-06-14",
+      now: new Date("2026-06-14T00:30:00.000Z"),
+      studyPeriod: "EIGHTH",
+      user: student
+    });
+    const forbiddenKeys = [
+      "adminActions",
+      "actorId",
+      "auditLogs",
+      "revokedById",
+      "riroId",
+      "sessionSummary",
+      "sourceActionId",
+      "userId"
+    ] as const;
+
+    // When
+    const profile = getMockStudentProfile(student.id, new Date("2026-06-14T00:45:00.000Z"));
+    expect(profile).not.toBeNull();
+    if (profile === null) {
+      return;
+    }
+    const serializedProfile = JSON.stringify(profile);
+
+    // Then
+    for (const forbiddenKey of forbiddenKeys) {
+      expect(serializedProfile).not.toContain(`"${forbiddenKey}"`);
+    }
   });
 });

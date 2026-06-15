@@ -7,7 +7,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  UserRound
 } from "lucide-react";
 import type { ReactElement } from "react";
 
@@ -33,6 +34,7 @@ type ReservationSidebarProps = {
   readonly onIdChange: (value: string) => void;
   readonly onLogin: () => void;
   readonly onLogout: () => void;
+  readonly onOpenProfile: () => void;
   readonly onPasswordChange: (value: string) => void;
   readonly onToggle: () => void;
   readonly password: string;
@@ -48,6 +50,7 @@ export function ReservationSidebar({
   onIdChange,
   onLogin,
   onLogout,
+  onOpenProfile,
   onPasswordChange,
   onToggle,
   password,
@@ -86,6 +89,12 @@ export function ReservationSidebar({
               </div>
               <ShieldCheck color="#3E6AE1" />
             </div>
+            {user.role !== "ADMIN" ? (
+              <button className="ghost-button" type="button" onClick={onOpenProfile}>
+                <UserRound size={18} />
+                프로필
+              </button>
+            ) : null}
             <button className="ghost-button" type="button" onClick={onLogout}>
               <LogOut size={18} />
               로그아웃

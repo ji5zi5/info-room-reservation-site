@@ -5,8 +5,10 @@ import { filterAdminUsers, type AdminUserFilterInput, type AdminUserListRow } fr
 import { toKstDate } from "./date";
 import type { PeriodSummary } from "./period-settings";
 import { getMockAdminPeriodSettings } from "./mock-period-settings";
+import { buildMockStudentProfilePayload } from "./mock-student-profile";
 import { buildStudentCancellationRestriction, type Reservation, type ReservationResult } from "./reservation-service";
 import type { SessionUser } from "./session";
+import type { StudentProfilePayload } from "./student-profile";
 import type { StudyPeriod } from "./study-periods";
 
 type MockUser = AdminUserListRow;
@@ -19,12 +21,8 @@ type MockReservation = Reservation & {
 
 type MockCancelResult =
   | { readonly kind: "cancelled"; readonly reservation: MockReservation; readonly user: SessionUser }
-  | {
-      readonly kind: "forbidden";
-    }
-  | {
-      readonly kind: "not_found";
-    };
+  | { readonly kind: "forbidden" }
+  | { readonly kind: "not_found" };
 
 const mockState = getGlobalMockReservationState();
 const usersById = mockState.usersById;
@@ -98,6 +96,13 @@ export function getMockAdminUserDetail(userId: string): object | null {
       updatedAt: now
     }
   };
+}
+
+export function getMockStudentProfile(userId: string, now: Date): StudentProfilePayload | null {
+  const user = usersById.get(userId);
+  return user
+    ? buildMockStudentProfilePayload({ now, reservations: reservations.filter((reservation) => reservation.userId === userId), user })
+    : null;
 }
 
 export function getMockPeriodSummariesForUser(input: {

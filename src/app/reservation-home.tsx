@@ -10,15 +10,17 @@ import {
   formatKstTime,
   previewCancellationRestrictedUntil
 } from "@/lib/student-reservation-status";
+import type { StudentProfilePayload } from "@/lib/student-profile";
 import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
 import { ReservationActionDialog, type ReservationPendingAction } from "@/components/reservation-action-dialog";
 import { ReservationCalendar } from "@/components/reservation-calendar";
 import { ReservationWarningPanel } from "@/components/reservation-warning-panel";
 import { AdminConsole } from "./admin/admin-console";
-import { readApiErrorMessage, readCurrentUser, readLoginPayload, readPeriodSummaries } from "./client-api-response";
+import { readApiErrorMessage, readCurrentUser, readLoginPayload, readPeriodSummaries, readStudentProfilePayload } from "./client-api-response";
 import { csrfFetch, resetCsrfToken } from "./csrf-fetch";
 import { consumeAdminRedirectMessage, reservationRestrictionMessage } from "./reservation-home-helpers";
 import { ReservationSidebar, type ReservationSidebarUser } from "./reservation-sidebar";
+import { StudentProfilePanel } from "./student-profile-panel";
 
 type Tab = "today" | "advance";
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
@@ -53,6 +55,7 @@ export function ReservationHomePage(): React.ReactElement {
   const [pendingAction, setPendingAction] = useState<ReservationPendingAction | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const activePeriodRefreshesRef = useRef(0);
+  const [profileState, setProfileState] = useState<{ readonly errorMessage: string | null; readonly loading: boolean; readonly open: boolean; readonly profile: StudentProfilePayload | null }>({ errorMessage: null, loading: false, open: false, profile: null });
 
   const isAdmin = user?.role === "ADMIN";
   const advanceUnavailable = tab === "advance" && advancePolicy?.kind === "unavailable";
@@ -173,6 +176,19 @@ export function ReservationHomePage(): React.ReactElement {
     };
   }, [advancePolicy, advanceUnavailable, refreshMe, refreshPeriodDates, targetDate, user?.id, user?.role]);
 
+  async function refreshProfile(): Promise<void> {
+    setProfileState((current) => ({ ...current, errorMessage: null, loading: true }));
+    const result = await readStudentProfilePayload(await fetch("/api/me/profile"));
+    switch (result.kind) {
+      case "loaded":
+        setProfileState((current) => ({ ...current, errorMessage: null, loading: false, profile: result.profile }));
+        return;
+      case "error":
+        setProfileState((current) => ({ ...current, errorMessage: result.message, loading: false, profile: null }));
+        return;
+    }
+  }
+
   async function login(): Promise<void> {
     setLoading(true);
     setToast(null);
@@ -200,6 +216,7 @@ export function ReservationHomePage(): React.ReactElement {
     resetCsrfToken();
     setUser(null);
     setPeriods([]);
+    setProfileState({ errorMessage: null, loading: false, open: false, profile: null });
     setToast("로그아웃되었습니다.");
   }
 
@@ -285,6 +302,7 @@ export function ReservationHomePage(): React.ReactElement {
     setLoading(false);
     setToast("예약이 확정되었습니다.");
     await refreshPeriods(targetDate);
+    if (profileState.open) { await refreshProfile(); }
   }
 
   async function cancelReservation(reservationId: string): Promise<void> {
@@ -295,6 +313,7 @@ export function ReservationHomePage(): React.ReactElement {
     setToast(response.ok ? "예약이 취소되었습니다. 3일간 예약이 제한됩니다." : errorMessage ?? "예약 취소에 실패했습니다.");
     await refreshMe();
     await refreshPeriods(targetDate);
+    if (response.ok && profileState.open) { await refreshProfile(); }
   }
 
   if (isAdmin) {
@@ -315,6 +334,7 @@ export function ReservationHomePage(): React.ReactElement {
           onIdChange={setId}
           onLogin={() => void login()}
           onLogout={() => void logout()}
+          onOpenProfile={() => { setProfileState((current) => ({ ...current, open: true })); void refreshProfile(); }}
           onPasswordChange={setPassword}
           onToggle={() => setSidebarOpen((open) => !open)}
         />
@@ -401,6 +421,7 @@ export function ReservationHomePage(): React.ReactElement {
           )}
         </section>
       </div>
+      <StudentProfilePanel errorMessage={profileState.errorMessage} loading={profileState.loading} open={profileState.open} profile={profileState.profile} onClose={() => setProfileState((current) => ({ ...current, open: false }))} onRetry={() => void refreshProfile()} />
       <ReservationActionDialog
         action={pendingAction}
         loading={loading}
