@@ -91,16 +91,16 @@
 .student-status-panel {
   background: var(--ash);
   border: 1px solid var(--fog);
-  border-radius: 8px;
+  border-radius: var(--radius);
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px;
 }
 
 .student-status-head {
   align-items: center;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   justify-content: space-between;
   min-width: 0;
 }
@@ -119,7 +119,7 @@
 
 .student-status-chip {
   background: color-mix(in srgb, #1f9d55 14%, var(--white));
-  border-radius: 999px;
+  border-radius: var(--radius);
   color: #176c3a;
   flex: 0 0 auto;
   font-size: 0.76rem;
@@ -136,13 +136,13 @@
 .student-status-summary {
   background: var(--white);
   border: 1px solid var(--fog);
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--ink);
   display: grid;
-  gap: 2px;
+  gap: 1px;
   margin: 0;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 7px 9px;
 }
 
 .student-status-summary span {
@@ -167,7 +167,7 @@
 .tabbar {
   background: var(--ash);
   border: 1px solid var(--fog);
-  border-radius: 8px;
+  border-radius: var(--radius);
   display: grid;
   gap: 4px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -179,7 +179,7 @@
 .tabbar button {
   background: var(--white);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--pewter);
   font-size: 0.86rem;
   font-weight: 700;
@@ -435,6 +435,10 @@
   opacity: 1;
 }
 
+.tool-panel > .topbar {
+  min-height: 68px;
+}
+
 .advance-unavailable {
   background: var(--white);
   border-radius: var(--radius);
@@ -487,7 +491,7 @@
 
 .meter {
   background: var(--fog);
-  border-radius: 999px;
+  border-radius: var(--radius);
   height: 8px;
   overflow: hidden;
 }
@@ -1103,6 +1107,19 @@
 
   .tabbar button {
     min-height: 42px;
+  }
+
+  .tool-panel > .topbar {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .tool-panel > .topbar > div {
+    min-width: 0;
+  }
+
+  .tool-panel > .topbar > svg {
+    flex: 0 0 auto;
   }
 
   .reservation-date-rail,

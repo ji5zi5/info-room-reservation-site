@@ -198,7 +198,7 @@
 .notification-pill {
   align-items: center;
   background: var(--white);
-  border-radius: 999px;
+  border-radius: var(--radius);
   color: var(--pewter);
   display: inline-flex;
   font-size: 0.84rem;
@@ -357,7 +357,7 @@
 
 .status-chip {
   background: var(--fog);
-  border-radius: 999px;
+  border-radius: var(--radius);
   color: var(--graphite);
   display: inline-flex;
   font-size: 0.78rem;

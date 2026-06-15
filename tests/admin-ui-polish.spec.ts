@@ -1,23 +1,29 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { e2eNow, FIXED_FRIDAY_DATE, mockClientDate, mockOpenPeriodsForDates } from "./e2e-time";
 import { csrfRequest } from "./playwright-csrf";
 import { visibleBox } from "./playwright-layout";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+const ADMIN_LOGIN_ALIAS = "admin";
+const CAN_USE_LOCAL_LOGIN_ENV = isLocalE2eTarget(BASE_URL) || process.env.E2E_ALLOW_LOCAL_LOGIN_ENV === "true";
+const ADMIN_LOGIN_ID = requiredAdminCredential("E2E_ADMIN_LOGIN_ID", "ADMIN_LOGIN_ID", ADMIN_LOGIN_ALIAS);
+const ADMIN_LOGIN_PASSWORD = requiredAdminCredential("E2E_ADMIN_LOGIN_PASSWORD", "ADMIN_LOGIN_PASSWORD", "password");
+const LOCAL_STUDENT_LOGIN_ID = process.env.E2E_STUDENT_LOGIN_ID ?? localOnlyEnv("LOCAL_STUDENT_LOGIN_ID");
+const LOCAL_STUDENT_NUMBER = process.env.E2E_STUDENT_NUMBER ?? localOnlyEnv("LOCAL_STUDENT_NUMBER") ?? LOCAL_STUDENT_LOGIN_ID;
+const STUDENT_LOGIN_PASSWORD = process.env.E2E_STUDENT_LOGIN_PASSWORD ?? localOnlyEnv("LOCAL_STUDENT_LOGIN_PASSWORD") ?? "password";
+const TEST_IP_RUN_OCTET = (Date.now() % 200) + 1;
+let testIpCounter = 0;
 
 async function login(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
-  if (loginId === "admin") {
+  if (loginId === ADMIN_LOGIN_ALIAS) {
     await loginWithApi(page, loginId, fixedIso);
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
     return;
   }
-  await mockClientDate(page, fixedIso);
+  await loginWithApi(page, loginId, fixedIso);
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.locator("input").nth(0).fill(loginId);
-  await page.locator("input").nth(1).fill("password");
-  await page.getByRole("button", { name: "인증하기" }).click();
   await page.locator(".period-card .period-badge").first().waitFor();
 }
 
@@ -27,11 +33,57 @@ async function logout(page: Page): Promise<void> {
 
 async function loginWithApi(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
   await mockClientDate(page, fixedIso);
+  const credentials =
+    loginId === ADMIN_LOGIN_ALIAS
+      ? { id: ADMIN_LOGIN_ID, password: ADMIN_LOGIN_PASSWORD }
+      : studentCredentials(loginId);
   const response = await page.request.post(`${BASE_URL}/api/auth/riro/login`, {
-    data: { id: loginId, password: "password" },
-    headers: { "x-forwarded-for": `192.0.2.${Math.floor(Math.random() * 200) + 1}` }
+    data: credentials,
+    headers: { "x-forwarded-for": nextTestIp() }
   });
-  expect(response.ok()).toBeTruthy();
+  if (!response.ok()) {
+    throw new Error(`Login failed with ${response.status()}: ${await response.text()}`);
+  }
+}
+
+function nextTestIp(): string {
+  testIpCounter += 1;
+  return `198.51.${TEST_IP_RUN_OCTET}.${(testIpCounter % 250) + 1}`;
+}
+
+function studentCredentials(loginId: string): { readonly id: string; readonly password: string } {
+  if (LOCAL_STUDENT_LOGIN_ID) {
+    return { id: LOCAL_STUDENT_LOGIN_ID, password: STUDENT_LOGIN_PASSWORD };
+  }
+  return { id: loginId, password: STUDENT_LOGIN_PASSWORD };
+}
+
+function expectedStudentNumber(loginId: string): string {
+  if (LOCAL_STUDENT_NUMBER) {
+    return LOCAL_STUDENT_NUMBER;
+  }
+  const digits = loginId.replace(/\D/gu, "");
+  return digits.length >= 4 ? digits.slice(-5) : `9${digits.padStart(4, "0")}`;
+}
+
+function localOnlyEnv(name: string): string | undefined {
+  return CAN_USE_LOCAL_LOGIN_ENV ? process.env[name] : undefined;
+}
+
+function requiredAdminCredential(e2eName: string, localName: string, localDefault: string): string {
+  const e2eValue = process.env[e2eName];
+  if (e2eValue) {
+    return e2eValue;
+  }
+  if (CAN_USE_LOCAL_LOGIN_ENV) {
+    return process.env[localName] ?? localDefault;
+  }
+  throw new Error(`${e2eName} is required for non-local E2E targets.`);
+}
+
+function isLocalE2eTarget(value: string): boolean {
+  const hostname = new URL(value).hostname;
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }
 
 test("admin student management keeps empty detail from clipping the 390px viewport", async ({ page }) => {
@@ -46,6 +98,22 @@ test("admin student management keeps empty detail from clipping the 390px viewpo
     rootScrollWidth: document.documentElement.scrollWidth
   }));
   expect(metrics.rootScrollWidth, "student admin view should not have horizontal clipping").toBeLessThanOrEqual(metrics.rootClientWidth);
+});
+
+test("admin E2E credential guard treats only loopback targets as local", () => {
+  expect(isLocalE2eTarget("http://localhost:3000")).toBe(true);
+  expect(isLocalE2eTarget("http://127.0.0.1:3000")).toBe(true);
+  expect(isLocalE2eTarget("http://[::1]:3000")).toBe(true);
+  expect(isLocalE2eTarget("https://reservation.example.com")).toBe(false);
+});
+
+test("admin compact indicators use the design radius", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 });
+  await login(page, "admin");
+
+  await expectBorderRadius(page.locator(".notification-pill").first(), "admin notification pill", "4px");
+  await page.getByRole("button", { name: "학생" }).click();
+  await expectBorderRadius(page.locator(".status-chip").first(), "admin status chip", "4px");
 });
 
 test("admin panels keep concise headings and open student detail space only when selected", async ({ page }) => {
@@ -126,7 +194,7 @@ test("mobile left panel collapses to a reopen button and expands again", async (
 
 test("mobile admin student detail flows below the list without clipping", async ({ page }) => {
   const loginId = `detail-mobile-${Date.now()}`;
-  const studentNumber = loginId.replace(/\D/gu, "").slice(-5);
+  const studentNumber = expectedStudentNumber(loginId);
   await page.setViewportSize({ height: 900, width: 390 });
   await loginWithApi(page, loginId);
   await logout(page);
@@ -173,7 +241,7 @@ test("mobile admin student detail flows below the list without clipping", async 
 
 test("admin student management uses reason select and one restriction duration flow", async ({ page }) => {
   const loginId = `student-ux-${Date.now()}`;
-  const studentNumber = loginId.replace(/\D/gu, "").slice(-5);
+  const studentNumber = expectedStudentNumber(loginId);
   let restrictionPayload: unknown = null;
   await page.route("**/api/admin/users/*/restriction", async (route) => {
     restrictionPayload = JSON.parse(route.request().postData() ?? "{}");
@@ -219,3 +287,15 @@ test("admin student management uses reason select and one restriction duration f
     status: "BANNED"
   });
 });
+
+async function expectBorderRadius(locator: Locator, label: string, expectedRadius: string): Promise<void> {
+  await expect(locator, `${label} should be visible`).toBeVisible();
+  const radius = await locator.evaluate((element) => {
+    const view = element.ownerDocument.defaultView;
+    if (view === null) {
+      throw new Error("document view should exist");
+    }
+    return view.getComputedStyle(element).borderRadius;
+  });
+  expect.soft(radius, `${label} border radius`).toBe(expectedRadius);
+}

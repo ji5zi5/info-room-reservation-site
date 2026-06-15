@@ -13,7 +13,7 @@ const mockUser = {
   restrictionReason: null,
   restrictedUntil: null,
   role: "STUDENT",
-  studentNumber: "25-10316",
+  studentNumber: "25-00000",
 };
 
 test("student reservation controls keep date selection compact", async ({ page }) => {
@@ -33,6 +33,7 @@ test("student reservation controls keep date selection compact", async ({ page }
 
   const tabbarHeight = await visibleHeight(page.locator(".tabbar"), "reservation mode tabs");
   expect(tabbarHeight).toBeLessThanOrEqual(60);
+  await expectBorderRadius(page.locator(".tabbar"), "reservation mode tabs", "4px");
   expect(Math.round(todayTabBox.width)).toBe(Math.round(advanceTabBox.width));
   expect(Math.round(todayTabBox.height)).toBe(Math.round(advanceTabBox.height));
   await expect(page.getByLabel("예약 날짜")).toHaveCount(0);
@@ -43,9 +44,13 @@ test("student reservation controls keep date selection compact", async ({ page }
   await expect(statusPanel.getByText("문의 코드")).toHaveCount(0);
 
   const statusPanelHeight = await visibleHeight(statusPanel, "student reservation status panel");
-  expect(statusPanelHeight).toBeLessThanOrEqual(150);
+  expect(statusPanelHeight).toBeLessThanOrEqual(145);
+  await expectBorderRadius(statusPanel, "student reservation status panel", "4px");
+  await expectBorderRadius(page.locator(".meter").first(), "reservation capacity meter", "4px");
 
   await advanceTab.click();
+  await expect(todayTab).toHaveAttribute("data-active", "false");
+  await expect(advanceTab).toHaveAttribute("data-active", "true");
   const datePicker = page.getByLabel("사전예약 날짜");
   await expect(datePicker).toBeVisible();
   await expect(datePicker).toHaveAttribute("min", FIXED_FRIDAY_DATE);
@@ -58,12 +63,44 @@ test("student reservation controls keep date selection compact", async ({ page }
   expect(Math.abs(Math.round(advancePeriodPosition.y - todayPeriodPosition.y))).toBeLessThanOrEqual(2);
 
   await todayTab.click();
+  await expect(todayTab).toHaveAttribute("data-active", "true");
+  await expect(advanceTab).toHaveAttribute("data-active", "false");
   const todayAgainPeriodPosition = await visiblePosition(firstPeriodCard, "today first period card after return");
   expect(Math.abs(Math.round(todayAgainPeriodPosition.y - todayPeriodPosition.y))).toBeLessThanOrEqual(2);
 });
 
+test("student reservation mobile topbar avoids icon-only rows and horizontal overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
+  await mockAuth(page);
+  await mockPeriods(page);
+
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  await login(page);
+
+  const topbar = page.locator(".tool-panel > .topbar");
+  const topbarBox = await visibleBox(topbar, "reservation topbar");
+  const topbarTextBox = await visibleBox(topbar.locator("> div").first(), "reservation topbar text");
+  const calendarIcon = topbar.locator("> svg").first();
+
+  if (await calendarIcon.isVisible()) {
+    const iconBox = await visibleBox(calendarIcon, "reservation topbar calendar icon");
+    expect(Math.round(topbarBox.height)).toBeLessThanOrEqual(
+      Math.ceil(Math.max(topbarTextBox.height, iconBox.height)) + 2
+    );
+  }
+
+  const overflow = await page.evaluate(() => ({
+    bodyWidth: document.body.scrollWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth
+  }));
+  expect(overflow.documentWidth).toBeLessThanOrEqual(overflow.viewportWidth);
+  expect(overflow.bodyWidth).toBeLessThanOrEqual(overflow.viewportWidth);
+});
+
 async function login(page: Page): Promise<void> {
-  await page.getByLabel("리로스쿨 ID").fill("25-10316");
+  await page.getByLabel("리로스쿨 ID").fill("ui-density-student");
   await page.getByLabel("리로스쿨 PW").fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
   await expect(page.getByRole("button", { name: "로그아웃" })).toBeVisible();
@@ -118,4 +155,15 @@ async function visibleHeight(locator: Locator, label: string): Promise<number> {
     throw new Error(`${label} should be visible`);
   }
   return box.height;
+}
+
+async function expectBorderRadius(locator: Locator, label: string, expectedRadius: string): Promise<void> {
+  const radius = await locator.evaluate((element) => {
+    const view = element.ownerDocument.defaultView;
+    if (view === null) {
+      throw new Error("document view should exist");
+    }
+    return view.getComputedStyle(element).borderRadius;
+  });
+  expect.soft(radius, `${label} border radius`).toBe(expectedRadius);
 }
