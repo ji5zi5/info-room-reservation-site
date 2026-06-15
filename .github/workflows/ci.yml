@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/info_room_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/info_room_test
       SESSION_SECRET: ci-session-secret-replace-in-runtime
       RIRO_MOCK_LOGIN: "false"
       ENABLE_LOCAL_ADMIN: "false"

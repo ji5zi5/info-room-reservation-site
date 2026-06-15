@@ -2,6 +2,7 @@ import { assertProductionEnvSafe, parseServerEnv, ServerEnvError } from "../src/
 
 const requiredProductionKeys = [
   "DATABASE_URL",
+  "DIRECT_URL",
   "SESSION_SECRET",
   "ADMIN_STUDENT_NUMBERS",
   "CRON_SECRET",

@@ -30,6 +30,7 @@ describe("server environment guards", () => {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
       CRON_SECRET: "cron-secret",
       DATABASE_URL: "postgresql://user:pass@example.test:5432/info_room",
+      DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
       NODE_ENV: "production",
       RIRO_MOCK_LOGIN: "false",
@@ -63,6 +64,18 @@ describe("server environment guards", () => {
 
   it("validates a configured Discord webhook URL", () => {
     expect(() => parseServerEnv({ DISCORD_WEBHOOK_URL: "not-a-url" })).toThrow("DISCORD_WEBHOOK_URL");
+  });
+
+  it("parses a direct database URL for Prisma migrations", () => {
+    expect(
+      parseServerEnv({
+        DATABASE_URL: "postgresql://user:pass@pooler.example.test:6543/info_room",
+        DIRECT_URL: "postgresql://user:pass@db.example.test:5432/info_room"
+      })
+    ).toMatchObject({
+      databaseUrl: "postgresql://user:pass@pooler.example.test:6543/info_room",
+      directUrl: "postgresql://user:pass@db.example.test:5432/info_room"
+    });
   });
 
   it("rejects invalid forwarded IP trust flag values", () => {

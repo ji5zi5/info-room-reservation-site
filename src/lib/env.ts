@@ -10,6 +10,7 @@ const ServerEnvSchema = z.object({
   ADMIN_STUDENT_NUMBERS: z.string().optional(),
   CRON_SECRET: z.string().optional(),
   DATABASE_URL: z.string().optional(),
+  DIRECT_URL: z.string().optional(),
   DISCORD_WEBHOOK_URL: z.union([z.string().url(), z.literal("")]).optional(),
   ENABLE_LOCAL_ADMIN: BooleanFlagSchema,
   NODE_ENV: z.string().optional(),
@@ -24,6 +25,7 @@ export type ServerEnv = {
   readonly adminStudentNumbers: string | null;
   readonly cronSecret: string | null;
   readonly databaseUrl: string | null;
+  readonly directUrl: string | null;
   readonly discordWebhookUrl: string | null;
   readonly enableLocalAdmin: boolean;
   readonly nodeEnv: string;
@@ -44,6 +46,7 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
     adminStudentNumbers: normalizeOptional(parsed.data.ADMIN_STUDENT_NUMBERS),
     cronSecret: normalizeOptional(parsed.data.CRON_SECRET),
     databaseUrl: normalizeOptional(parsed.data.DATABASE_URL),
+    directUrl: normalizeOptional(parsed.data.DIRECT_URL),
     discordWebhookUrl: normalizeOptional(parsed.data.DISCORD_WEBHOOK_URL),
     enableLocalAdmin: parsed.data.ENABLE_LOCAL_ADMIN === "true",
     nodeEnv: parsed.data.NODE_ENV ?? "development",

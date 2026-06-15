@@ -5,6 +5,7 @@ Target platform: Vercel with managed Postgres.
 ## Required Environment Variables
 
 - `DATABASE_URL`: Postgres connection string.
+- `DIRECT_URL`: direct Postgres connection string for Prisma migrations.
 - `SESSION_SECRET`: long random secret for session signing.
 - `ADMIN_STUDENT_NUMBERS`: comma-separated student numbers with admin access.
 - `CRON_SECRET`: bearer token used by cron endpoints.
@@ -25,11 +26,20 @@ Set the Vercel build command to:
 npm run vercel-build
 ```
 
-That command runs Prisma Client generation, `prisma migrate deploy`, and `next build`. Keep `npm run db:push` for local development only; production uses committed migrations.
+That command runs the predeploy environment check, Prisma Client generation, `prisma migrate deploy`, and `next build`. Keep `npm run db:push` for local development only; production uses committed migrations.
+
+## Supabase Postgres
+
+Use two Supabase connection strings:
+
+- `DATABASE_URL`: Supabase transaction pooler connection. This is the runtime URL used by Vercel serverless functions.
+- `DIRECT_URL`: Supabase direct connection. This is used by Prisma Migrate through `directUrl` in `prisma/schema.prisma`.
+
+On Vercel, set both env vars for Production, Preview, and Development if those environments deploy against Supabase. If you use separate Supabase projects per environment, keep the matching pooler/direct pair together.
 
 ## First Deploy Checklist
 
-1. Create the managed Postgres database and set `DATABASE_URL`.
+1. Create the managed Postgres database and set `DATABASE_URL` plus `DIRECT_URL`.
 2. Set all required environment variables in Vercel.
 3. Run `npm run predeploy:check` locally with the production env loaded.
 4. Deploy with `npm run vercel-build`.

@@ -49,6 +49,7 @@ npm run db:seed
 
 ```env
 DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/info_room?sslmode=require"
+DIRECT_URL="postgresql://USER:PASSWORD@DIRECT_HOST:5432/info_room?sslmode=require"
 SESSION_SECRET="long-random-secret"
 ADMIN_STUDENT_NUMBERS=""
 CRON_SECRET="long-random-secret"
@@ -86,10 +87,12 @@ ADMIN_LOGIN_PASSWORD=""
 
 배포 대상은 Vercel + managed PostgreSQL입니다.
 
-1. Vercel 프로젝트에 필수 env를 설정합니다.
-2. Build command를 `npm run vercel-build`로 설정합니다.
-3. 프로덕션에는 `RIRO_MOCK_LOGIN=false`, `ENABLE_LOCAL_ADMIN=false`, `TRUST_FORWARDED_IP_HEADERS=true`를 사용합니다.
-4. Vercel cron이 아래 두 endpoint를 호출하도록 설정되어 있는지 확인합니다.
+1. Supabase에서 Postgres 프로젝트를 만들고 connection string 두 개를 준비합니다.
+2. `DATABASE_URL`에는 transaction pooler URL을, `DIRECT_URL`에는 direct connection URL을 넣습니다.
+3. Vercel 프로젝트에 필수 env를 설정합니다.
+4. Build command는 `vercel.json`의 `npm run vercel-build`를 사용합니다.
+5. 프로덕션에는 `RIRO_MOCK_LOGIN=false`, `ENABLE_LOCAL_ADMIN=false`, `TRUST_FORWARDED_IP_HEADERS=true`를 사용합니다.
+6. Vercel cron이 아래 두 endpoint를 호출하도록 설정되어 있는지 확인합니다.
 
 ```text
 /api/cron/closed-period-notifications
