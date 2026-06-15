@@ -6,6 +6,17 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
 type StudyPeriod = "EIGHTH" | "FIRST";
 
+type MockUser = {
+  readonly bookingStatus: "ACTIVE";
+  readonly generation: number;
+  readonly id: string;
+  readonly name: string;
+  readonly restrictionReason: null;
+  readonly restrictedUntil: null;
+  readonly role: "STUDENT";
+  readonly studentNumber: string;
+};
+
 type MockPeriod = {
   readonly applicants: readonly [];
   readonly capacity: number;
@@ -26,6 +37,8 @@ test("reserve confirmation posts before any dialog-stage period refresh", async 
   let postStarted = false;
   let periodGetsBetweenDialogAndPost = 0;
 
+  await routeMockCsrf(page);
+  await routeMockLogin(page);
   await routeOpenPeriods(page, () => {
     if (dialogVisible && !postStarted) {
       periodGetsBetweenDialogAndPost += 1;
@@ -67,6 +80,26 @@ async function login(page: Page): Promise<void> {
   await expect(page.locator(".period-card .period-badge")).toHaveCount(2);
 }
 
+async function routeMockLogin(page: Page): Promise<void> {
+  await page.route("**/api/auth/riro/login", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ user: buildMockUser() }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+}
+
+async function routeMockCsrf(page: Page): Promise<void> {
+  await page.route("**/api/csrf", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken: "network-test-csrf-token" }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+}
+
 async function routeOpenPeriods(page: Page, onPeriodsGet: () => void): Promise<void> {
   await page.route("**/api/periods**", async (route) => {
     onPeriodsGet();
@@ -79,6 +112,19 @@ async function routeOpenPeriods(page: Page, onPeriodsGet: () => void): Promise<v
       status: 200
     });
   });
+}
+
+function buildMockUser(): MockUser {
+  return {
+    bookingStatus: "ACTIVE",
+    generation: 31,
+    id: "network-user",
+    name: "테스트학생",
+    restrictionReason: null,
+    restrictedUntil: null,
+    role: "STUDENT",
+    studentNumber: "90001"
+  };
 }
 
 function buildMockPeriod(date: string, studyPeriod: StudyPeriod, label: string): MockPeriod {
