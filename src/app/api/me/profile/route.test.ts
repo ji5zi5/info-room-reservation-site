@@ -234,6 +234,11 @@ describe("student profile route", () => {
     const currentReservation = { createdAt: new Date("2026-06-16T00:01:00.000Z"), date: "2026-06-16", status: "CONFIRMED", studyPeriod: "EIGHTH", updatedAt: new Date("2026-06-16T00:02:00.000Z") };
     const recentReservation = { createdAt: new Date("2026-06-10T00:01:00.000Z"), date: "2026-06-10", status: "CONFIRMED", studyPeriod: "FIRST", updatedAt: new Date("2026-06-10T00:02:00.000Z") };
     const recentSanction = { createdAt: new Date("2026-06-10T00:00:00.000Z"), endsAt: null, reason: "Late cancellation", revokedAt: null, startsAt: new Date("2026-06-09T00:00:00.000Z"), status: "ACTIVE", type: "RESERVATION" };
+    const sanctionSummaryRows = [
+      { endsAt: null, revokedAt: null, status: "ACTIVE" }, { endsAt: new Date("2026-06-18T00:00:00.000Z"), revokedAt: null, status: "ACTIVE" },
+      { endsAt: new Date("2026-06-19T00:00:00.000Z"), revokedAt: new Date("2026-06-12T00:00:00.000Z"), status: "ACTIVE" }, { endsAt: new Date("2026-06-20T00:00:00.000Z"), revokedAt: null, status: "ACTIVE" },
+      { endsAt: new Date("2026-06-21T00:00:00.000Z"), revokedAt: null, status: "REVOKED" }, { endsAt: new Date("2026-06-22T00:00:00.000Z"), revokedAt: null, status: "EXPIRED" }, { endsAt: new Date("2026-06-23T00:00:00.000Z"), revokedAt: null, status: "EXPIRED" }
+    ] as const;
     routeMocks.reservationFindMany
       .mockResolvedValueOnce([currentReservation])
       .mockResolvedValueOnce([recentReservation]);
@@ -242,7 +247,9 @@ describe("student profile route", () => {
       { _count: { _all: 3 }, status: "CANCELLED" },
       { _count: { _all: 2 }, status: "NO_SHOW" }
     ]);
-    routeMocks.sanctionFindMany.mockResolvedValue([recentSanction]);
+    routeMocks.sanctionFindMany
+      .mockResolvedValueOnce([recentSanction])
+      .mockResolvedValueOnce(sanctionSummaryRows);
     routeMocks.sanctionCount
       .mockResolvedValueOnce(4)
       .mockResolvedValueOnce(1)
@@ -260,12 +267,15 @@ describe("student profile route", () => {
       reservationSummary: { cancelledCount: 3, confirmedCount: 12, noShowCount: 2 },
       sanctionSummary: { activeCount: 4, permanentCount: 1, revokedCount: 2, totalCount: 7 }
     });
+    expect(routeMocks.sanctionCount).not.toHaveBeenCalled();
+    expect(routeMocks.sanctionFindMany).toHaveBeenNthCalledWith(2, { select: { endsAt: true, revokedAt: true, status: true }, where: { userId: studentUser.id } });
     expect(routeMocks.reservationGroupBy).toHaveBeenCalledWith({
       by: ["status"],
       where: { userId: studentUser.id },
       _count: { _all: true }
     });
     expect(routeMocks.reservationFindMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 10 }));
+    expect(routeMocks.sanctionFindMany).toHaveBeenCalledTimes(2);
   });
 });
 

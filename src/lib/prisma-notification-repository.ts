@@ -3,13 +3,13 @@ import { Prisma, type NotificationDelivery, type PeriodSetting } from "@prisma/c
 import { prisma } from "./db";
 import { CLOSED_LIST_NOTIFICATION_KIND, selectClosedPeriodNotificationCandidates, staleSendingDeliveryCutoff, type ClosedPeriodCandidate, type ClosedPeriodDeliverySnapshot, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
 import type { ClosedPeriodNotificationDeliveryRecord, ClosedPeriodNotificationDeliveryWrite, ClosedPeriodNotificationPeriod, ClosedPeriodNotificationRepository } from "./closed-period-notification-service";
-import { addDays, toKstDate } from "./date";
+import { toKstDate } from "./date";
 import { buildDefaultPeriodSetting, type PeriodSettingDefaults } from "./period-settings";
 import { STUDY_PERIODS, parseStudyPeriod, type StudyPeriod } from "./study-periods";
 
 type NotificationReservation = { readonly user: { readonly name: string; readonly studentNumber: string } };
 
-const FORCE_CLAIMABLE_STATUSES = ["FAILED", "SENT"] as const, NON_FORCE_CLAIMABLE_STATUSES = ["FAILED"] as const, CLOSED_PERIOD_CATCH_UP_DAYS = 7;
+const FORCE_CLAIMABLE_STATUSES = ["FAILED", "SENT"] as const, NON_FORCE_CLAIMABLE_STATUSES = ["FAILED"] as const;
 
 export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationRepository = {
   async getDelivery(input) {
@@ -94,55 +94,38 @@ export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationR
 
 export async function getDueClosedPeriodNotificationCandidates(now: Date): Promise<readonly ClosedPeriodCandidate[]> {
   const today = toKstDate(now);
-  const catchUpFrom = addDays(today, -(CLOSED_PERIOD_CATCH_UP_DAYS - 1));
   const staleSendingBefore = staleSendingDeliveryCutoff(now);
-  const [catchUpSettings, actionableDeliveries, activeCatchUpDeliveries] = await Promise.all([
-    prisma.periodSetting.findMany({ where: { date: { gte: catchUpFrom, lte: today } } }),
+  const [todaySettings, actionableDeliveries, activeTodayDeliveries] = await Promise.all([
+    prisma.periodSetting.findMany({ where: { date: today } }),
     prisma.notificationDelivery.findMany({
-      where: { date: { lte: today }, kind: CLOSED_LIST_NOTIFICATION_KIND, OR: [{ status: "FAILED" }, { status: "SENDING", updatedAt: { lte: staleSendingBefore } }] }
+      where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND, OR: [{ status: "FAILED" }, { status: "SENDING", updatedAt: { lte: staleSendingBefore } }] }
     }),
     prisma.notificationDelivery.findMany({
-      where: { date: { gte: catchUpFrom, lte: today }, kind: CLOSED_LIST_NOTIFICATION_KIND, OR: [{ status: "SENT" }, { status: "SENDING", updatedAt: { gt: staleSendingBefore } }] }
+      where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND, OR: [{ status: "SENT" }, { status: "SENDING", updatedAt: { gt: staleSendingBefore } }] }
     })
   ]);
-  const retryPairs = actionableDeliveries.map((delivery) => ({ date: delivery.date, studyPeriod: parseStudyPeriod(delivery.studyPeriod) }));
-  const retrySettings =
-    retryPairs.length === 0
-      ? []
-      : await prisma.periodSetting.findMany({ where: { OR: retryPairs } });
-  const retrySettingsByPeriod = new Map(retrySettings.map((setting) => [candidateKey(setting.date, parseStudyPeriod(setting.studyPeriod)), setting]));
+  const todayCandidates = todaySettings.map(toCandidate);
+  const existingPeriods = new Set(todayCandidates.map((setting) => candidateKey(setting.date, setting.studyPeriod)));
+  const defaultTodayCandidates = STUDY_PERIODS.filter((studyPeriod) => !existingPeriods.has(candidateKey(today, studyPeriod))).map((studyPeriod) =>
+    buildDefaultPeriodSetting(today, studyPeriod)
+  );
   const byPeriod = new Map<string, ClosedPeriodCandidate>();
-  for (const candidate of withCatchUpDefaultPeriodCandidates(catchUpSettings.map(toCandidate), catchUpFrom, today)) {
+  for (const candidate of [...todayCandidates, ...defaultTodayCandidates]) {
     byPeriod.set(candidateKey(candidate.date, candidate.studyPeriod), candidate);
   }
-  for (const pair of retryPairs) {
-    byPeriod.set(candidateKey(pair.date, pair.studyPeriod), toCandidate(retrySettingsByPeriod.get(candidateKey(pair.date, pair.studyPeriod)) ?? buildDefaultPeriodSetting(pair.date, pair.studyPeriod)));
+  for (const delivery of actionableDeliveries) {
+    const studyPeriod = parseStudyPeriod(delivery.studyPeriod);
+    const key = candidateKey(delivery.date, studyPeriod);
+    byPeriod.set(key, byPeriod.get(key) ?? buildDefaultPeriodSetting(delivery.date, studyPeriod));
   }
   return selectClosedPeriodNotificationCandidates({
-    deliveries: [...actionableDeliveries, ...activeCatchUpDeliveries].map(toDeliverySnapshot),
+    deliveries: [...actionableDeliveries, ...activeTodayDeliveries].map(toDeliverySnapshot),
     now,
     settings: Array.from(byPeriod.values())
   });
 }
 
 const candidateKey = (date: string, studyPeriod: StudyPeriod): string => `${date}:${studyPeriod}`;
-
-function withCatchUpDefaultPeriodCandidates(
-  settings: readonly ClosedPeriodCandidate[],
-  catchUpFrom: string,
-  today: string
-): readonly ClosedPeriodCandidate[] {
-  const existingPeriods = new Set(settings.map((setting) => candidateKey(setting.date, setting.studyPeriod)));
-  const defaults: ClosedPeriodCandidate[] = [];
-  for (let date = catchUpFrom; date <= today; date = addDays(date, 1)) {
-    for (const studyPeriod of STUDY_PERIODS) {
-      if (!existingPeriods.has(candidateKey(date, studyPeriod))) {
-        defaults.push(buildDefaultPeriodSetting(date, studyPeriod));
-      }
-    }
-  }
-  return [...settings, ...defaults];
-}
 
 async function claimExistingDelivery(
   input: { readonly date: string; readonly staleSendingBefore: Date; readonly studyPeriod: StudyPeriod },

@@ -15,6 +15,8 @@ type DbStudentProfileUser = { readonly bookingStatus: string; readonly generatio
 type DbReservationRow = { readonly createdAt: Date; readonly date: string; readonly status: string; readonly studyPeriod: string; readonly updatedAt: Date };
 type DbReservationCountRow = { readonly _count: { readonly _all: number }; readonly status: string };
 type DbSanctionRow = { readonly createdAt: Date; readonly endsAt: Date | null; readonly reason: string; readonly revokedAt: Date | null; readonly startsAt: Date; readonly status: string; readonly type: string };
+type DbSanctionSummaryRow = { readonly endsAt: Date | null; readonly revokedAt: Date | null; readonly status: string };
+type StudentProfileSanctionSummaryStatus = StudentProfileSanctionStatus | "OTHER";
 type BuildDatabaseStudentProfileInput = { readonly currentReservations: readonly DbReservationRow[]; readonly kstToday: string; readonly now: Date; readonly recentReservations: readonly DbReservationRow[]; readonly recentSanctions: readonly DbSanctionRow[]; readonly reservationSummary: StudentProfileReservationSummary; readonly sanctionSummary: StudentProfileSanctionSummary; readonly user: DbStudentProfileUser };
 
 export async function GET(): Promise<NextResponse> {
@@ -54,10 +56,7 @@ async function getDatabaseStudentProfile(userId: string, now: Date): Promise<Stu
     recentReservations,
     reservationCounts,
     recentSanctions,
-    activeSanctionCount,
-    permanentSanctionCount,
-    revokedSanctionCount,
-    totalSanctionCount
+    sanctionSummaryRows
   ] = await Promise.all([
     prisma.user.findUnique({
       select: {
@@ -93,10 +92,10 @@ async function getDatabaseStudentProfile(userId: string, now: Date): Promise<Stu
       take: 5,
       where: { userId }
     }),
-    prisma.userSanction.count({ where: { status: "ACTIVE", userId } }),
-    prisma.userSanction.count({ where: { endsAt: null, status: "ACTIVE", userId } }),
-    prisma.userSanction.count({ where: { OR: [{ status: "REVOKED" }, { revokedAt: { not: null } }], userId } }),
-    prisma.userSanction.count({ where: { userId } })
+    prisma.userSanction.findMany({
+      select: sanctionSummarySelect,
+      where: { userId }
+    })
   ]);
 
   if (user === null) {
@@ -110,18 +109,14 @@ async function getDatabaseStudentProfile(userId: string, now: Date): Promise<Stu
     recentReservations,
     recentSanctions,
     reservationSummary: summarizeReservationCounts(reservationCounts),
-    sanctionSummary: {
-      activeCount: activeSanctionCount,
-      permanentCount: permanentSanctionCount,
-      revokedCount: revokedSanctionCount,
-      totalCount: totalSanctionCount
-    },
+    sanctionSummary: summarizeSanctionSummaryRows(sanctionSummaryRows),
     user
   });
 }
 
 const reservationSelect = { createdAt: true, date: true, status: true, studyPeriod: true, updatedAt: true } as const;
 const sanctionSelect = { createdAt: true, endsAt: true, reason: true, revokedAt: true, startsAt: true, status: true, type: true } as const;
+const sanctionSummarySelect = { endsAt: true, revokedAt: true, status: true } as const;
 
 function buildDatabaseStudentProfile(input: BuildDatabaseStudentProfileInput): StudentProfilePayload {
   const user = toStudentProfileUserRow(input.user);
@@ -177,6 +172,38 @@ function summarizeReservationCounts(rows: readonly DbReservationCountRow[]): Stu
   );
 }
 
+function summarizeSanctionSummaryRows(rows: readonly DbSanctionSummaryRow[]): StudentProfileSanctionSummary {
+  return rows.reduce<StudentProfileSanctionSummary>(
+    (summary, row) => {
+      const status = parseSanctionSummaryStatus(row.status);
+      switch (status) {
+        case "ACTIVE":
+          return {
+            activeCount: summary.activeCount + 1,
+            permanentCount: summary.permanentCount + (row.endsAt === null ? 1 : 0),
+            revokedCount: summary.revokedCount + (row.revokedAt === null ? 0 : 1),
+            totalCount: summary.totalCount + 1
+          };
+        case "REVOKED":
+          return {
+            ...summary,
+            revokedCount: summary.revokedCount + 1,
+            totalCount: summary.totalCount + 1
+          };
+        case "OTHER":
+          return {
+            ...summary,
+            revokedCount: summary.revokedCount + (row.revokedAt === null ? 0 : 1),
+            totalCount: summary.totalCount + 1
+          };
+        default:
+          return assertNeverSanctionSummaryStatus(status);
+      }
+    },
+    { activeCount: 0, permanentCount: 0, revokedCount: 0, totalCount: 0 }
+  );
+}
+
 function parseBookingStatus(value: string): BookingStatus {
   switch (value) {
     case "ACTIVE": case "BANNED": case "RESTRICTED": return value;
@@ -201,6 +228,14 @@ function parseSanctionStatus(value: string): StudentProfileSanctionStatus {
   }
 }
 
+function parseSanctionSummaryStatus(value: string): StudentProfileSanctionSummaryStatus {
+  switch (value) {
+    case "ACTIVE": case "REVOKED": return value;
+    default:
+      return "OTHER";
+  }
+}
+
 function parseStudyPeriod(value: string): StudyPeriod {
   switch (value) {
     case "EIGHTH": case "FIRST": return value;
@@ -214,4 +249,8 @@ class InvalidStudentProfileFieldError extends Error {
     super(`Invalid student profile ${field}: ${value}`);
     this.name = "InvalidStudentProfileFieldError";
   }
+}
+
+function assertNeverSanctionSummaryStatus(value: never): never {
+  throw new InvalidStudentProfileFieldError("sanctionSummaryStatus", String(value));
 }

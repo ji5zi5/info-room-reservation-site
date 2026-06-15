@@ -1,28 +1,22 @@
 "use client";
 
-import { CalendarDays, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getAdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
 import { buildReservationCalendarDays } from "@/lib/reservation-calendar";
 import {
   collectStudentCurrentReservations,
-  formatKstTime,
   previewCancellationRestrictedUntil
 } from "@/lib/student-reservation-status";
-import type { StudentProfilePayload } from "@/lib/student-profile";
-import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
-import { ReservationActionDialog, type ReservationPendingAction } from "@/components/reservation-action-dialog";
-import { ReservationCalendar } from "@/components/reservation-calendar";
-import { ReservationWarningPanel } from "@/components/reservation-warning-panel";
+import type { PeriodSummary } from "@/components/reservation-period-card";
+import type { ReservationPendingAction } from "@/components/reservation-action-dialog";
 import { AdminConsole } from "./admin/admin-console";
 import { readApiErrorMessage, readCurrentUser, readLoginPayload, readPeriodSummaries, readStudentProfilePayload } from "./client-api-response";
 import { csrfFetch, resetCsrfToken } from "./csrf-fetch";
 import { consumeAdminRedirectMessage, reservationRestrictionMessage } from "./reservation-home-helpers";
-import { ReservationSidebar, type ReservationSidebarUser } from "./reservation-sidebar";
-import { StudentProfilePanel } from "./student-profile-panel";
+import { ReservationHomeView, type ReservationHomeProfileState, type ReservationHomeTab } from "./reservation-home-view";
+import type { ReservationSidebarUser } from "./reservation-sidebar";
 
-type Tab = "today" | "advance";
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
 type PeriodFetchResult =
   | {
@@ -36,12 +30,13 @@ type PeriodFetchResult =
     };
 
 const PERIOD_REFRESH_INTERVAL_MS = 60_000;
+const EMPTY_PROFILE_STATE: ReservationHomeProfileState = { errorMessage: null, loading: false, open: false, profile: null };
 
 export function ReservationHomePage(): React.ReactElement {
   const [user, setUser] = useState<ReservationSidebarUser | null>(null);
   const [periods, setPeriods] = useState<readonly PeriodSummary[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [tab, setTab] = useState<Tab>("today");
+  const [tab, setTab] = useState<ReservationHomeTab>("today");
   const [advancePolicy, setAdvancePolicy] = useState<AdvanceReservationPolicy | null>(null);
   const [advanceDate, setAdvanceDate] = useState("");
   const [calendarPeriodsByDate, setCalendarPeriodsByDate] = useState<{
@@ -55,7 +50,8 @@ export function ReservationHomePage(): React.ReactElement {
   const [pendingAction, setPendingAction] = useState<ReservationPendingAction | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const activePeriodRefreshesRef = useRef(0);
-  const [profileState, setProfileState] = useState<{ readonly errorMessage: string | null; readonly loading: boolean; readonly open: boolean; readonly profile: StudentProfilePayload | null }>({ errorMessage: null, loading: false, open: false, profile: null });
+  const profileRefreshPromiseRef = useRef<Promise<void> | null>(null);
+  const [profileState, setProfileState] = useState<ReservationHomeProfileState>(EMPTY_PROFILE_STATE);
 
   const isAdmin = user?.role === "ADMIN";
   const advanceUnavailable = tab === "advance" && advancePolicy?.kind === "unavailable";
@@ -177,15 +173,27 @@ export function ReservationHomePage(): React.ReactElement {
   }, [advancePolicy, advanceUnavailable, refreshMe, refreshPeriodDates, targetDate, user?.id, user?.role]);
 
   async function refreshProfile(): Promise<void> {
-    setProfileState((current) => ({ ...current, errorMessage: null, loading: true }));
-    const result = await readStudentProfilePayload(await fetch("/api/me/profile"));
-    switch (result.kind) {
-      case "loaded":
-        setProfileState((current) => ({ ...current, errorMessage: null, loading: false, profile: result.profile }));
-        return;
-      case "error":
-        setProfileState((current) => ({ ...current, errorMessage: result.message, loading: false, profile: null }));
-        return;
+    if (profileRefreshPromiseRef.current) {
+      await profileRefreshPromiseRef.current;
+      return;
+    }
+    const refresh = (async (): Promise<void> => {
+      setProfileState((current) => ({ ...current, errorMessage: null, loading: true }));
+      const result = await readStudentProfilePayload(await fetch("/api/me/profile"));
+      switch (result.kind) {
+        case "loaded":
+          setProfileState((current) => ({ ...current, errorMessage: null, loading: false, profile: result.profile }));
+          return;
+        case "error":
+          setProfileState((current) => ({ ...current, errorMessage: result.message, loading: false, profile: null }));
+          return;
+      }
+    })();
+    profileRefreshPromiseRef.current = refresh;
+    try {
+      await refresh;
+    } finally {
+      profileRefreshPromiseRef.current = null;
     }
   }
 
@@ -216,7 +224,7 @@ export function ReservationHomePage(): React.ReactElement {
     resetCsrfToken();
     setUser(null);
     setPeriods([]);
-    setProfileState({ errorMessage: null, loading: false, open: false, profile: null });
+    setProfileState(EMPTY_PROFILE_STATE);
     setToast("로그아웃되었습니다.");
   }
 
@@ -280,13 +288,6 @@ export function ReservationHomePage(): React.ReactElement {
 
   async function reserve(studyPeriod: "EIGHTH" | "FIRST"): Promise<void> {
     setLoading(true);
-    const latestPeriods = await refreshPeriods(targetDate);
-    const period = latestPeriods.find((candidate) => candidate.studyPeriod === studyPeriod);
-    if (!canReservePeriod(period)) {
-      setLoading(false);
-      setToast("최신 좌석 수를 반영했습니다. 다시 확인하세요.");
-      return;
-    }
     const response = await csrfFetch("/api/reservations", {
       body: JSON.stringify({ date: targetDate, studyPeriod }),
       headers: { "content-type": "application/json" },
@@ -301,8 +302,7 @@ export function ReservationHomePage(): React.ReactElement {
     }
     setLoading(false);
     setToast("예약이 확정되었습니다.");
-    await refreshPeriods(targetDate);
-    if (profileState.open) { await refreshProfile(); }
+    await Promise.all([refreshPeriods(targetDate), ...(profileState.open ? [refreshProfile()] : [])]);
   }
 
   async function cancelReservation(reservationId: string): Promise<void> {
@@ -311,9 +311,16 @@ export function ReservationHomePage(): React.ReactElement {
     const errorMessage = await readApiErrorMessage(response);
     setLoading(false);
     setToast(response.ok ? "예약이 취소되었습니다. 3일간 예약이 제한됩니다." : errorMessage ?? "예약 취소에 실패했습니다.");
-    await refreshMe();
-    await refreshPeriods(targetDate);
-    if (response.ok && profileState.open) { await refreshProfile(); }
+    await Promise.all([
+      refreshMe(),
+      refreshPeriods(targetDate),
+      ...(response.ok && profileState.open ? [refreshProfile()] : [])
+    ]);
+  }
+
+  function openProfile(): void {
+    setProfileState((current) => ({ ...current, open: true }));
+    void refreshProfile();
   }
 
   if (isAdmin) {
@@ -321,114 +328,43 @@ export function ReservationHomePage(): React.ReactElement {
   }
 
   return (
-    <main className="app-shell">
-      <div className="workspace" data-sidebar={sidebarOpen ? "open" : "closed"}>
-        <ReservationSidebar
-          currentReservations={currentReservations}
-          id={id}
-          loading={loading}
-          message={toast}
-          password={password}
-          sidebarOpen={sidebarOpen}
-          user={user}
-          onIdChange={setId}
-          onLogin={() => void login()}
-          onLogout={() => void logout()}
-          onOpenProfile={() => { setProfileState((current) => ({ ...current, open: true })); void refreshProfile(); }}
-          onPasswordChange={setPassword}
-          onToggle={() => setSidebarOpen((open) => !open)}
-        />
-
-        <section className="tool-panel">
-          <div className="topbar">
-            <div>
-              <h2>예약 현황</h2>
-              <p className="muted">{advancePolicy ? (advanceUnavailable ? "사전예약 불가" : targetDate) : "예약 날짜 확인 중"}</p>
-              {user && !advanceUnavailable ? (
-                <p className="refresh-status" data-refreshing={periodsRefreshing}>
-                  <span className="refresh-spinner" aria-hidden="true">
-                    <LoaderCircle size={14} />
-                  </span>
-                  <span>
-                    {periodsRefreshing
-                      ? "갱신 중"
-                      : lastRefreshedAt
-                        ? `마지막 갱신 ${formatKstTime(lastRefreshedAt)}`
-                        : "갱신 대기"}
-                  </span>
-                </p>
-              ) : null}
-            </div>
-            <CalendarDays color="#3E6AE1" />
-          </div>
-          <div className="tabbar" aria-label="예약 종류">
-            <button type="button" data-active={tab === "today"} onClick={() => setTab("today")}>당일예약</button>
-            <button type="button" data-active={tab === "advance"} onClick={() => setTab("advance")}>사전예약</button>
-          </div>
-          {advancePolicy && user ? (
-            <ReservationCalendar
-              advancePolicy={advancePolicy}
-              periodsByDate={calendarPeriodsByDate}
-              selectedDate={targetDate}
-              onSelectDate={selectCalendarDate}
-              onTodayClick={selectToday}
-            />
-          ) : null}
-          {advancePolicy ? (
-            <div className="reservation-date-rail">
-              {advanceUnavailable ? (
-                <div className="advance-date-field advance-date-placeholder" aria-hidden="true" />
-              ) : tab === "advance" && advancePolicy.kind === "available" ? (
-                <label className="field advance-date-field">
-                  <span>사전예약 날짜</span>
-                  <input
-                    max={advancePolicy.maxDate}
-                    min={advancePolicy.minDate}
-                    type="date"
-                    value={advanceDate}
-                    onChange={(event) => setAdvanceDate(event.currentTarget.value)}
-                  />
-                </label>
-              ) : (
-                <label className="field advance-date-field">
-                  <span>예약 날짜</span>
-                  <input disabled readOnly type="date" value={todayDate} />
-                </label>
-              )}
-            </div>
-          ) : null}
-          <ReservationWarningPanel />
-          {advanceUnavailable ? (
-            <div className="advance-unavailable" role="status">
-              <h3>사전예약 불가</h3>
-              <p className="muted">금요일 이후에는 이번 주 사전예약이 마감됩니다.</p>
-            </div>
-          ) : (
-            <div className="period-grid">
-              {periods.map((period) => (
-                <ReservationPeriodCard
-                  key={period.studyPeriod}
-                  lastRefreshedAt={lastRefreshedAt}
-                  loading={loading}
-                  period={period}
-                  userReady={user !== null}
-                  onCancel={requestCancel}
-                  onReserve={requestReserve}
-                />
-              ))}
-              {!user ? <p className="muted">예약 현황은 로그인 후 표시됩니다.</p> : null}
-            </div>
-          )}
-        </section>
-      </div>
-      <StudentProfilePanel errorMessage={profileState.errorMessage} loading={profileState.loading} open={profileState.open} profile={profileState.profile} onClose={() => setProfileState((current) => ({ ...current, open: false }))} onRetry={() => void refreshProfile()} />
-      <ReservationActionDialog
-        action={pendingAction}
-        loading={loading}
-        onClose={() => setPendingAction(null)}
-        onConfirm={confirmPendingAction}
-      />
-    </main>
+    <ReservationHomeView
+      advanceDate={advanceDate}
+      advancePolicy={advancePolicy}
+      advanceUnavailable={advanceUnavailable}
+      calendarPeriodsByDate={calendarPeriodsByDate}
+      currentReservations={currentReservations}
+      id={id}
+      lastRefreshedAt={lastRefreshedAt}
+      loading={loading}
+      password={password}
+      pendingAction={pendingAction}
+      periods={periods}
+      periodsRefreshing={periodsRefreshing}
+      profileState={profileState}
+      sidebarOpen={sidebarOpen}
+      tab={tab}
+      targetDate={targetDate}
+      toast={toast}
+      todayDate={todayDate}
+      user={user}
+      onAdvanceDateChange={setAdvanceDate}
+      onCancel={requestCancel}
+      onClosePendingAction={() => setPendingAction(null)}
+      onCloseProfile={() => setProfileState((current) => ({ ...current, open: false }))}
+      onConfirmPendingAction={confirmPendingAction}
+      onIdChange={setId}
+      onLogin={() => void login()}
+      onLogout={() => void logout()}
+      onOpenProfile={openProfile}
+      onPasswordChange={setPassword}
+      onProfileRetry={() => void refreshProfile()}
+      onReserve={requestReserve}
+      onSelectCalendarDate={selectCalendarDate}
+      onSelectToday={selectToday}
+      onSidebarToggle={() => setSidebarOpen((open) => !open)}
+      onTabChange={setTab}
+    />
   );
 }
 
