@@ -19,6 +19,7 @@
 | Reservation list UI | `admin-reservations-panel.tsx` | Status filters and no-show action. |
 | User restrictions UI | `admin-users-panel.tsx` | Search, restrict, ban, unrestrict. |
 | Student detail UI | `admin-student-detail.tsx` | Individual reservation history, audit trail, restriction actions. |
+| Admin visual polish | `../styles/admin.css`, root `DESIGN.md` | Quiet console styling, compact controls, no explanatory subtitles under every heading. |
 
 ## CONVENTIONS
 
@@ -36,6 +37,7 @@
 - ADMIN users must not see student reservation buttons; keep `src/app/reservation-home.tsx` and `src/app/api/reservations/route.ts` aligned.
 - Student-specific detail/ban work should live in new focused components instead of expanding `admin-users-panel.tsx`.
 - Admin CSV/export behavior should remain a derived view of the current filtered reservations list.
+- Student detail belongs in the student section; other sections should not reserve empty detail-panel space.
 
 ## RESPONSIVE NOTES
 

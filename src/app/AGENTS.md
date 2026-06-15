@@ -22,6 +22,7 @@ src/app/
 | Task | Location | Notes |
 | --- | --- | --- |
 | Login and reservation tabs | `reservation-home.tsx` | Already large; extract components for any substantial change. |
+| Visual style | `styles/`, root `DESIGN.md` | Minimal chrome, short labels, compact 4px controls; do not import showroom hero patterns into workflow screens. |
 | Admin page protection | `admin/layout.tsx` | Must call `requireAdmin()` before rendering admin UI. |
 | Admin route UI | `admin/page.tsx`, `admin/admin-console.tsx`, `reservation-home.tsx` | Admins also see `AdminConsole` immediately after normal login. |
 | Route handlers | `api/` | Nested `AGENTS.md` covers request parsing, auth, CSRF, and mutation rules. |
@@ -37,6 +38,7 @@ src/app/
 - Root page should render `AdminConsole` for ADMIN sessions instead of student reservation controls.
 - Client components should keep Korean labels short and avoid explanatory product copy in the UI.
 - Use lucide icons for button/tool affordances when an icon exists.
+- Prefer dense, stable operational layouts over marketing sections or decorative cards.
 
 ## UI INVARIANTS
 
@@ -45,6 +47,7 @@ src/app/
 - `사전예약` chooses date before showing period cards.
 - Applicant lists are collapsed by default and toggle with accessible buttons.
 - Mobile layouts must avoid horizontal overflow at 390px.
+- Buttons, chips, pills, and compact controls should preserve the design radius instead of drifting into oversized rounded badges.
 
 ## ANTI-PATTERNS
 

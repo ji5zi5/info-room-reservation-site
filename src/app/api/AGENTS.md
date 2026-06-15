@@ -27,6 +27,7 @@ src/app/api/
 | Current user | `me/route.ts` | Include restriction expiry so expired temporary restrictions do not block UI forever. |
 | Period summaries | `periods/route.ts` | Do not create period settings for out-of-policy dates. |
 | Admin settings | `admin/period-settings/route.ts` | Admin-only; settings writes must stay date + period scoped. |
+| Admin API subtree | `admin/` | Nested `AGENTS.md` covers audit, mutation, and transition rules. |
 | Admin transitions | `admin/reservations/[id]/cancel/route.ts`, `admin/reservations/[id]/no-show/route.ts` | Only transition `CONFIRMED` reservations. |
 | User sanctions | `admin/users/[id]/restriction/route.ts` | `BANNED` uses `days: null`; `RESTRICTED` requires days. |
 | Discord send | `admin/notifications/closed-periods/send/route.ts` | Manual close-list send only; never reservation-created notifications. |

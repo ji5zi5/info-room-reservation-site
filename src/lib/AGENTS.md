@@ -13,6 +13,7 @@
 | Period defaults/settings | `period-settings.ts` | Default open/close/capacity and per-date settings. |
 | Persistence adapters | `prisma-reservation-store.ts`, `memory-reservation-store.ts` | Keep store contract aligned with `reservation-service.ts`. |
 | Riro auth | `riro-auth.ts`, `auth-service.ts` | Real login path plus mock mode. |
+| Env and local fallback gates | `env.ts`, `local-login.ts`, `mock-dev-mode.ts` | Mock, local admin, and local student modes are separate switches. |
 | Sessions | `session.ts` | `requireUser()` and `requireAdmin()` live here. |
 | Admin helpers | `admin-reservations.ts`, `admin-users.ts`, `admin-user-detail.ts`, `admin-dashboard.ts` | Pure filtering/sorting/summary helpers. |
 | Discord notifications | `discord-notifications.ts`, `closed-period-notifications.ts`, `closed-period-notification-service.ts`, `prisma-notification-repository.ts` | Closed-list delivery only. |
@@ -39,6 +40,6 @@
 - Do not duplicate Korean labels or period ordering outside `study-periods.ts`.
 - Do not use random success, fake close, or deceptive delay logic in reservation services.
 - Do not send Discord messages from reservation creation paths.
-- Do not make mock `admin` work when `RIRO_MOCK_LOGIN=false`.
+- Do not make local admin/student fallback depend on `RIRO_MOCK_LOGIN`; use explicit env gates.
 - Do not add broad `catch` blocks in services unless they convert a known external failure into a typed result.
 - Do not let admins restrict themselves or target other admins in user-management helpers.
