@@ -48,8 +48,8 @@ npm run db:seed
 프로덕션 필수:
 
 ```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/info_room?sslmode=require"
-DIRECT_URL="postgresql://USER:PASSWORD@DIRECT_HOST:5432/info_room?sslmode=require"
+DATABASE_URL="postgresql://postgres.PROJECT_REF:PASSWORD@aws-N-ap-northeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1&sslmode=require"
+DIRECT_URL="postgresql://postgres.PROJECT_REF:PASSWORD@aws-N-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require"
 SESSION_SECRET="long-random-secret"
 ADMIN_STUDENT_NUMBERS=""
 CRON_SECRET="long-random-secret"
@@ -88,7 +88,7 @@ ADMIN_LOGIN_PASSWORD=""
 배포 대상은 Vercel + managed PostgreSQL입니다.
 
 1. Supabase에서 Postgres 프로젝트를 만들고 connection string 두 개를 준비합니다.
-2. `DATABASE_URL`에는 transaction pooler URL을, `DIRECT_URL`에는 direct connection URL을 넣습니다.
+2. `DATABASE_URL`에는 transaction pooler URL을, `DIRECT_URL`에는 session pooler URL을 넣습니다.
 3. Vercel 프로젝트에 필수 env를 설정합니다.
 4. Build command는 `vercel.json`의 `npm run vercel-build`를 사용합니다.
 5. 프로덕션에는 `RIRO_MOCK_LOGIN=false`, `ENABLE_LOCAL_ADMIN=false`, `TRUST_FORWARDED_IP_HEADERS=true`를 사용합니다.

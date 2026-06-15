@@ -4,8 +4,8 @@ Target platform: Vercel with managed Postgres.
 
 ## Required Environment Variables
 
-- `DATABASE_URL`: Postgres connection string.
-- `DIRECT_URL`: direct Postgres connection string for Prisma migrations.
+- `DATABASE_URL`: runtime Postgres connection string. On Supabase, use the transaction pooler.
+- `DIRECT_URL`: migration Postgres connection string. On Supabase, use the session pooler.
 - `SESSION_SECRET`: long random secret for session signing.
 - `ADMIN_STUDENT_NUMBERS`: comma-separated student numbers with admin access.
 - `CRON_SECRET`: bearer token used by cron endpoints.
@@ -32,10 +32,12 @@ That command runs the predeploy environment check, Prisma Client generation, `pr
 
 Use two Supabase connection strings:
 
-- `DATABASE_URL`: Supabase transaction pooler connection. This is the runtime URL used by Vercel serverless functions.
-- `DIRECT_URL`: Supabase direct connection. This is used by Prisma Migrate through `directUrl` in `prisma/schema.prisma`.
+- `DATABASE_URL`: Supabase transaction pooler connection, usually port `6543`. This is the runtime URL used by Vercel serverless functions.
+- `DIRECT_URL`: Supabase session pooler connection, usually port `5432`. This is used by Prisma Migrate through `directUrl` in `prisma/schema.prisma`.
 
-On Vercel, set both env vars for Production, Preview, and Development if those environments deploy against Supabase. If you use separate Supabase projects per environment, keep the matching pooler/direct pair together.
+Supabase direct database hosts can require IPv6. If your network or deploy environment is IPv4-only, use the Supavisor session pooler for `DIRECT_URL` instead of `db.<project-ref>.supabase.co`. On Vercel, set both env vars for Production, Preview, and Development if those environments deploy against Supabase. If you use separate Supabase projects per environment, keep the matching transaction/session pair together.
+
+The pooler host can be `aws-0`, `aws-1`, or another Supabase-assigned shard. Copy the exact host from the Supabase connection string or `supabase/.temp/pooler-url`.
 
 ## First Deploy Checklist
 
