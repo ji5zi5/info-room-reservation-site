@@ -10,6 +10,8 @@ describe("request source helpers", () => {
   });
 
   it("uses unknown for bare spoofed forwarded-for headers without trusted proxy policy", () => {
+    vi.stubEnv("TRUST_FORWARDED_IP_HEADERS", "false");
+
     const firstRequest = new Request("https://example.test", {
       headers: { "x-forwarded-for": "203.0.113.8" }
     });
