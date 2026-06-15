@@ -19,11 +19,71 @@ describe("server environment guards", () => {
     ).toThrow("RIRO_MOCK_LOGIN");
   });
 
+  it("rejects local admin login in production", () => {
+    expect(() =>
+      assertProductionEnvSafe({
+        DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+        ENABLE_LOCAL_ADMIN: "true",
+        NODE_ENV: "production",
+        TRUST_FORWARDED_IP_HEADERS: "true"
+      })
+    ).toThrow("ENABLE_LOCAL_ADMIN");
+  });
+
+  it("rejects local student login in production", () => {
+    expect(() =>
+      assertProductionEnvSafe({
+        DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+        ENABLE_LOCAL_STUDENT: "true",
+        NODE_ENV: "production",
+        TRUST_FORWARDED_IP_HEADERS: "true"
+      })
+    ).toThrow("ENABLE_LOCAL_STUDENT");
+  });
+
+  it("allows an explicit production local student fallback without the generic local toggle", () => {
+    const productionEnv = {
+      DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+      ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
+      LOCAL_STUDENT_LOGIN_ID: "local-student",
+      LOCAL_STUDENT_LOGIN_PASSWORD: "production-student-secret",
+      NODE_ENV: "production",
+      TRUST_FORWARDED_IP_HEADERS: "true"
+    } as const;
+
+    expect(() => assertProductionEnvSafe(productionEnv)).not.toThrow();
+    expect(isLocalStudentLoginEnabled(productionEnv)).toBe(true);
+    expect(isLocalAdminLoginEnabled(productionEnv)).toBe(false);
+  });
+
+  it("rejects a weak explicit production local student password", () => {
+    expect(() =>
+      assertProductionEnvSafe({
+        DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+        ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
+        LOCAL_STUDENT_LOGIN_ID: "local_student_a",
+        LOCAL_STUDENT_LOGIN_PASSWORD: "short",
+        NODE_ENV: "production",
+        TRUST_FORWARDED_IP_HEADERS: "true"
+      })
+    ).toThrow("LOCAL_STUDENT_LOGIN_PASSWORD");
+  });
+
   it("requires a Discord webhook in production", () => {
     expect(() => assertProductionEnvSafe({ DISCORD_WEBHOOK_URL: "", NODE_ENV: "production" })).toThrow(
       "DISCORD_WEBHOOK_URL"
     );
     expect(() => assertProductionEnvSafe({ NODE_ENV: "production" })).toThrow("DISCORD_WEBHOOK_URL");
+  });
+
+  it("rejects non-Discord webhook URLs in production", () => {
+    expect(() =>
+      assertProductionEnvSafe({
+        DISCORD_WEBHOOK_URL: "https://example.test/api/webhooks/1/token",
+        NODE_ENV: "production",
+        TRUST_FORWARDED_IP_HEADERS: "true"
+      })
+    ).toThrow("DISCORD_WEBHOOK_URL");
   });
 
   it("requires trusted forwarded IP headers in production", () => {
@@ -65,12 +125,23 @@ describe("server environment guards", () => {
 
   it("does not enable the local student account through mock login", () => {
     expect(isLocalStudentLoginEnabled({ ENABLE_LOCAL_STUDENT: "false", RIRO_MOCK_LOGIN: "true" })).toBe(false);
-    expect(isLocalStudentLoginEnabled({ ENABLE_LOCAL_STUDENT: "true", RIRO_MOCK_LOGIN: "false" })).toBe(true);
+    expect(
+      isLocalStudentLoginEnabled({
+        ENABLE_LOCAL_STUDENT: "true",
+        LOCAL_STUDENT_LOGIN_ID: "site-student",
+        LOCAL_STUDENT_LOGIN_PASSWORD: "local-student-secret",
+        RIRO_MOCK_LOGIN: "false"
+      })
+    ).toBe(true);
   });
 
   it("rejects a weak local student password when student fallback is enabled", () => {
     expect(() =>
-      assertProductionEnvSafe({ ENABLE_LOCAL_STUDENT: "true", LOCAL_STUDENT_LOGIN_PASSWORD: "short" })
+      assertProductionEnvSafe({
+        ENABLE_LOCAL_STUDENT: "true",
+        LOCAL_STUDENT_LOGIN_ID: "site-student",
+        LOCAL_STUDENT_LOGIN_PASSWORD: "short"
+      })
     ).toThrow("LOCAL_STUDENT_LOGIN_PASSWORD");
   });
 

@@ -58,6 +58,7 @@ TRUST_FORWARDED_IP_HEADERS="true"
 RIRO_MOCK_LOGIN="false"
 ENABLE_LOCAL_ADMIN="false"
 ENABLE_LOCAL_STUDENT="false"
+ENABLE_PRODUCTION_LOCAL_STUDENT="false"
 ```
 
 선택 로컬 설정:
@@ -71,6 +72,7 @@ LOCAL_STUDENT_NUMBER=""
 ```
 
 전체 예시는 `.env.example`을 참고하세요. 실제 리로스쿨 계정, Discord webhook, 세션 비밀값은 커밋하지 않습니다.
+프로덕션에서 리로스쿨 장애 대응용 학생 fallback이 필요할 때만 `ENABLE_PRODUCTION_LOCAL_STUDENT=true`와 `LOCAL_STUDENT_LOGIN_ID`/`LOCAL_STUDENT_LOGIN_PASSWORD`를 함께 설정합니다. `ENABLE_LOCAL_ADMIN`과 `ENABLE_LOCAL_STUDENT`는 프로덕션에서 계속 사용할 수 없습니다.
 
 ## 명령어
 
@@ -95,7 +97,7 @@ LOCAL_STUDENT_NUMBER=""
 2. `DATABASE_URL`에는 transaction pooler URL을, `DIRECT_URL`에는 session pooler URL을 넣습니다.
 3. Vercel 프로젝트에 필수 env를 설정합니다.
 4. Build command는 `vercel.json`의 `npm run vercel-build`를 사용합니다.
-5. 프로덕션에는 `RIRO_MOCK_LOGIN=false`, `ENABLE_LOCAL_ADMIN=false`, `TRUST_FORWARDED_IP_HEADERS=true`를 사용합니다.
+5. 프로덕션에는 `RIRO_MOCK_LOGIN=false`, `ENABLE_LOCAL_ADMIN=false`, `ENABLE_LOCAL_STUDENT=false`, `TRUST_FORWARDED_IP_HEADERS=true`를 사용합니다.
 6. Vercel cron이 아래 두 endpoint를 호출하도록 설정되어 있는지 확인합니다.
 
 ```text

@@ -9,6 +9,11 @@ describe("request source helpers", () => {
     vi.unstubAllEnvs();
   });
 
+  function trustForwardedHeadersOnVercel(): void {
+    vi.stubEnv("TRUST_FORWARDED_IP_HEADERS", "true");
+    vi.stubEnv("VERCEL", "1");
+  }
+
   it("uses unknown for bare spoofed forwarded-for headers without trusted proxy policy", () => {
     vi.stubEnv("TRUST_FORWARDED_IP_HEADERS", "false");
 
@@ -23,8 +28,38 @@ describe("request source helpers", () => {
     expect(getRequestClientIp(secondRequest)).toBe("unknown");
   });
 
-  it("uses the first non-empty forwarded-for IP under trusted proxy policy before fallback headers", () => {
+  it("uses unknown for trusted proxy headers without a Vercel runtime signal", () => {
     vi.stubEnv("TRUST_FORWARDED_IP_HEADERS", "true");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("VERCEL_ENV", "");
+
+    const request = new Request("https://example.test", {
+      headers: {
+        "cf-connecting-ip": "198.51.100.44",
+        "x-forwarded-for": "203.0.113.8",
+        "x-real-ip": "198.51.100.10"
+      }
+    });
+
+    expect(getRequestClientIp(request)).toBe("unknown");
+  });
+
+  it("prefers the first non-empty Vercel forwarded-for IP under trusted Vercel proxy policy", () => {
+    trustForwardedHeadersOnVercel();
+
+    const request = new Request("https://example.test", {
+      headers: {
+        "x-forwarded-for": "198.51.100.10",
+        "x-real-ip": "198.51.100.11",
+        "x-vercel-forwarded-for": " , 203.0.113.8 , 203.0.113.9"
+      }
+    });
+
+    expect(getRequestClientIp(request)).toBe("203.0.113.8");
+  });
+
+  it("uses the first non-empty forwarded-for IP under trusted Vercel proxy policy before fallback headers", () => {
+    trustForwardedHeadersOnVercel();
 
     const request = new Request("https://example.test", {
       headers: {
@@ -38,7 +73,7 @@ describe("request source helpers", () => {
   });
 
   it("falls back to real-ip, cloudflare IP, then unknown", () => {
-    vi.stubEnv("TRUST_FORWARDED_IP_HEADERS", "true");
+    trustForwardedHeadersOnVercel();
 
     const realIpRequest = new Request("https://example.test", {
       headers: { "x-real-ip": " 198.51.100.10 " }
@@ -54,7 +89,7 @@ describe("request source helpers", () => {
   });
 
   it("uses unknown for empty trusted proxy header values", () => {
-    vi.stubEnv("TRUST_FORWARDED_IP_HEADERS", "true");
+    trustForwardedHeadersOnVercel();
 
     const request = new Request("https://example.test", {
       headers: {
@@ -68,7 +103,7 @@ describe("request source helpers", () => {
   });
 
   it("hashes the normalized client IP without exposing the raw value", () => {
-    vi.stubEnv("TRUST_FORWARDED_IP_HEADERS", "true");
+    trustForwardedHeadersOnVercel();
 
     const request = new Request("https://example.test", {
       headers: { "x-forwarded-for": " ADMIN-LAB-IP " }

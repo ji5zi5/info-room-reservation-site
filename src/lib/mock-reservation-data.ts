@@ -1,51 +1,26 @@
 import { filterAdminReservations, filterAdminReservationsByQuery, orderAdminReservations } from "./admin-reservations";
 import type { AdminReservationQueryFilters, AdminReservationStatusFilter } from "./admin-reservations";
 import { summarizeAdminUserReservations } from "./admin-user-detail";
-import { filterAdminUsers, type AdminUserFilterInput, type AdminUserListRow } from "./admin-users";
+import { filterAdminUsers, type AdminUserFilterInput } from "./admin-users";
 import { toKstDate } from "./date";
 import type { PeriodSummary } from "./period-settings";
 import { getMockAdminPeriodSettings } from "./mock-period-settings";
+import {
+  mockReservations as reservations,
+  mockReservationUsersById as usersById,
+  upsertMockReservationUserRecord
+} from "./mock-reservation-state";
+import type { MockCancelResult, MockReservation, MockUser } from "./mock-reservation-state";
 import { buildMockStudentProfilePayload } from "./mock-student-profile";
-import { buildStudentCancellationRestriction, type Reservation, type ReservationResult } from "./reservation-service";
+import { buildStudentCancellationRestriction, type ReservationResult } from "./reservation-service";
 import type { SessionUser } from "./session";
 import type { StudentProfilePayload } from "./student-profile";
 import type { StudyPeriod } from "./study-periods";
 
-type MockUser = AdminUserListRow;
-type MockReservationState = { readonly reservations: MockReservation[]; readonly usersById: Map<string, MockUser> };
-
-type MockReservation = Reservation & {
-  readonly createdAt: Date;
-  readonly user: Pick<MockUser, "bookingStatus" | "id" | "name" | "role" | "studentNumber">;
-};
-
-type MockCancelResult =
-  | { readonly kind: "cancelled"; readonly reservation: MockReservation; readonly user: SessionUser }
-  | { readonly kind: "forbidden" }
-  | { readonly kind: "not_found" };
-
-const mockState = getGlobalMockReservationState();
-const usersById = mockState.usersById;
-const reservations = mockState.reservations;
+export { resetMockReservationDataForTests } from "./mock-reservation-state";
 
 export function upsertMockReservationUser(user: SessionUser): void {
   upsertMockReservationUserRecord(user);
-}
-
-function upsertMockReservationUserRecord(user: SessionUser): MockUser {
-  const existing = usersById.get(user.id);
-  const nextUser = {
-    bookingStatus: existing?.bookingStatus ?? user.bookingStatus,
-    generation: user.generation,
-    id: user.id,
-    name: user.name,
-    restrictedUntil: existing?.restrictedUntil ?? parseNullableDate(user.restrictedUntil),
-    restrictionReason: existing?.restrictionReason ?? null,
-    role: user.role,
-    studentNumber: user.studentNumber
-  } satisfies MockUser;
-  usersById.set(user.id, nextUser);
-  return nextUser;
 }
 
 export function getMockAdminUsers(filters: AdminUserFilterInput): readonly MockUser[] {
@@ -218,11 +193,6 @@ export function cancelMockReservation(input: {
   return { kind: "not_found" };
 }
 
-export function resetMockReservationDataForTests(): void {
-  usersById.clear();
-  reservations.length = 0;
-}
-
 function createMockReservation(
   input: {
     readonly date: string;
@@ -256,19 +226,4 @@ function isMockUserRestricted(user: MockUser, now: Date): boolean {
     return user.restrictedUntil === null || user.restrictedUntil.getTime() > now.getTime();
   }
   return false;
-}
-
-function parseNullableDate(value: string | null): Date | null {
-  return value ? new Date(value) : null;
-}
-
-function getGlobalMockReservationState(): MockReservationState {
-  const globalStore = globalThis as typeof globalThis & {
-    __infoRoomMockReservationData?: MockReservationState;
-  };
-  globalStore.__infoRoomMockReservationData ??= {
-    reservations: [],
-    usersById: new Map<string, MockUser>()
-  };
-  return globalStore.__infoRoomMockReservationData;
 }

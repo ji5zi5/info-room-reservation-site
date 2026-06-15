@@ -1,5 +1,6 @@
 import ky from "ky";
 
+import { parseDiscordWebhookUrl } from "./discord-webhook-url";
 import { getStudyPeriodLabel, type StudyPeriod } from "./study-periods";
 
 const DISCORD_FIELD_VALUE_LIMIT = 1024;
@@ -65,7 +66,7 @@ export function buildClosedPeriodDiscordPayload(input: ClosedPeriodNotificationI
 }
 
 export function buildDiscordWebhookExecuteUrl(webhookUrl: string): string {
-  const url = new URL(webhookUrl);
+  const url = parseDiscordWebhookUrl(webhookUrl);
   url.searchParams.set("wait", "true");
   return url.toString();
 }

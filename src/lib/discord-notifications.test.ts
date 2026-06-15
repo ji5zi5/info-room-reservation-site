@@ -60,6 +60,30 @@ describe("Discord closed-period notification payload", () => {
 });
 
 describe("Discord webhook execution URL", () => {
+  it("rejects non-Discord webhook hosts", () => {
+    expect(() => buildDiscordWebhookExecuteUrl("https://example.test/api/webhooks/1/token")).toThrow(
+      "Invalid Discord webhook URL"
+    );
+  });
+
+  it("rejects non-HTTPS Discord webhook URLs", () => {
+    expect(() => buildDiscordWebhookExecuteUrl("http://discord.com/api/webhooks/1/token")).toThrow(
+      "Invalid Discord webhook URL"
+    );
+  });
+
+  it("rejects Discord URLs outside the webhook execution path", () => {
+    expect(() => buildDiscordWebhookExecuteUrl("https://discord.com/api/channels/1/token")).toThrow(
+      "Invalid Discord webhook URL"
+    );
+  });
+
+  it("rejects Discord webhook URLs with extra path segments", () => {
+    expect(() => buildDiscordWebhookExecuteUrl("https://discord.com/api/webhooks/1/token/extra")).toThrow(
+      "Invalid Discord webhook URL"
+    );
+  });
+
   it("adds wait=true while preserving existing query params", () => {
     expect(buildDiscordWebhookExecuteUrl("https://discord.com/api/webhooks/1/token?thread_id=abc")).toBe(
       "https://discord.com/api/webhooks/1/token?thread_id=abc&wait=true"

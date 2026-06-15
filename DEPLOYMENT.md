@@ -15,9 +15,10 @@ Target platform: Vercel with managed Postgres.
 
 Optional:
 
-- `ENABLE_LOCAL_ADMIN`: local fallback admin login. Keep `false` in production unless explicitly needed.
+- `ENABLE_LOCAL_ADMIN`: local fallback admin login. Must stay `false` in production.
 - `ADMIN_LOGIN_ID`, `ADMIN_LOGIN_PASSWORD`: local admin credentials when fallback login is enabled.
-- `ENABLE_LOCAL_STUDENT`: local fallback student login. Keep `false` in production unless explicitly needed.
+- `ENABLE_LOCAL_STUDENT`: local fallback student login for development and preview. Must stay `false` in production.
+- `ENABLE_PRODUCTION_LOCAL_STUDENT`: explicit production-only student fallback. Use only when Riro login is unavailable and pair it with local student credentials.
 - `LOCAL_STUDENT_LOGIN_ID`, `LOCAL_STUDENT_LOGIN_PASSWORD`, `LOCAL_STUDENT_NUMBER`: local student credentials and display number when fallback login is enabled.
 
 ## Vercel Build
