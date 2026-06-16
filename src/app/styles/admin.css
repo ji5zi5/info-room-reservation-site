@@ -385,6 +385,112 @@
   color: var(--red);
 }
 
+.status-chip[data-status="SHADOW_BANNED"] {
+  background: color-mix(in srgb, #7c3aed 10%, var(--fog));
+  color: #7c3aed;
+}
+
+/* Blacklist panel */
+.bl-section {
+  display: grid;
+  gap: 10px;
+}
+
+.bl-section-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.bl-section-head h3 {
+  align-items: center;
+  display: flex;
+  font-size: 0.9rem;
+  gap: 8px;
+  margin: 0;
+}
+
+.bl-count {
+  background: color-mix(in srgb, #7c3aed 12%, var(--fog));
+  border-radius: 999px;
+  color: #7c3aed;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 9px;
+}
+
+.blacklist-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.bl-card {
+  align-items: center;
+  background: var(--fog);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 64px;
+  padding: 12px 14px;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion);
+}
+
+.bl-card--active {
+  background: color-mix(in srgb, #7c3aed 6%, var(--white));
+  border-color: color-mix(in srgb, #7c3aed 22%, var(--silver));
+}
+
+.bl-card[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--blue) 40%, var(--silver));
+}
+
+.bl-card-info {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bl-card-info strong {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
+
+.bl-card-actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.bl-empty {
+  background: var(--fog);
+  border-radius: var(--radius);
+  color: var(--pewter);
+  font-size: 0.86rem;
+  min-height: 48px;
+  padding: 14px;
+  text-align: center;
+}
+
+.bl-reason {
+  background: color-mix(in srgb, #7c3aed 10%, var(--fog));
+  border-radius: var(--radius);
+  color: #7c3aed;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+}
+
+.bl-search-note {
+  color: var(--pewter);
+  font-size: 0.82rem;
+}
+
 .detail-metrics,
 .detail-actions {
   display: grid;

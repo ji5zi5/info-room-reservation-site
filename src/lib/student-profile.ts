@@ -129,6 +129,7 @@ export function buildStudentProfilePayload(input: StudentProfileInput): StudentP
 export function getEffectiveBookingStatus(user: StudentProfileUserRow, now: Date): EffectiveBookingStatus {
   switch (user.bookingStatus) {
     case "ACTIVE":
+    case "SHADOW_BANNED":
       return "ACTIVE";
     case "BANNED":
       return "BANNED";
@@ -142,6 +143,7 @@ export function getEffectiveBookingStatus(user: StudentProfileUserRow, now: Date
 export function getStudentProfileStatusMessage(status: EffectiveBookingStatus): StudentProfileStatusMessage {
   switch (status) {
     case "ACTIVE":
+    case "SHADOW_BANNED":
       return "예약 가능";
     case "BANNED":
       return "영구 제한";

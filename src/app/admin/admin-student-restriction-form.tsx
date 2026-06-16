@@ -68,6 +68,15 @@ export function AdminStudentRestrictionForm({
           <Ban size={16} />
           영구
         </button>
+        <button
+          data-active={draft.status === "SHADOW_BANNED"}
+          className="ghost-button"
+          type="button"
+          onClick={() => onSetDraft({ days: "", status: "SHADOW_BANNED" })}
+        >
+          <Ban size={16} />
+          블랙리스트(숨김)
+        </button>
       </fieldset>
       <button className="danger-button" disabled={!reasonReady} type="button" onClick={onApply}>
         <Ban size={16} />

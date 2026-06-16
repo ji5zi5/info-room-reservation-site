@@ -116,6 +116,9 @@ export function reserveMockStudyPeriod(input: {
   readonly user: SessionUser;
 }): ReservationResult {
   const user = upsertMockReservationUserRecord(input.user);
+  if (user.bookingStatus === "SHADOW_BANNED") {
+    return { kind: "error", reason: "shadow_banned" };
+  }
   if (isMockUserRestricted(user, input.now)) {
     return { kind: "error", reason: "restricted" };
   }
