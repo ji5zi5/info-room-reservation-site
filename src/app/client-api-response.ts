@@ -58,7 +58,7 @@ const PeriodSummarySchema = z.object({
   windowState: z.union([z.literal("closed"), z.literal("not_open_yet"), z.literal("open")])
 });
 
-const BookingStatusSchema = z.enum(["ACTIVE", "RESTRICTED", "BANNED"]);
+const BookingStatusSchema = z.enum(["ACTIVE", "RESTRICTED", "BANNED", "SHADOW_BANNED"]);
 
 const StudentProfileReservationSchema = z.object({
   createdAt: z.string(),

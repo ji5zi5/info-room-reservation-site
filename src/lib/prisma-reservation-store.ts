@@ -130,7 +130,7 @@ function toReservation(reservation: PrismaReservation): Reservation {
   };
 }
 
-function parseBookingStatus(value: string): "ACTIVE" | "BANNED" | "RESTRICTED" {
+function parseBookingStatus(value: string): "ACTIVE" | "BANNED" | "RESTRICTED" | "SHADOW_BANNED" {
   switch (value) {
     case "ACTIVE":
       return "ACTIVE";
@@ -138,6 +138,8 @@ function parseBookingStatus(value: string): "ACTIVE" | "BANNED" | "RESTRICTED" {
       return "BANNED";
     case "RESTRICTED":
       return "RESTRICTED";
+    case "SHADOW_BANNED":
+      return "SHADOW_BANNED";
     default:
       throw new InvalidStoredValueError("bookingStatus", value);
   }

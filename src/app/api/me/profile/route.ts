@@ -206,7 +206,7 @@ function summarizeSanctionSummaryRows(rows: readonly DbSanctionSummaryRow[]): St
 
 function parseBookingStatus(value: string): BookingStatus {
   switch (value) {
-    case "ACTIVE": case "BANNED": case "RESTRICTED": return value;
+    case "ACTIVE": case "BANNED": case "RESTRICTED": case "SHADOW_BANNED": return value;
     default:
       throw new InvalidStudentProfileFieldError("bookingStatus", value);
   }

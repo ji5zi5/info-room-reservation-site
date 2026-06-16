@@ -41,7 +41,7 @@ export async function POST(request: Request, context: { readonly params: Promise
     }
 
     let restrictedUntil: Date | null = null;
-    if (parsed.data.status === "BANNED" && restrictionDays !== null) {
+    if ((parsed.data.status === "BANNED" || parsed.data.status === "SHADOW_BANNED") && restrictionDays !== null) {
       return jsonError(400, "bad_request", "영구 차단에는 기간을 설정할 수 없습니다.");
     }
     if (parsed.data.status === "RESTRICTED") {
