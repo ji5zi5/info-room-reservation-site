@@ -1,9 +1,10 @@
 "use client";
 
-import { BarChart3, CalendarClock, ListChecks, LogOut, Search, Settings, ShieldAlert } from "lucide-react";
+import { BarChart3, CalendarClock, EyeOff, ListChecks, LogOut, Search, Settings, ShieldAlert } from "lucide-react";
 import type { ReactElement } from "react";
 
 import { AdminAuditPanel } from "./admin-audit-panel";
+import { AdminBlacklistPanel } from "./admin-blacklist-panel";
 import { AdminDashboardPanel } from "./admin-dashboard-panel";
 import { AdminReservationsPanel } from "./admin-reservations-panel";
 import { AdminSettingsPanel } from "./admin-settings-panel";
@@ -15,6 +16,7 @@ import { type AdminSection, useAdminConsole } from "./use-admin-console";
 
 const SECTION_LABELS: Record<AdminSection, string> = {
   audit: "감사",
+  blacklist: "블랙리스트",
   dashboard: "운영",
   reservations: "예약자",
   settings: "설정",
@@ -28,13 +30,16 @@ const SECTIONS: readonly {
   { icon: <BarChart3 size={18} />, id: "dashboard" },
   { icon: <ListChecks size={18} />, id: "reservations" },
   { icon: <Search size={18} />, id: "students" },
+  { icon: <EyeOff size={18} />, id: "blacklist" },
   { icon: <ShieldAlert size={18} />, id: "audit" },
   { icon: <Settings size={18} />, id: "settings" }
 ];
 
 export function AdminConsole(): ReactElement {
   const consoleState = useAdminConsole();
-  const detailOpen = consoleState.activeSection === "students" && consoleState.selectedUserDetail !== null;
+  const detailOpen =
+    (consoleState.activeSection === "students" || consoleState.activeSection === "blacklist") &&
+    consoleState.selectedUserDetail !== null;
 
   async function logout(): Promise<void> {
     await csrfFetch("/api/auth/logout", { method: "POST" });
@@ -113,6 +118,17 @@ export function AdminConsole(): ReactElement {
                 onSetStatus={consoleState.setUserStatusFilter}
               />
             ) : null}
+            {consoleState.activeSection === "blacklist" ? (
+              <AdminBlacklistPanel
+                query={consoleState.userQuery}
+                selectedUserId={consoleState.selectedUserId}
+                users={consoleState.users}
+                onRelease={(userId) => void consoleState.removeRestriction(userId)}
+                onSelectUser={(userId) => void consoleState.viewUser(userId)}
+                onSetQuery={consoleState.setUserQuery}
+                onShadowBan={(userId) => void consoleState.applyShadowBan(userId)}
+              />
+            ) : null}
             {consoleState.activeSection === "audit" ? (
               <AdminAuditPanel
                 actionFilter={consoleState.auditActionFilter}
@@ -131,7 +147,7 @@ export function AdminConsole(): ReactElement {
               />
             ) : null}
           </section>
-          {consoleState.activeSection === "students" ? (
+          {(consoleState.activeSection === "students" || consoleState.activeSection === "blacklist") ? (
             <AdminStudentDetail
               detail={consoleState.selectedUserDetail}
               restrictionDraft={

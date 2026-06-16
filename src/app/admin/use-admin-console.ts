@@ -183,6 +183,16 @@ export function useAdminConsole(): AdminConsoleState {
     await refresh();
   }
 
+  async function applyShadowBan(userId: string): Promise<void> {
+    const ok = await applyUserRestriction(userId, {
+      days: null,
+      reason: "블랙리스트",
+      status: "SHADOW_BANNED"
+    });
+    setToast(ok ? "블랙리스트에 추가했습니다." : "블랙리스트 추가 실패");
+    await refresh();
+  }
+
   function updatePeriod(studyPeriod: StudyPeriod, patch: Partial<AdminPeriodSetting>): void {
     setPeriods((current) => updatePeriodSetting(current, studyPeriod, patch));
   }
@@ -232,6 +242,7 @@ export function useAdminConsole(): AdminConsoleState {
     auditActions,
     auditQuery,
     applyRestriction,
+    applyShadowBan,
     cancelReservation,
     clearSelectedUser,
     copyReservationsCsv,
