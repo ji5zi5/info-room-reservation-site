@@ -224,6 +224,7 @@ function getRestrictionNote(profile: StudentProfilePayload): string | null {
 function getProfileStatusView(status: ProfileStatus): ProfileStatusView {
   switch (status) {
     case "ACTIVE":
+    case "SHADOW_BANNED":
       return { label: "예약 가능", tone: "available" };
     case "BANNED":
       return { label: "영구 제한", tone: "banned" };

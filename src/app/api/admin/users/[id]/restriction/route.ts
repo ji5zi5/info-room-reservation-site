@@ -16,7 +16,7 @@ import {
 const RestrictionRequestSchema = z.object({
   days: z.number().int().min(1).max(365).nullable().optional(),
   reason: z.string().trim().min(1).max(200),
-  status: z.union([z.literal("RESTRICTED"), z.literal("BANNED")])
+  status: z.union([z.literal("RESTRICTED"), z.literal("BANNED"), z.literal("SHADOW_BANNED")])
 });
 
 export async function POST(request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
@@ -91,7 +91,7 @@ export async function POST(request: Request, context: { readonly params: Promise
           reason: parsed.data.reason,
           sourceActionId: action.id,
           status: "ACTIVE",
-          type: parsed.data.status === "BANNED" ? "ADMIN_BAN" : "ADMIN_RESTRICTION",
+          type: parsed.data.status === "BANNED" || parsed.data.status === "SHADOW_BANNED" ? "ADMIN_BAN" : "ADMIN_RESTRICTION",
           userId: params.id
         }
       });

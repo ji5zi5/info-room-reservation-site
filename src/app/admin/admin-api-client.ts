@@ -34,7 +34,7 @@ export type AdminReadResult<T> =
 export type AdminRestrictionPayload = {
   readonly days: number | null;
   readonly reason: string;
-  readonly status: "BANNED" | "RESTRICTED";
+  readonly status: "BANNED" | "RESTRICTED" | "SHADOW_BANNED";
 };
 
 export async function fetchAdminSettings(date: string): Promise<AdminReadResult<readonly AdminPeriodSetting[]>> {

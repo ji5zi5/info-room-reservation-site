@@ -10,6 +10,7 @@ const USER_STATUS_LABELS: Record<AdminUserStatusFilter, string> = {
   ACTIVE: "정상",
   ALL: "전체",
   BANNED: "차단",
+  SHADOW_BANNED: "블랙리스트(숨김)",
   RESTRICTED: "제한"
 };
 
@@ -87,6 +88,8 @@ function statusLabel(status: string): string {
       return "정상";
     case "BANNED":
       return "차단";
+    case "SHADOW_BANNED":
+      return "블랙리스트(숨김)";
     case "RESTRICTED":
       return "제한";
     default:

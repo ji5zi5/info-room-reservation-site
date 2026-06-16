@@ -62,10 +62,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         studyPeriod: parsed.data.studyPeriod,
         user
       });
-      if (result.kind === "confirmed") {
-        return NextResponse.json({ reservation: result.reservation }, { status: 201 });
-      }
-      return jsonError(statusForReservationError(result.reason), result.reason, messageForReservationError(result.reason));
+      return buildReservationResponse(result);
     }
 
     const result = await reserveStudyPeriod({
@@ -77,11 +74,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       userId: user.id
     });
 
-    if (result.kind === "confirmed") {
-      return NextResponse.json({ reservation: result.reservation }, { status: 201 });
-    }
-
-    return jsonError(statusForReservationError(result.reason), result.reason, messageForReservationError(result.reason));
+    return buildReservationResponse(result);
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);
@@ -102,7 +95,8 @@ type ReservationErrorReason =
   | "full"
   | "not_found"
   | "not_open_yet"
-  | "restricted";
+  | "restricted"
+  | "shadow_banned";
 
 function statusForReservationError(reason: ReservationErrorReason): number {
   switch (reason) {
@@ -119,6 +113,8 @@ function statusForReservationError(reason: ReservationErrorReason): number {
       return 409;
     case "not_found":
       return 404;
+    case "shadow_banned":
+      return 500; // Fallback, shouldn't be reached due to intercept
   }
 }
 
@@ -142,5 +138,26 @@ function messageForReservationError(reason: ReservationErrorReason): string {
       return "아직 예약이 열리지 않았습니다.";
     case "restricted":
       return "예약 이용이 제한되었습니다.";
+    case "shadow_banned":
+      return "서버 내부 오류가 발생했습니다."; // Fallback
   }
 }
+
+function buildReservationResponse(result: import("@/lib/reservation-service").ReservationResult): NextResponse {
+  if (result.kind === "confirmed") {
+    return NextResponse.json({ reservation: result.reservation }, { status: 201 });
+  }
+
+  if (result.reason === "shadow_banned") {
+    const fakeErrors = [
+      { status: 429, error: "rate_limited" as const, message: "일시적인 요청 과부하입니다. 잠시 후 다시 시도해주세요." },
+      { status: 500, error: "server_error" as const, message: "서버 내부 오류가 발생했습니다." },
+      { status: 502, error: "server_error" as const, message: "예약 서버와의 통신에 실패했습니다." }
+    ];
+    const randomError = fakeErrors[Math.floor(Math.random() * fakeErrors.length)]!;
+    return jsonError(randomError.status, randomError.error, randomError.message);
+  }
+
+  return jsonError(statusForReservationError(result.reason), result.reason, messageForReservationError(result.reason));
+}
+

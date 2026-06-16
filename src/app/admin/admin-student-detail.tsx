@@ -182,6 +182,8 @@ function statusLabel(status: string): string {
       return "정상";
     case "BANNED":
       return "차단";
+    case "SHADOW_BANNED":
+      return "블랙리스트(숨김)";
     case "CANCELLED":
       return "취소";
     case "CONFIRMED":

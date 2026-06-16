@@ -1,4 +1,4 @@
-export const ADMIN_USER_STATUS_FILTERS = ["ACTIVE", "RESTRICTED", "BANNED", "ALL"] as const;
+export const ADMIN_USER_STATUS_FILTERS = ["ACTIVE", "RESTRICTED", "BANNED", "SHADOW_BANNED", "ALL"] as const;
 
 export type AdminUserStatusFilter = (typeof ADMIN_USER_STATUS_FILTERS)[number];
 
@@ -31,6 +31,7 @@ export function parseAdminUserStatusFilter(value: string | null): AdminUserStatu
   switch (value) {
     case "ACTIVE":
     case "BANNED":
+    case "SHADOW_BANNED":
     case "RESTRICTED":
       return value;
     case "ALL":

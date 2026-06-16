@@ -16,7 +16,7 @@ import type {
 export type UserRestrictionDraft = {
   readonly days: string;
   readonly reason: string;
-  readonly status: "BANNED" | "RESTRICTED";
+  readonly status: "BANNED" | "RESTRICTED" | "SHADOW_BANNED";
 };
 
 export type AdminSection = "audit" | "dashboard" | "reservations" | "settings" | "students";

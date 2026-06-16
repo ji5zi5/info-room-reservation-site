@@ -3,8 +3,7 @@ import { getPeriodWindowState } from "./period-window";
 import type { StudyPeriod } from "./study-periods";
 
 export { createMemoryReservationStore } from "./memory-reservation-store";
-
-export type BookingStatus = "ACTIVE" | "RESTRICTED" | "BANNED";
+export type BookingStatus = "ACTIVE" | "RESTRICTED" | "BANNED" | "SHADOW_BANNED";
 
 export type ReservationStatus = "CONFIRMED" | "CANCELLED" | "NO_SHOW";
 
@@ -32,7 +31,7 @@ export type UserBookingState = {
 };
 
 export type BookingRestrictionUpdate = {
-  readonly bookingStatus: "BANNED" | "RESTRICTED";
+  readonly bookingStatus: "BANNED" | "RESTRICTED" | "SHADOW_BANNED";
   readonly restrictedUntil: Date | null;
   readonly restrictionReason: string;
 };
@@ -52,7 +51,8 @@ export type ReservationResult =
         | "full"
         | "not_found"
         | "not_open_yet"
-        | "restricted";
+        | "restricted"
+        | "shadow_banned";
     };
 
 export interface ReservationStore {
@@ -108,6 +108,10 @@ export async function reserveStudyPeriod(input: ReserveStudyPeriodInput): Promis
     const userState = await store.getUserBookingState(input.userId);
     if (!userState) {
       return { kind: "error", reason: "not_found" };
+    }
+
+    if (userState.bookingStatus === "SHADOW_BANNED") {
+      return { kind: "error", reason: "shadow_banned" };
     }
 
     if (isRestricted(userState, input.now)) {
