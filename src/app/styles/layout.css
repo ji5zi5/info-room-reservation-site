@@ -106,7 +106,7 @@
   color: color-mix(in srgb, var(--pewter) 72%, var(--white));
   font-size: 0.74rem;
   padding: 0 32px 20px;
-  text-align: right;
+  text-align: center;
 }
 
 .brand-row,
