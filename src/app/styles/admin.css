@@ -581,6 +581,16 @@
   padding: 8px 10px;
 }
 
+.detail-line[data-action="true"] {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.detail-line-action {
+  min-height: 30px;
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
 .detail-line span,
 .detail-line strong {
   min-width: 0;
@@ -840,8 +850,17 @@
     grid-template-columns: 1fr;
   }
 
+  .detail-line[data-action="true"] {
+    grid-template-columns: 1fr;
+  }
+
   .detail-line strong {
     text-align: left;
+  }
+
+  .detail-line-action {
+    justify-content: center;
+    width: 100%;
   }
 
   .admin-toast {

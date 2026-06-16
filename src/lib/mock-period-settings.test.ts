@@ -99,4 +99,47 @@ describe("mock admin period settings", () => {
       }
     ]);
   });
+
+  it("applies saved settings to already loaded dates and future dates", () => {
+    getMockAdminPeriodSettings("2026-06-15", new Date("2026-06-15T00:30:00.000Z"));
+    const updates = [
+      {
+        capacity: 7,
+        closeTime: "21:30",
+        enabled: true,
+        openTime: "08:00",
+        studyPeriod: "FIRST"
+      },
+      {
+        capacity: 4,
+        closeTime: "20:30",
+        enabled: false,
+        openTime: "09:00",
+        studyPeriod: "EIGHTH"
+      }
+    ] satisfies readonly MockAdminPeriodSettingInput[];
+
+    updateMockAdminPeriodSettings("2026-06-14", updates, new Date("2026-06-14T00:30:00.000Z"));
+
+    expect(
+      getMockAdminPeriodSettings("2026-06-15", new Date("2026-06-15T00:30:00.000Z")).map((period) => ({
+        closeTime: period.closeTime,
+        enabled: period.enabled,
+        studyPeriod: period.studyPeriod
+      }))
+    ).toEqual([
+      { closeTime: "20:30", enabled: false, studyPeriod: "EIGHTH" },
+      { closeTime: "21:30", enabled: true, studyPeriod: "FIRST" }
+    ]);
+    expect(
+      getMockAdminPeriodSettings("2026-06-16", new Date("2026-06-16T00:30:00.000Z")).map((period) => ({
+        closeTime: period.closeTime,
+        enabled: period.enabled,
+        studyPeriod: period.studyPeriod
+      }))
+    ).toEqual([
+      { closeTime: "20:30", enabled: false, studyPeriod: "EIGHTH" },
+      { closeTime: "21:30", enabled: true, studyPeriod: "FIRST" }
+    ]);
+  });
 });

@@ -11,9 +11,11 @@ type PeriodSettingRow = {
   readonly studyPeriod: StudyPeriod;
 };
 
+type PeriodSettingDateFilter = string | { readonly in: readonly string[] };
+
 type PeriodSettingFindMany = (input: {
   readonly where: {
-    readonly date: string;
+    readonly date: PeriodSettingDateFilter;
   };
 }) => Promise<readonly PeriodSettingRow[]>;
 
@@ -55,8 +57,10 @@ function createDeferred<T>(): Deferred<T> {
 
 const prismaMocks = vi.hoisted(() => {
   const periodSettingsStore: PeriodSettingRow[] = [];
+  const matchesDateFilter = (date: string, filter: PeriodSettingDateFilter): boolean =>
+    typeof filter === "string" ? date === filter : filter.in.includes(date);
   const periodSettingFindMany = vi.fn<PeriodSettingFindMany>(async ({ where }) =>
-    periodSettingsStore.filter((setting) => setting.date === where.date)
+    periodSettingsStore.filter((setting) => matchesDateFilter(setting.date, where.date))
   );
   const periodSettingUpsert = vi.fn<PeriodSettingUpsert>(async ({ create, where }) => {
     const existing = periodSettingsStore.find(
@@ -104,6 +108,7 @@ vi.mock("./db", () => ({
 import {
   DEFAULT_PERIOD_CLOSE_TIME,
   DEFAULT_PERIOD_OPEN_TIME,
+  GLOBAL_PERIOD_SETTINGS_DATE,
   getPeriodSummaries,
   findMyReservationId
 } from "./period-settings";
@@ -264,5 +269,75 @@ describe("period summaries", () => {
     ]);
     expect(prismaMocks.periodSettingsStore).toHaveLength(1);
     expect(prismaMocks.periodSettingUpsert).not.toHaveBeenCalled();
+  });
+
+  it("uses global period settings for dates without stored rows", async () => {
+    prismaMocks.periodSettingsStore.push({
+      capacity: 6,
+      closeTime: "22:00",
+      date: GLOBAL_PERIOD_SETTINGS_DATE,
+      enabled: true,
+      openTime: "08:00",
+      studyPeriod: "EIGHTH"
+    });
+
+    const periods = await getPeriodSummaries("2026-06-17", { now: new Date("2026-06-17T00:30:00.000Z") });
+
+    expect(
+      periods.map((period) => ({
+        capacity: period.capacity,
+        closeTime: period.closeTime,
+        openTime: period.openTime,
+        studyPeriod: period.studyPeriod,
+        windowState: period.windowState
+      }))
+    ).toEqual([
+      {
+        capacity: 6,
+        closeTime: "22:00",
+        openTime: "08:00",
+        studyPeriod: "EIGHTH",
+        windowState: "open"
+      },
+      {
+        capacity: 10,
+        closeTime: "16:20",
+        openTime: "13:00",
+        studyPeriod: "FIRST",
+        windowState: "not_open_yet"
+      }
+    ]);
+    expect(prismaMocks.periodSettingUpsert).not.toHaveBeenCalled();
+  });
+
+  it("lets a date-specific period setting override the global setting", async () => {
+    prismaMocks.periodSettingsStore.push(
+      {
+        capacity: 6,
+        closeTime: "22:00",
+        date: GLOBAL_PERIOD_SETTINGS_DATE,
+        enabled: true,
+        openTime: "08:00",
+        studyPeriod: "EIGHTH"
+      },
+      {
+        capacity: 3,
+        closeTime: "09:00",
+        date: "2026-06-17",
+        enabled: false,
+        openTime: "07:00",
+        studyPeriod: "EIGHTH"
+      }
+    );
+
+    const [eighth] = await getPeriodSummaries("2026-06-17", { now: new Date("2026-06-17T00:30:00.000Z") });
+
+    expect(eighth).toMatchObject({
+      capacity: 3,
+      closeTime: "09:00",
+      enabled: false,
+      openTime: "07:00",
+      studyPeriod: "EIGHTH"
+    });
   });
 });

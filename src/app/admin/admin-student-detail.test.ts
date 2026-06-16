@@ -35,12 +35,39 @@ const detail = {
   }
 } satisfies AdminUserDetail;
 
+const detailWithCurrentReservation = {
+  ...detail,
+  currentReservations: [
+    {
+      createdAt: "2026-06-16T00:00:00.000Z",
+      date: "2026-06-16",
+      id: "reservation-confirmed",
+      reason: "학습",
+      status: "CONFIRMED",
+      studyPeriod: "EIGHTH",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+      userId: "user-1"
+    },
+    {
+      createdAt: "2026-06-16T00:00:00.000Z",
+      date: "2026-06-16",
+      id: "reservation-cancelled",
+      reason: "학습",
+      status: "CANCELLED",
+      studyPeriod: "FIRST",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+      userId: "user-1"
+    }
+  ]
+} satisfies AdminUserDetail;
+
 describe("AdminStudentDetail", () => {
   it("renders reservation metrics without a session count", () => {
     const markup = renderToStaticMarkup(
       createElement(AdminStudentDetail, {
         detail,
         onApplyRestriction: () => undefined,
+        onMarkNoShow: () => undefined,
         onRelease: () => undefined,
         onSetRestrictionDraft: () => undefined,
         restrictionDraft
@@ -51,5 +78,21 @@ describe("AdminStudentDetail", () => {
     expect(markup).toContain("노쇼 2");
     expect(markup).toContain("취소 3");
     expect(markup).not.toContain("세션 4");
+  });
+
+  it("renders a no-show action only for confirmed current reservations", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminStudentDetail, {
+        detail: detailWithCurrentReservation,
+        onApplyRestriction: () => undefined,
+        onMarkNoShow: () => undefined,
+        onRelease: () => undefined,
+        onSetRestrictionDraft: () => undefined,
+        restrictionDraft
+      })
+    );
+
+    expect(markup).toContain("data-reservation-action=\"reservation-confirmed\"");
+    expect(markup).not.toContain("data-reservation-action=\"reservation-cancelled\"");
   });
 });

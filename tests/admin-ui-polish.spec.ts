@@ -497,55 +497,6 @@ test("mobile admin student detail flows below the list without clipping", async 
   );
 });
 
-test("admin student management uses reason select and one restriction duration flow", async ({ page }) => {
-  const loginId = `student-ux-${Date.now()}`;
-  const studentNumber = expectedStudentNumber(loginId);
-  let restrictionPayload: unknown = null;
-  await page.route("**/api/admin/users/*/restriction", async (route) => {
-    restrictionPayload = JSON.parse(route.request().postData() ?? "{}");
-    await route.fulfill({ body: JSON.stringify({ user: null }), contentType: "application/json", status: 200 });
-  });
-  await loginWithApi(page, loginId);
-  await logout(page);
-  await loginWithApi(page, "admin");
-  await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
-
-  await page.getByRole("button", { name: "학생" }).click();
-  await expect(page.locator(".user-line .restriction-controls")).toHaveCount(0);
-
-  const studentRow = page.locator(".user-line").filter({ hasText: studentNumber }).first();
-  await expect(studentRow).toBeVisible();
-  await studentRow.getByRole("button", { name: "상세 보기" }).click();
-
-  const detail = page.locator(".student-detail-panel[data-open='true']");
-  await expect(detail).toBeVisible();
-  const reasonInput = detail.getByLabel("제재 사유");
-  await expect(reasonInput).toHaveValue("");
-  await expect(detail.getByRole("button", { name: "예약 취소" })).toHaveCount(0);
-  await expect(detail.getByRole("button", { name: "미출석" })).toHaveCount(0);
-  await expect(detail.getByRole("button", { name: "관리자 확인" })).toHaveCount(0);
-  await expect(detail.getByRole("button", { name: "기타" })).toHaveCount(0);
-
-  await detail.getByLabel("사유 선택").selectOption("예약 취소");
-  await expect(reasonInput).toHaveValue("예약 취소");
-  await detail.getByLabel("사유 선택").selectOption("CUSTOM");
-  await expect(reasonInput).toHaveValue("");
-  await reasonInput.fill("직접 입력 사유");
-  await expect(reasonInput).toHaveValue("직접 입력 사유");
-  await expect(detail.getByLabel("기간", { exact: true })).toHaveCount(0);
-
-  const duration = detail.getByRole("group", { name: "제재 기간" });
-  await duration.getByRole("button", { name: "영구" }).click();
-  await expect(duration.getByRole("button", { name: "영구" })).toHaveAttribute("data-active", "true");
-  await detail.getByRole("button", { name: "제재 적용" }).click();
-  await expect.poll(() => restrictionPayload).toEqual({
-    days: null,
-    reason: "직접 입력 사유",
-    status: "BANNED"
-  });
-});
-
 async function expectBorderRadius(locator: Locator, label: string, expectedRadius: string): Promise<void> {
   await expect(locator, `${label} should be visible`).toBeVisible();
   const radius = await locator.evaluate((element) => {

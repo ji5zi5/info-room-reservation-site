@@ -1,6 +1,6 @@
 "use client";
 
-import { ShieldOff } from "lucide-react";
+import { ShieldOff, UserX } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 
 import type { UserRestrictionDraft } from "./admin-console-state";
@@ -13,6 +13,7 @@ export function AdminStudentDetail({
   detail,
   onApplyRestriction,
   onClose,
+  onMarkNoShow,
   onRelease,
   onSetRestrictionDraft,
   restrictionDraft
@@ -20,6 +21,7 @@ export function AdminStudentDetail({
   readonly detail: AdminUserDetail | null;
   readonly onApplyRestriction: (userId: string) => void;
   readonly onClose?: () => void;
+  readonly onMarkNoShow: (reservationId: string) => void;
   readonly onRelease: (userId: string) => void;
   readonly onSetRestrictionDraft: (userId: string, patch: Partial<UserRestrictionDraft>) => void;
   readonly restrictionDraft: UserRestrictionDraft;
@@ -70,6 +72,17 @@ export function AdminStudentDetail({
           detail.currentReservations.map((reservation) => (
             <DetailLine
               key={reservation.id}
+              action={
+                reservation.status === "CONFIRMED" ? (
+                  <button
+                    className="danger-button detail-line-action" data-reservation-action={reservation.id} type="button"
+                    onClick={() => onMarkNoShow(reservation.id)}
+                  >
+                    <UserX size={16} />
+                    노쇼
+                  </button>
+                ) : undefined
+              }
               left={`${periodLabel(reservation.studyPeriod)} · ${reservationReasonLabel(reservation.reason)}`}
               right={reservation.date}
             />
@@ -152,11 +165,20 @@ function DetailSection({ children, title }: { readonly children: ReactNode; read
   );
 }
 
-function DetailLine({ left, right }: { readonly left: string; readonly right: string }): ReactElement {
+function DetailLine({
+  action,
+  left,
+  right
+}: {
+  readonly action?: ReactNode;
+  readonly left: ReactNode;
+  readonly right: ReactNode;
+}): ReactElement {
   return (
-    <div className="detail-line">
+    <div className="detail-line" data-action={action ? "true" : undefined}>
       <span>{left}</span>
       <strong>{right}</strong>
+      {action}
     </div>
   );
 }

@@ -1,9 +1,14 @@
 import { prisma } from "./db";
 import { getPeriodWindowState, type PeriodWindowState } from "./period-window";
-import { DEFAULT_PERIOD_CAPACITY, STUDY_PERIODS, getStudyPeriodLabel, parseStudyPeriod, type StudyPeriod } from "./study-periods";
-
-export const DEFAULT_PERIOD_OPEN_TIME = "13:00";
-export const DEFAULT_PERIOD_CLOSE_TIME = "16:20";
+import {
+  DEFAULT_PERIOD_CLOSE_TIME,
+  DEFAULT_PERIOD_OPEN_TIME,
+  buildDefaultPeriodSetting,
+  periodSettingReadDates,
+  resolveEffectivePeriodSetting,
+  type PeriodSettingDefaults
+} from "./period-setting-values";
+import { STUDY_PERIODS, getStudyPeriodLabel, parseStudyPeriod, type StudyPeriod } from "./study-periods";
 
 export type PeriodSummary = {
   readonly applicants: readonly PeriodApplicant[];
@@ -43,14 +48,15 @@ type PeriodSummaryOptions = {
   readonly now?: Date;
 };
 
-export type PeriodSettingDefaults = {
-  readonly capacity: number;
-  readonly closeTime: string;
-  readonly date: string;
-  readonly enabled: boolean;
-  readonly openTime: string;
-  readonly studyPeriod: StudyPeriod;
-};
+export {
+  DEFAULT_PERIOD_CLOSE_TIME,
+  DEFAULT_PERIOD_OPEN_TIME,
+  GLOBAL_PERIOD_SETTINGS_DATE,
+  buildDefaultPeriodSetting,
+  periodSettingReadDates,
+  resolveEffectivePeriodSetting,
+  type PeriodSettingDefaults
+} from "./period-setting-values";
 
 export async function getPeriodSummaries(
   date: string,
@@ -58,7 +64,7 @@ export async function getPeriodSummaries(
 ): Promise<readonly PeriodSummary[]> {
   const now = options.now ?? new Date();
   const [settings, counts, applicants] = await Promise.all([
-    prisma.periodSetting.findMany({ where: { date } }),
+    prisma.periodSetting.findMany({ where: { date: { in: [...periodSettingReadDates(date)] } } }),
     prisma.reservation.groupBy({
       by: ["studyPeriod"],
       where: { date, status: "CONFIRMED" },
@@ -68,7 +74,7 @@ export async function getPeriodSummaries(
   ]);
 
   return STUDY_PERIODS.map((studyPeriod) => {
-    const setting = settings.find((candidate) => candidate.studyPeriod === studyPeriod) ?? buildDefaultPeriodSetting(date, studyPeriod);
+    const setting = resolveEffectivePeriodSetting(date, studyPeriod, settings);
     const count = counts.find((candidate) => candidate.studyPeriod === studyPeriod)?._count._all ?? 0;
     const periodApplicants = applicantsForPeriod(studyPeriod, applicants);
     return {
@@ -145,14 +151,19 @@ export function findMyReservationId(
 }
 
 export async function ensurePeriodSettings(date: string): Promise<void> {
+  const globalSettings = await prisma.periodSetting.findMany({
+    where: { date: { in: [...periodSettingReadDates(date)] } }
+  });
+
   for (const studyPeriod of STUDY_PERIODS) {
+    const setting = resolveEffectivePeriodSetting(date, studyPeriod, globalSettings);
     await prisma.periodSetting.upsert({
       create: {
-        capacity: DEFAULT_PERIOD_CAPACITY,
-        closeTime: DEFAULT_PERIOD_CLOSE_TIME,
+        capacity: setting.capacity,
+        closeTime: setting.closeTime,
         date,
-        enabled: true,
-        openTime: DEFAULT_PERIOD_OPEN_TIME,
+        enabled: setting.enabled,
+        openTime: setting.openTime,
         studyPeriod
       },
       update: {},
@@ -168,15 +179,4 @@ export async function ensurePeriodSettings(date: string): Promise<void> {
 
 export function parseStoredStudyPeriod(value: string): StudyPeriod {
   return parseStudyPeriod(value);
-}
-
-export function buildDefaultPeriodSetting(date: string, studyPeriod: StudyPeriod): PeriodSettingDefaults {
-  return {
-    capacity: DEFAULT_PERIOD_CAPACITY,
-    closeTime: DEFAULT_PERIOD_CLOSE_TIME,
-    date,
-    enabled: true,
-    openTime: DEFAULT_PERIOD_OPEN_TIME,
-    studyPeriod
-  };
 }

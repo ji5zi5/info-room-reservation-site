@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
 import { getMockAdminStatistics } from "@/lib/mock-admin-data";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
+import { GLOBAL_PERIOD_SETTINGS_DATE } from "@/lib/period-setting-values";
 import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 
 const StatisticsDateSchema = z
@@ -73,7 +74,9 @@ export async function GET(request: Request): Promise<NextResponse> {
           date: true,
           studyPeriod: true
         },
-        where: { date: { gte: from, lte: to } }
+        where: {
+          OR: [{ date: GLOBAL_PERIOD_SETTINGS_DATE }, { date: { gte: from, lte: to } }]
+        }
       })
     ]);
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionUser } from "@/lib/session";
+import { GLOBAL_PERIOD_SETTINGS_DATE } from "@/lib/period-setting-values";
 
 import { GET } from "./route";
 
@@ -85,6 +86,22 @@ describe("admin statistics route", () => {
     expect(await response.json()).toMatchObject({ error: { code: "bad_request" } });
     expect(routeMocks.reservationFindMany).not.toHaveBeenCalled();
     expect(routeMocks.periodSettingFindMany).not.toHaveBeenCalled();
+  });
+
+  it("includes global period settings when querying statistics capacity settings", async () => {
+    const response = await GET(statisticsRequest("from=2026-06-16&to=2026-06-17"));
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.periodSettingFindMany).toHaveBeenCalledWith({
+      select: {
+        capacity: true,
+        date: true,
+        studyPeriod: true
+      },
+      where: {
+        OR: [{ date: GLOBAL_PERIOD_SETTINGS_DATE }, { date: { gte: "2026-06-16", lte: "2026-06-17" } }]
+      }
+    });
   });
 });
 

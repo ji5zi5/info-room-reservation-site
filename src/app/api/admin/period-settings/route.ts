@@ -8,12 +8,18 @@ import { buildPeriodSettingsPatchAdminAction } from "@/lib/admin-operation-audit
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { getMockAdminPeriodSettings, updateMockAdminPeriodSettings } from "@/lib/mock-period-settings";
 import { getPeriodSummaries } from "@/lib/period-settings";
+import {
+  GLOBAL_PERIOD_SETTINGS_DATE,
+  periodSettingReadDates,
+  resolveEffectivePeriodSetting
+} from "@/lib/period-setting-values";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
 import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
 import { requireAdmin, requireAdminSession, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
+import { STUDY_PERIODS } from "@/lib/study-periods";
 
 const PeriodPatchSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
@@ -71,35 +77,41 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     const ipHash = hashRequestClientIp(request);
 
     await prisma.$transaction(async (transaction) => {
-      const before = await transaction.periodSetting.findMany({
+      const beforeRows = await transaction.periodSetting.findMany({
         select: {
           capacity: true,
           closeTime: true,
+          date: true,
           enabled: true,
           openTime: true,
           studyPeriod: true
         },
-        where: { date: parsed.data.date }
+        where: { date: { in: [...periodSettingReadDates(parsed.data.date)] } }
       });
+      const before = STUDY_PERIODS.map((studyPeriod) =>
+        resolveEffectivePeriodSetting(parsed.data.date, studyPeriod, beforeRows)
+      );
       for (const period of parsed.data.periods) {
+        const periodData = {
+          capacity: period.capacity,
+          closeTime: period.closeTime,
+          enabled: period.enabled,
+          openTime: period.openTime
+        };
+        await transaction.periodSetting.updateMany({
+          data: periodData,
+          where: { studyPeriod: period.studyPeriod }
+        });
         await transaction.periodSetting.upsert({
           create: {
-            capacity: period.capacity,
-            closeTime: period.closeTime,
-            date: parsed.data.date,
-            enabled: period.enabled,
-            openTime: period.openTime,
+            ...periodData,
+            date: GLOBAL_PERIOD_SETTINGS_DATE,
             studyPeriod: period.studyPeriod
           },
-          update: {
-            capacity: period.capacity,
-            closeTime: period.closeTime,
-            enabled: period.enabled,
-            openTime: period.openTime
-          },
+          update: periodData,
           where: {
             date_studyPeriod: {
-              date: parsed.data.date,
+              date: GLOBAL_PERIOD_SETTINGS_DATE,
               studyPeriod: period.studyPeriod
             }
           }
@@ -118,7 +130,12 @@ export async function PATCH(request: Request): Promise<NextResponse> {
         data: {
           action: "PERIOD_SETTINGS_PATCH",
           actorId: admin.id,
-          detail: JSON.stringify({ actionId: action.id, date: parsed.data.date, periods: parsed.data.periods.length })
+          detail: JSON.stringify({
+            actionId: action.id,
+            date: parsed.data.date,
+            periods: parsed.data.periods.length,
+            scope: "ALL_DATES"
+          })
         }
       });
     });

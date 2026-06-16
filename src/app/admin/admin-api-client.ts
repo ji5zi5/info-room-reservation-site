@@ -132,7 +132,7 @@ export async function sendClosedPeriodNotification(period: AdminDashboardPeriod,
 
 export async function markReservationNoShow(reservationId: string): Promise<boolean> {
   const response = await csrfFetch(`/api/admin/reservations/${reservationId}/no-show`, {
-    body: JSON.stringify({ days: 7, reason: "정보실 예약 노쇼" }),
+    body: JSON.stringify({ reason: "정보실 예약 노쇼" }),
     headers: { "content-type": "application/json" },
     method: "POST"
   });

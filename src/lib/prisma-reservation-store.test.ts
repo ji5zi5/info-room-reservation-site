@@ -3,12 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StudyPeriod } from "./study-periods";
 
-type PeriodSettingFindUniqueInput = {
+type PeriodSettingFindManyInput = {
   readonly where: {
-    readonly date_studyPeriod: {
-      readonly date: string;
-      readonly studyPeriod: StudyPeriod;
-    };
+    readonly date: { readonly in: readonly string[] };
+    readonly studyPeriod: StudyPeriod;
   };
 };
 
@@ -70,9 +68,18 @@ type ReservationRow = {
   readonly userId: string;
 };
 
+type PeriodSettingRow = {
+  readonly capacity: number;
+  readonly closeTime: string;
+  readonly date: string;
+  readonly enabled: boolean;
+  readonly openTime: string;
+  readonly studyPeriod: StudyPeriod;
+};
+
 type MockPrismaTransaction = {
   readonly periodSetting: {
-    readonly findUnique: (input: PeriodSettingFindUniqueInput) => Promise<null>;
+    readonly findMany: (input: PeriodSettingFindManyInput) => Promise<readonly PeriodSettingRow[]>;
     readonly upsert: (input: PeriodSettingUpsertInput) => Promise<never>;
   };
   readonly reservation: {
@@ -97,9 +104,15 @@ type PrismaTransactionMock = (
 ) => Promise<unknown>;
 
 const prismaMocks = vi.hoisted(() => {
+  const periodSettingsStore: PeriodSettingRow[] = [];
   const transactionClient = {
     periodSetting: {
-      findUnique: vi.fn(async (_input: PeriodSettingFindUniqueInput): Promise<null> => null),
+      findMany: vi.fn(async (input: PeriodSettingFindManyInput): Promise<readonly PeriodSettingRow[]> =>
+        periodSettingsStore.filter(
+          (setting) =>
+            input.where.date.in.includes(setting.date) && setting.studyPeriod === input.where.studyPeriod
+        )
+      ),
       upsert: vi.fn(async (_input: PeriodSettingUpsertInput): Promise<never> => {
         throw new Error("Period settings should not be precreated by the reservation store");
       })
@@ -120,6 +133,7 @@ const prismaMocks = vi.hoisted(() => {
   } satisfies MockPrismaTransaction;
 
   return {
+    periodSettingsStore,
     transaction: vi.fn<PrismaTransactionMock>(async (operation) => operation(transactionClient)),
     transactionClient
   };
@@ -137,11 +151,13 @@ import {
   prismaReservationStore,
   retrySerializableReservationTransaction
 } from "./prisma-reservation-store";
+import { GLOBAL_PERIOD_SETTINGS_DATE } from "./period-setting-values";
 import { reserveStudyPeriod } from "./reservation-service";
 
 beforeEach(() => {
+  prismaMocks.periodSettingsStore.length = 0;
   prismaMocks.transaction.mockClear();
-  prismaMocks.transactionClient.periodSetting.findUnique.mockClear();
+  prismaMocks.transactionClient.periodSetting.findMany.mockClear();
   prismaMocks.transactionClient.periodSetting.upsert.mockClear();
   prismaMocks.transactionClient.reservation.count.mockClear();
   prismaMocks.transactionClient.reservation.create.mockClear();
@@ -215,12 +231,10 @@ describe("Prisma reservation store period defaults", () => {
         userId: "user-1"
       }
     });
-    expect(prismaMocks.transactionClient.periodSetting.findUnique).toHaveBeenCalledWith({
+    expect(prismaMocks.transactionClient.periodSetting.findMany).toHaveBeenCalledWith({
       where: {
-        date_studyPeriod: {
-          date: "2026-06-16",
-          studyPeriod: "EIGHTH"
-        }
+        date: { in: ["2026-06-16", GLOBAL_PERIOD_SETTINGS_DATE] },
+        studyPeriod: "EIGHTH"
       }
     });
     expect(prismaMocks.transactionClient.periodSetting.upsert).not.toHaveBeenCalled();
@@ -234,6 +248,29 @@ describe("Prisma reservation store period defaults", () => {
         userId: "user-1"
       }
     });
+  });
+
+  it("uses global period settings when the requested date has no row", async () => {
+    prismaMocks.periodSettingsStore.push({
+      capacity: 10,
+      closeTime: "13:00",
+      date: GLOBAL_PERIOD_SETTINGS_DATE,
+      enabled: true,
+      openTime: "00:00",
+      studyPeriod: "EIGHTH"
+    });
+
+    await expect(
+      reserveStudyPeriod({
+        date: "2026-06-16",
+        now: new Date("2026-06-16T05:00:00.000Z"),
+        reason: "자습",
+        store: prismaReservationStore,
+        studyPeriod: "EIGHTH",
+        userId: "user-1"
+      })
+    ).resolves.toEqual({ kind: "error", reason: "closed" });
+    expect(prismaMocks.transactionClient.reservation.create).not.toHaveBeenCalled();
   });
 });
 

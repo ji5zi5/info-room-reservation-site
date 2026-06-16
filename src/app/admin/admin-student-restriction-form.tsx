@@ -5,12 +5,6 @@ import type { ReactElement } from "react";
 
 import type { UserRestrictionDraft } from "./admin-console-state";
 
-const REASON_OPTIONS = [
-  { label: "미출석", value: "미출석" },
-  { label: "예약 취소", value: "예약 취소" },
-  { label: "관리자 확인", value: "관리자 확인" },
-  { label: "직접 작성", value: "CUSTOM" }
-] as const;
 const DAY_PRESETS = ["7", "14", "30"] as const;
 
 type AdminStudentRestrictionFormProps = {
@@ -27,15 +21,7 @@ export function AdminStudentRestrictionForm({
   const reasonReady = draft.reason.trim().length > 0;
 
   return (
-    <section className="restriction-form" aria-label="예약 제재 적용">
-      <label className="field">
-        <span>사유 선택</span>
-        <select value={reasonSelectValue(draft.reason)} onChange={(event) => onSetDraft({ reason: parseReasonValue(event.currentTarget.value) })}>
-          {REASON_OPTIONS.map((reason) => (
-            <option key={reason.value} value={reason.value}>{reason.label}</option>
-          ))}
-        </select>
-      </label>
+    <section className="restriction-form" aria-label="학생 제재 적용">
       <label className="field">
         <span>제재 사유</span>
         <input
@@ -80,30 +66,8 @@ export function AdminStudentRestrictionForm({
       </fieldset>
       <button className="danger-button" disabled={!reasonReady} type="button" onClick={onApply}>
         <Ban size={16} />
-        제재 적용
+        학생 제재 적용
       </button>
     </section>
   );
-}
-
-function reasonSelectValue(reason: string): string {
-  switch (reason) {
-    case "미출석":
-    case "예약 취소":
-    case "관리자 확인":
-      return reason;
-    default:
-      return "CUSTOM";
-  }
-}
-
-function parseReasonValue(value: string): string {
-  switch (value) {
-    case "미출석":
-    case "예약 취소":
-    case "관리자 확인":
-      return value;
-    default:
-      return "";
-  }
 }

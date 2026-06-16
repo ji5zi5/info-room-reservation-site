@@ -8,7 +8,8 @@ import {
   type UserBookingState
 } from "./reservation-service";
 import { prisma } from "./db";
-import { buildDefaultPeriodSetting, parseStoredStudyPeriod } from "./period-settings";
+import { parseStoredStudyPeriod } from "./period-settings";
+import { periodSettingReadDates, resolveEffectivePeriodSetting } from "./period-setting-values";
 import type { StudyPeriod } from "./study-periods";
 
 type PrismaTransaction = Prisma.TransactionClient;
@@ -86,25 +87,14 @@ class PrismaReservationStoreUnit implements ReservationStore {
   }
 
   public async getPeriodSetting(date: string, studyPeriod: StudyPeriod): Promise<PeriodSetting | null> {
-    const setting = await this.client.periodSetting.findUnique({
+    const settings = await this.client.periodSetting.findMany({
       where: {
-        date_studyPeriod: {
-          date,
-          studyPeriod
-        }
+        date: { in: [...periodSettingReadDates(date)] },
+        studyPeriod
       }
     });
-    if (!setting) {
-      return buildDefaultPeriodSetting(date, studyPeriod);
-    }
-    return {
-      capacity: setting.capacity,
-      closeTime: setting.closeTime,
-      date: setting.date,
-      enabled: setting.enabled,
-      openTime: setting.openTime,
-      studyPeriod: parseStoredStudyPeriod(setting.studyPeriod)
-    };
+    const setting = resolveEffectivePeriodSetting(date, studyPeriod, settings);
+    return { ...setting, studyPeriod: parseStoredStudyPeriod(setting.studyPeriod) };
   }
 
   public async getUserBookingState(userId: string): Promise<UserBookingState | null> {

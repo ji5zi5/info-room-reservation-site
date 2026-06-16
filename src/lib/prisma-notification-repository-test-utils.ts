@@ -139,8 +139,22 @@ vi.mock("./db", () => ({
   }
 }));
 
-export function periodSetting(input: { readonly date: string; readonly enabled?: boolean; readonly studyPeriod: StudyPeriod }): PeriodSettingRow {
-  return { capacity: 10, closeTime: "16:20", date: input.date, enabled: input.enabled ?? true, openTime: "13:00", studyPeriod: input.studyPeriod };
+export function periodSetting(input: {
+  readonly capacity?: number;
+  readonly closeTime?: string;
+  readonly date: string;
+  readonly enabled?: boolean;
+  readonly openTime?: string;
+  readonly studyPeriod: StudyPeriod;
+}): PeriodSettingRow {
+  return {
+    capacity: input.capacity ?? 10,
+    closeTime: input.closeTime ?? "16:20",
+    date: input.date,
+    enabled: input.enabled ?? true,
+    openTime: input.openTime ?? "13:00",
+    studyPeriod: input.studyPeriod
+  };
 }
 
 export function delivery(input: {

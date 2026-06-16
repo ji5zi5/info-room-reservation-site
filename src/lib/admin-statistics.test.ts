@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildAdminStatistics } from "./admin-statistics";
+import { GLOBAL_PERIOD_SETTINGS_DATE } from "./period-setting-values";
 
 const studentA = { id: "user-a", name: "김학생", studentNumber: "20101" };
 const studentB = { id: "user-b", name: "박반복", studentNumber: "20102" };
@@ -73,6 +74,24 @@ describe("buildAdminStatistics", () => {
     expect(statistics.periodStats.map((period) => ({ capacity: period.capacity, studyPeriod: period.studyPeriod }))).toEqual([
       { capacity: 20, studyPeriod: "EIGHTH" },
       { capacity: 20, studyPeriod: "FIRST" }
+    ]);
+  });
+
+  it("uses global capacity for date-periods without stored settings", () => {
+    const statistics = buildAdminStatistics({
+      from: "2026-06-10",
+      reservations: [],
+      settings: [
+        setting({ capacity: 7, date: GLOBAL_PERIOD_SETTINGS_DATE, studyPeriod: "EIGHTH" }),
+        setting({ capacity: 8, date: GLOBAL_PERIOD_SETTINGS_DATE, studyPeriod: "FIRST" }),
+        setting({ capacity: 5, date: "2026-06-10", studyPeriod: "EIGHTH" })
+      ],
+      to: "2026-06-11"
+    });
+
+    expect(statistics.periodStats.map((period) => ({ capacity: period.capacity, studyPeriod: period.studyPeriod }))).toEqual([
+      { capacity: 12, studyPeriod: "EIGHTH" },
+      { capacity: 16, studyPeriod: "FIRST" }
     ]);
   });
 });

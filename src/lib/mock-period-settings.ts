@@ -1,6 +1,7 @@
 import {
   DEFAULT_PERIOD_CLOSE_TIME,
   DEFAULT_PERIOD_OPEN_TIME,
+  GLOBAL_PERIOD_SETTINGS_DATE,
   type PeriodSummary
 } from "./period-settings";
 import { getPeriodWindowState } from "./period-window";
@@ -50,6 +51,10 @@ export function updateMockAdminPeriodSettings(
     const incoming = incomingByPeriod.get(studyPeriod);
     return incoming ?? defaultSetting(studyPeriod);
   });
+  for (const storedDate of mockSettingsByDate.keys()) {
+    mockSettingsByDate.set(storedDate, nextSettings);
+  }
+  mockSettingsByDate.set(GLOBAL_PERIOD_SETTINGS_DATE, nextSettings);
   mockSettingsByDate.set(date, nextSettings);
   return getMockAdminPeriodSettings(date, now);
 }
@@ -63,7 +68,7 @@ function getStoredSettings(date: string): readonly MockAdminPeriodSettingInput[]
   if (stored) {
     return stored;
   }
-  const defaults = STUDY_PERIODS.map(defaultSetting);
+  const defaults = mockSettingsByDate.get(GLOBAL_PERIOD_SETTINGS_DATE) ?? STUDY_PERIODS.map(defaultSetting);
   mockSettingsByDate.set(date, defaults);
   return defaults;
 }

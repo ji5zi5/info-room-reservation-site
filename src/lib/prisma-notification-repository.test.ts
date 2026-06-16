@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { delivery, periodSetting, prismaMocks } from "./prisma-notification-repository-test-utils";
+import { GLOBAL_PERIOD_SETTINGS_DATE } from "./period-setting-values";
 import {
   getDueClosedPeriodNotificationCandidates,
   prismaClosedPeriodNotificationRepository
@@ -41,6 +42,31 @@ describe("Prisma closed-period notification periods", () => {
     expect(period?.confirmedCount).toBe(1);
     expect(period?.applicants).toEqual([{ name: "김도윤", reason: "자습", studentNumber: "26001" }]);
     expect(prismaMocks.periodSettingsStore).toHaveLength(0);
+  });
+
+  it("resolves missing date rows from global period settings", async () => {
+    prismaMocks.periodSettingsStore.push(
+      periodSetting({
+        capacity: 6,
+        closeTime: "20:30",
+        date: GLOBAL_PERIOD_SETTINGS_DATE,
+        openTime: "08:00",
+        studyPeriod: "EIGHTH"
+      })
+    );
+
+    const period = await prismaClosedPeriodNotificationRepository.getPeriod({
+      date: "2026-06-12",
+      studyPeriod: "EIGHTH"
+    });
+
+    expect(period).toMatchObject({
+      capacity: 6,
+      closeTime: "20:30",
+      date: "2026-06-12",
+      openTime: "08:00",
+      studyPeriod: "EIGHTH"
+    });
   });
 
   it("returns only today default closed periods for cron candidates", async () => {
@@ -99,6 +125,22 @@ describe("Prisma closed-period notification periods", () => {
 
   it("suppresses a generated default when a disabled stored setting exists", async () => {
     prismaMocks.periodSettingsStore.push(periodSetting({ date: "2026-06-12", enabled: false, studyPeriod: "EIGHTH" }));
+
+    const todayKeys = candidateKeys(await getDueClosedPeriodNotificationCandidates(new Date("2026-06-12T07:25:00.000Z")))
+      .filter((key) => key.startsWith("2026-06-12:"));
+
+    expect(todayKeys).toEqual(["2026-06-12:FIRST"]);
+  });
+
+  it("uses global period settings when choosing due cron candidates", async () => {
+    prismaMocks.periodSettingsStore.push(
+      periodSetting({
+        closeTime: "23:59",
+        date: GLOBAL_PERIOD_SETTINGS_DATE,
+        openTime: "00:00",
+        studyPeriod: "EIGHTH"
+      })
+    );
 
     const todayKeys = candidateKeys(await getDueClosedPeriodNotificationCandidates(new Date("2026-06-12T07:25:00.000Z")))
       .filter((key) => key.startsWith("2026-06-12:"));

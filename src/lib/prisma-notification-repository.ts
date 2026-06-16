@@ -4,7 +4,7 @@ import { prisma } from "./db";
 import { CLOSED_LIST_NOTIFICATION_KIND, selectClosedPeriodNotificationCandidates, staleSendingDeliveryCutoff, type ClosedPeriodCandidate, type ClosedPeriodDeliverySnapshot, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
 import type { ClosedPeriodNotificationDeliveryRecord, ClosedPeriodNotificationDeliveryWrite, ClosedPeriodNotificationPeriod, ClosedPeriodNotificationRepository } from "./closed-period-notification-service";
 import { toKstDate } from "./date";
-import { buildDefaultPeriodSetting, type PeriodSettingDefaults } from "./period-settings";
+import { buildDefaultPeriodSetting, periodSettingReadDates, resolveEffectivePeriodSetting, type PeriodSettingDefaults } from "./period-settings";
 import { STUDY_PERIODS, parseStudyPeriod, type StudyPeriod } from "./study-periods";
 
 type NotificationReservation = {
@@ -20,12 +20,10 @@ export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationR
   },
 
   async getPeriod(input) {
-    const setting = await prisma.periodSetting.findUnique({
+    const settings = await prisma.periodSetting.findMany({
       where: {
-        date_studyPeriod: {
-          date: input.date,
-          studyPeriod: input.studyPeriod
-        }
+        date: { in: [...periodSettingReadDates(input.date)] },
+        studyPeriod: input.studyPeriod
       }
     });
     const reservations = await prisma.reservation.findMany({
@@ -37,7 +35,7 @@ export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationR
         studyPeriod: input.studyPeriod
       }
     });
-    return toNotificationPeriod(setting ?? buildDefaultPeriodSetting(input.date, input.studyPeriod), reservations);
+    return toNotificationPeriod(resolveEffectivePeriodSetting(input.date, input.studyPeriod, settings), reservations);
   },
 
   async claimDelivery(input) {
@@ -99,7 +97,7 @@ export async function getDueClosedPeriodNotificationCandidates(now: Date): Promi
   const today = toKstDate(now);
   const staleSendingBefore = staleSendingDeliveryCutoff(now);
   const [todaySettings, actionableDeliveries, activeTodayDeliveries] = await Promise.all([
-    prisma.periodSetting.findMany({ where: { date: today } }),
+    prisma.periodSetting.findMany({ where: { date: { in: [...periodSettingReadDates(today)] } } }),
     prisma.notificationDelivery.findMany({
       where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND, OR: [{ status: "FAILED" }, { status: "SENDING", updatedAt: { lte: staleSendingBefore } }] }
     }),
@@ -107,13 +105,11 @@ export async function getDueClosedPeriodNotificationCandidates(now: Date): Promi
       where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND, OR: [{ status: "SENT" }, { status: "SENDING", updatedAt: { gt: staleSendingBefore } }] }
     })
   ]);
-  const todayCandidates = todaySettings.map(toCandidate);
-  const existingPeriods = new Set(todayCandidates.map((setting) => candidateKey(setting.date, setting.studyPeriod)));
-  const defaultTodayCandidates = STUDY_PERIODS.filter((studyPeriod) => !existingPeriods.has(candidateKey(today, studyPeriod))).map((studyPeriod) =>
-    buildDefaultPeriodSetting(today, studyPeriod)
-  );
+  const todayCandidates = STUDY_PERIODS.map((studyPeriod) =>
+    resolveEffectivePeriodSetting(today, studyPeriod, todaySettings)
+  ).map(toCandidate);
   const byPeriod = new Map<string, ClosedPeriodCandidate>();
-  for (const candidate of [...todayCandidates, ...defaultTodayCandidates]) {
+  for (const candidate of todayCandidates) {
     byPeriod.set(candidateKey(candidate.date, candidate.studyPeriod), candidate);
   }
   for (const delivery of actionableDeliveries) {

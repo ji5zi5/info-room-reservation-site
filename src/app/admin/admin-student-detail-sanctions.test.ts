@@ -70,6 +70,7 @@ describe("AdminStudentDetail sanction history", () => {
       createElement(AdminStudentDetail, {
         detail: detailWithSanctions,
         onApplyRestriction: () => undefined,
+        onMarkNoShow: () => undefined,
         onRelease: () => undefined,
         onSetRestrictionDraft: () => undefined,
         restrictionDraft

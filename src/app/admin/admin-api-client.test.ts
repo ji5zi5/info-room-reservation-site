@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAdminSettings, saveAdminSettings } from "./admin-api-client";
+import { fetchAdminSettings, markReservationNoShow, saveAdminSettings } from "./admin-api-client";
 
 const csrfFetchMock = vi.hoisted(() =>
   vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
@@ -69,5 +69,15 @@ describe("admin api client", () => {
         ]
       })
     );
+  });
+
+  it("sends only a no-show reason when marking a reservation no-show", async () => {
+    csrfFetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await expect(markReservationNoShow("reservation-1")).resolves.toBe(true);
+
+    const request = csrfFetchMock.mock.calls[0]?.[1];
+    expect(request).toBeDefined();
+    expect(request?.body).toBe(JSON.stringify({ reason: "정보실 예약 노쇼" }));
   });
 });

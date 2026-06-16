@@ -149,7 +149,7 @@ export function useAdminConsole(): AdminConsoleState {
 
   async function markNoShow(reservationId: string): Promise<void> {
     const ok = await markReservationNoShow(reservationId);
-    setToast(ok ? "노쇼 처리와 예약 제한을 적용했습니다." : "노쇼 처리 실패");
+    setToast(ok ? "노쇼 처리와 영구 차단을 적용했습니다." : "노쇼 처리 실패");
     await refresh();
   }
 
@@ -178,7 +178,7 @@ export function useAdminConsole(): AdminConsoleState {
       reason,
       status: draft.status
     });
-    setToast(ok ? "예약 제한을 적용했습니다." : "예약 제한 적용 실패");
+    setToast(ok ? "학생 제재를 적용했습니다." : "학생 제재 적용 실패");
     await refresh();
   }
 

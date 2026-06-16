@@ -154,6 +154,7 @@ export function AdminConsole(): ReactElement {
               }
               onApplyRestriction={(userId) => void consoleState.applyRestriction(userId)}
               onClose={consoleState.clearSelectedUser}
+              onMarkNoShow={(reservationId) => void consoleState.markNoShow(reservationId)}
               onRelease={(userId) => void consoleState.removeRestriction(userId)}
               onSetRestrictionDraft={consoleState.setRestrictionDraft}
             />
