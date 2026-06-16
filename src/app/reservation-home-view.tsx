@@ -201,6 +201,9 @@ export function ReservationHomeView({
           )}
         </section>
       </div>
+      <footer className="site-credit" aria-label="사이트 크레딧">
+        © 2026 ISHS 32nd · 엄지오
+      </footer>
       <StudentProfilePanel
         errorMessage={profileState.errorMessage}
         loading={profileState.loading}
