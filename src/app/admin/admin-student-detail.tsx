@@ -7,6 +7,8 @@ import type { UserRestrictionDraft } from "./admin-console-state";
 import { AdminStudentRestrictionForm } from "./admin-student-restriction-form";
 import type { AdminUserDetail } from "./admin-types";
 
+type AdminUserSanction = AdminUserDetail["sanctions"][number];
+
 export function AdminStudentDetail({
   detail,
   onApplyRestriction,
@@ -40,7 +42,6 @@ export function AdminStudentDetail({
         <span>확정 {detail.summary.confirmedCount}</span>
         <span>노쇼 {detail.summary.noShowCount}</span>
         <span>취소 {detail.summary.cancelledCount}</span>
-        <span>세션 {detail.sessionSummary.activeCount}</span>
       </div>
       <div className="notice-panel">
         <strong>현재 상태</strong>
@@ -92,7 +93,7 @@ export function AdminStudentDetail({
             <DetailLine
               key={sanction.id}
               left={`${sanctionTypeLabel(sanction.type)} · ${sanction.reason}`}
-              right={`${statusLabel(sanction.status)} · ${formatKst(sanction.createdAt)}`}
+              right={`${sanctionStatusLabel(sanction.status)} · ${formatKst(sanctionStatusTimestamp(sanction))}`}
             />
           ))
         ) : (
@@ -195,6 +196,24 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
+}
+
+function sanctionStatusLabel(status: string): string {
+  switch (status) {
+    case "ACTIVE":
+      return "적용 중";
+    case "REVOKED":
+      return "해제";
+    default:
+      return status;
+  }
+}
+
+function sanctionStatusTimestamp(sanction: AdminUserSanction): string {
+  if (sanction.status === "REVOKED" && sanction.revokedAt) {
+    return sanction.revokedAt;
+  }
+  return sanction.createdAt;
 }
 
 function sanctionTypeLabel(type: string): string {
