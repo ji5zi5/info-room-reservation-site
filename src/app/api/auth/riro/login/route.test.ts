@@ -128,6 +128,38 @@ describe("Riro login route", () => {
     expect(routeMocks.loginUserWithRiro).toHaveBeenCalledTimes(1);
   });
 
+  it("masks shadow-banned student fields in the login response only", async () => {
+    routeMocks.loginUserWithRiro.mockResolvedValue({
+      kind: "success",
+      token: "raw-shadow-session-token",
+      user: {
+        bookingStatus: "SHADOW_BANNED",
+        generation: 31,
+        id: "user-shadow",
+        name: "테스트학생",
+        restrictionReason: "블랙리스트",
+        restrictedUntil: "2026-07-01T00:00:00.000Z",
+        role: "STUDENT",
+        studentNumber: "90001"
+      }
+    });
+
+    const response = await POST(loginRequest(JSON.stringify({ id: "student-1", password: "example-password" })));
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.setSessionCookie).toHaveBeenCalledWith(response, "raw-shadow-session-token");
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({
+      user: {
+        bookingStatus: "ACTIVE",
+        restrictionReason: null,
+        restrictedUntil: null
+      }
+    });
+    expect(text).not.toContain("SHADOW_BANNED");
+    expect(text).not.toContain("블랙리스트");
+  });
+
   it("returns unauthorized JSON for invalid Riro credentials without echoing the password", async () => {
     routeMocks.loginUserWithRiro.mockResolvedValue(invalidCredentialsLogin);
 

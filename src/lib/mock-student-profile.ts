@@ -54,6 +54,7 @@ function parseMockBookingStatus(value: string): BookingStatus {
     case "ACTIVE":
     case "BANNED":
     case "RESTRICTED":
+    case "SHADOW_BANNED":
       return value;
     default:
       throw new InvalidMockBookingStatusError(value);

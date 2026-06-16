@@ -277,6 +277,7 @@ describe("student profile route", () => {
     expect(routeMocks.reservationFindMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 10 }));
     expect(routeMocks.sanctionFindMany).toHaveBeenCalledTimes(2);
   });
+
 });
 
 async function loadProfileRoute(): Promise<ProfileRouteModule> {

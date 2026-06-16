@@ -10,6 +10,7 @@ import {
   upsertMockReservationUser
 } from "./mock-reservation-data";
 import { resetMockAdminPeriodSettingsForTests, updateMockAdminPeriodSettings } from "./mock-period-settings";
+import { mockReservationUsersById } from "./mock-reservation-state";
 import type { SessionUser } from "./session";
 
 const student = {
@@ -80,6 +81,47 @@ describe("mock reservation data", () => {
     expect(getMockAdminUsers({ bookingStatus: "RESTRICTED", query: "12345" })[0]).toMatchObject({
       bookingStatus: "RESTRICTED",
       restrictionReason: "예약 취소"
+    });
+  });
+
+  it("keeps stored shadow bans when a mock student cancels an existing reservation", () => {
+    const shadowBannedStudent = {
+      ...student,
+      bookingStatus: "SHADOW_BANNED",
+      restrictionReason: "블랙리스트",
+      restrictedUntil: "2026-07-01T00:00:00.000Z"
+    } satisfies SessionUser;
+    openAllMockPeriods("2026-06-14");
+    upsertMockReservationUser(student);
+    reserveMockStudyPeriod({
+      date: "2026-06-14",
+      now: new Date("2026-06-14T00:30:00.000Z"),
+      reason: "자습",
+      studyPeriod: "EIGHTH",
+      user: student
+    });
+    mockReservationUsersById.set(student.id, {
+      ...student,
+      bookingStatus: "SHADOW_BANNED",
+      restrictionReason: "블랙리스트",
+      restrictedUntil: new Date("2026-07-01T00:00:00.000Z")
+    });
+
+    const result = cancelMockReservation({
+      id: "mock-reservation-1",
+      now: new Date("2026-06-14T00:40:00.000Z"),
+      user: {
+        ...shadowBannedStudent,
+        bookingStatus: "ACTIVE",
+        restrictionReason: null,
+        restrictedUntil: null
+      }
+    });
+
+    expect(result.kind).toBe("cancelled");
+    expect(getMockAdminUsers({ bookingStatus: "SHADOW_BANNED", query: "12345" })[0]).toMatchObject({
+      bookingStatus: "SHADOW_BANNED",
+      restrictionReason: "블랙리스트"
     });
   });
 

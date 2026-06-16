@@ -29,13 +29,25 @@ const restrictedUser = {
   studentNumber: "26002"
 } satisfies AdminUserListRow;
 
-const users = [activeUser, restrictedUser] as const;
+const shadowBannedUser = {
+  bookingStatus: "SHADOW_BANNED",
+  generation: 26,
+  id: "u3",
+  name: "최유진",
+  restrictedUntil: null,
+  restrictionReason: "블랙리스트",
+  role: "STUDENT",
+  studentNumber: "26003"
+} satisfies AdminUserListRow;
+
+const users = [activeUser, restrictedUser, shadowBannedUser] as const;
 
 describe("admin user status parsing", () => {
   it("defaults malformed filters to ALL", () => {
     expect(parseAdminUserStatusFilter(null)).toBe("ALL");
     expect(parseAdminUserStatusFilter("wat")).toBe("ALL");
     expect(parseAdminUserStatusFilter("RESTRICTED")).toBe("RESTRICTED");
+    expect(parseAdminUserStatusFilter("SHADOW_BANNED")).toBe("SHADOW_BANNED");
   });
 });
 
@@ -44,6 +56,7 @@ describe("admin user filtering", () => {
     expect(filterAdminUsers(users, { bookingStatus: "ALL", query: "도윤" }).map((user) => user.id)).toEqual(["u1"]);
     expect(filterAdminUsers(users, { bookingStatus: "ALL", query: "26002" }).map((user) => user.id)).toEqual(["u2"]);
     expect(filterAdminUsers(users, { bookingStatus: "RESTRICTED", query: "" }).map((user) => user.id)).toEqual(["u2"]);
+    expect(filterAdminUsers(users, { bookingStatus: "SHADOW_BANNED", query: "" }).map((user) => user.id)).toEqual(["u3"]);
   });
 });
 

@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
+import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
+import { applyMockUserRestriction, removeMockUserRestriction, type MockUserRestrictionResult } from "@/lib/mock-user-restrictions";
 import { readJsonRequest } from "@/lib/request-json";
 import { hashRequestClientIp } from "@/lib/request-source";
 
@@ -35,11 +37,6 @@ export async function POST(request: Request, context: { readonly params: Promise
     }
     const restrictionDays = parsed.data.days ?? null;
 
-    const target = await findRestrictableTarget(admin.id, params.id);
-    if (target instanceof NextResponse) {
-      return target;
-    }
-
     let restrictedUntil: Date | null = null;
     if ((parsed.data.status === "BANNED" || parsed.data.status === "SHADOW_BANNED") && restrictionDays !== null) {
       return jsonError(400, "bad_request", "영구 차단에는 기간을 설정할 수 없습니다.");
@@ -49,6 +46,21 @@ export async function POST(request: Request, context: { readonly params: Promise
         return jsonError(400, "bad_request", "기간 제한 일수가 필요합니다.");
       }
       restrictedUntil = new Date(Date.now() + restrictionDays * 24 * 60 * 60 * 1000);
+    }
+    if (isNoDatabaseMockMode()) {
+      return mockRestrictionResultResponse(
+        applyMockUserRestriction({
+          actorId: admin.id,
+          bookingStatus: parsed.data.status,
+          restrictedUntil,
+          restrictionReason: parsed.data.reason,
+          targetUserId: params.id
+        })
+      );
+    }
+    const target = await findRestrictableTarget(admin.id, params.id);
+    if (target instanceof NextResponse) {
+      return target;
     }
     const ipHash = hashRequestClientIp(request);
 
@@ -128,6 +140,9 @@ export async function DELETE(request: Request, context: { readonly params: Promi
       return admin;
     }
     const params = await context.params;
+    if (isNoDatabaseMockMode()) {
+      return mockRestrictionResultResponse(removeMockUserRestriction({ actorId: admin.id, targetUserId: params.id }));
+    }
     const target = await findRestrictableTarget(admin.id, params.id);
     if (target instanceof NextResponse) {
       return target;
@@ -183,5 +198,20 @@ export async function DELETE(request: Request, context: { readonly params: Promi
       return response;
     }
     throw error;
+  }
+}
+
+function mockRestrictionResultResponse(result: MockUserRestrictionResult): NextResponse {
+  switch (result.kind) {
+    case "ok":
+      return NextResponse.json({ user: result.user });
+    case "not_found":
+      return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
+    case "forbidden":
+      return jsonError(
+        403,
+        result.reason,
+        result.reason === "self_restriction" ? "자기 자신은 제한할 수 없습니다." : "관리자 계정은 제한할 수 없습니다."
+      );
   }
 }

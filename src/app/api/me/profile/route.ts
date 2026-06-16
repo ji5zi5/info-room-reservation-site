@@ -9,6 +9,7 @@ import type { BookingStatus, ReservationStatus } from "@/lib/reservation-service
 import { requireUser, UnauthorizedSessionError } from "@/lib/session";
 import { buildStudentProfilePayload } from "@/lib/student-profile";
 import type { StudentProfilePayload, StudentProfileReservationRow, StudentProfileReservationSummary, StudentProfileSanctionRow, StudentProfileSanctionStatus, StudentProfileSanctionSummary, StudentProfileUserRow } from "@/lib/student-profile";
+import { shouldExposeStudentProfileSanctions } from "@/lib/student-profile-visibility";
 import type { StudyPeriod } from "@/lib/study-periods";
 
 type DbStudentProfileUser = { readonly bookingStatus: string; readonly generation: number; readonly name: string; readonly restrictedUntil: Date | null; readonly restrictionReason: string | null; readonly role: string; readonly studentNumber: string };
@@ -139,7 +140,7 @@ function buildDatabaseStudentProfile(input: BuildDatabaseStudentProfileInput): S
     ...recentPayload,
     currentReservations: currentPayload.currentReservations,
     reservationSummary: input.reservationSummary,
-    sanctionSummary: input.sanctionSummary
+    sanctionSummary: shouldExposeStudentProfileSanctions(user) ? input.sanctionSummary : recentPayload.sanctionSummary
   };
 }
 

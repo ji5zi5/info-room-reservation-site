@@ -10,9 +10,9 @@ import { AdminReservationsPanel } from "./admin-reservations-panel";
 import { AdminSettingsPanel } from "./admin-settings-panel";
 import { AdminStudentDetail } from "./admin-student-detail";
 import { AdminUsersPanel } from "./admin-users-panel";
-import { DEFAULT_RESTRICTION_DRAFT } from "./admin-console-state";
+import { DEFAULT_RESTRICTION_DRAFT, type AdminSection } from "./admin-console-state";
 import { csrfFetch, resetCsrfToken } from "../csrf-fetch";
-import { type AdminSection, useAdminConsole } from "./use-admin-console";
+import { useAdminConsole } from "./use-admin-console";
 
 const SECTION_LABELS: Record<AdminSection, string> = {
   audit: "감사",

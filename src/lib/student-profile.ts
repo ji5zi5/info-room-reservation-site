@@ -1,4 +1,11 @@
 import type { BookingStatus, ReservationStatus } from "./reservation-service";
+import {
+  EMPTY_STUDENT_PROFILE_SANCTION_SUMMARY,
+  getEffectiveBookingStatus,
+  getStudentProfileStatusMessage,
+  shouldExposeStudentProfileSanctions,
+  toStudentFacingProfileUser
+} from "./student-profile-visibility";
 import { STUDY_PERIODS, type StudyPeriod } from "./study-periods";
 
 export type EffectiveBookingStatus = BookingStatus;
@@ -104,7 +111,12 @@ export function buildStudentProfilePayload(input: StudentProfileInput): StudentP
     input.reservations.filter((reservation) => reservation.status === "CONFIRMED" && reservation.date >= input.kstToday)
   );
   const recentReservations = orderRecentReservations(input.reservations).slice(0, RECENT_RESERVATION_LIMIT);
-  const recentSanctions = orderRecentSanctions(input.sanctions).slice(0, RECENT_SANCTION_LIMIT);
+  const exposeSanctions = shouldExposeStudentProfileSanctions(input.user);
+  const recentSanctions = exposeSanctions ? orderRecentSanctions(input.sanctions).slice(0, RECENT_SANCTION_LIMIT) : [];
+  const sanctionSummary = exposeSanctions
+    ? summarizeStudentProfileSanctions(input.sanctions)
+    : EMPTY_STUDENT_PROFILE_SANCTION_SUMMARY;
+  const user = toStudentFacingProfileUser(input.user);
 
   return {
     currentReservations: currentReservations.map(serializeReservation),
@@ -112,46 +124,10 @@ export function buildStudentProfilePayload(input: StudentProfileInput): StudentP
     recentReservations: recentReservations.map(serializeReservation),
     recentSanctions: recentSanctions.map(serializeSanction),
     reservationSummary: summarizeStudentProfileReservations(input.reservations),
-    sanctionSummary: summarizeStudentProfileSanctions(input.sanctions),
+    sanctionSummary,
     statusMessage: getStudentProfileStatusMessage(effectiveStatus),
-    user: {
-      bookingStatus: input.user.bookingStatus,
-      generation: input.user.generation,
-      name: input.user.name,
-      restrictionReason: input.user.restrictionReason,
-      restrictedUntil: toIsoString(input.user.restrictedUntil),
-      role: input.user.role,
-      studentNumber: input.user.studentNumber
-    }
+    user
   };
-}
-
-export function getEffectiveBookingStatus(user: StudentProfileUserRow, now: Date): EffectiveBookingStatus {
-  switch (user.bookingStatus) {
-    case "ACTIVE":
-    case "SHADOW_BANNED":
-      return "ACTIVE";
-    case "BANNED":
-      return "BANNED";
-    case "RESTRICTED":
-      return user.restrictedUntil === null || user.restrictedUntil.getTime() > now.getTime() ? "RESTRICTED" : "ACTIVE";
-    default:
-      return assertNever(user.bookingStatus);
-  }
-}
-
-export function getStudentProfileStatusMessage(status: EffectiveBookingStatus): StudentProfileStatusMessage {
-  switch (status) {
-    case "ACTIVE":
-    case "SHADOW_BANNED":
-      return "예약 가능";
-    case "BANNED":
-      return "영구 제한";
-    case "RESTRICTED":
-      return "예약 제한";
-    default:
-      return assertNever(status);
-  }
 }
 
 export function summarizeStudentProfileReservations(

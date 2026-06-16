@@ -8,6 +8,7 @@ import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { enforceLoginIpRateLimit, enforceLoginRateLimit } from "@/lib/route-rate-limit";
 import { setSessionCookie } from "@/lib/session";
+import { maskStudentFacingSessionUser } from "@/lib/student-facing-session";
 
 const LoginRequestSchema = z.object({
   id: z.string().min(1),
@@ -50,7 +51,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       return jsonError(status, result.reason === "invalid_credentials" ? "invalid_credentials" : "server_error", result.message);
     }
 
-    const response = NextResponse.json({ user: result.user });
+    const response = NextResponse.json({ user: maskStudentFacingSessionUser(result.user) });
     setSessionCookie(response, result.token);
     return response;
   } catch (error) {

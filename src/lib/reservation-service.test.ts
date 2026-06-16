@@ -4,7 +4,9 @@ import {
   buildNoShowBan,
   buildStudentCancellationRestriction,
   createMemoryReservationStore,
-  reserveStudyPeriod
+  reserveStudyPeriod,
+  type ReservationStore,
+  type TransactionalReservationStore
 } from "./reservation-service";
 
 describe("reservation service", () => {
@@ -129,6 +131,42 @@ describe("reservation service", () => {
         userId: "user-1"
       })
     ).resolves.toMatchObject({ kind: "confirmed", reservation: { reason: "자습" } });
+  });
+
+  it("returns shadow_banned before creating a reservation for shadow-banned users", async () => {
+    const innerStore = {
+      countConfirmedReservations: async () => 0,
+      createReservation: async () => {
+        throw new Error("Shadow-banned users must not create reservations.");
+      },
+      findReservation: async () => null,
+      getPeriodSetting: async () => ({
+        capacity: 10,
+        closeTime: "23:00",
+        date: "2026-06-11",
+        enabled: true,
+        openTime: "08:00",
+        studyPeriod: "EIGHTH" as const
+      }),
+      getUserBookingState: async () => ({
+        bookingStatus: "SHADOW_BANNED" as const,
+        restrictedUntil: null
+      })
+    } satisfies ReservationStore;
+    const store = {
+      transaction: async <T>(operation: (store: ReservationStore) => Promise<T>) => operation(innerStore)
+    } satisfies TransactionalReservationStore;
+
+    await expect(
+      reserveStudyPeriod({
+        date: "2026-06-11",
+        now: new Date("2026-06-11T09:00:00+09:00"),
+        reason: "자습",
+        store,
+        studyPeriod: "EIGHTH",
+        userId: "user-shadow"
+      })
+    ).resolves.toEqual({ kind: "error", reason: "shadow_banned" });
   });
 
   it("blocks advance reservations after this week's Friday", async () => {

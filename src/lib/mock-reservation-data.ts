@@ -173,7 +173,7 @@ export function cancelMockReservation(input: {
     reservations[index] = nextReservation;
 
     let nextUser = user;
-    if (reservation.user.id === input.user.id && input.user.role !== "ADMIN") {
+    if (reservation.user.id === input.user.id && input.user.role !== "ADMIN" && user.bookingStatus !== "SHADOW_BANNED") {
       const restriction = buildStudentCancellationRestriction(input.now);
       nextUser = {
         ...user,

@@ -294,8 +294,8 @@
 }
 
 .user-line[data-selected="true"] {
-  background: color-mix(in srgb, var(--blue) 7%, var(--white));
-  border-color: color-mix(in srgb, var(--blue) 28%, var(--silver));
+  background: color-mix(in srgb, var(--fog) 56%, var(--white));
+  border-color: var(--silver);
 }
 
 .user-line-main,
@@ -377,7 +377,7 @@
 }
 
 .status-chip[data-status="ACTIVE"] {
-  color: var(--blue);
+  color: var(--graphite);
 }
 
 .status-chip[data-status="BANNED"],
@@ -386,8 +386,8 @@
 }
 
 .status-chip[data-status="SHADOW_BANNED"] {
-  background: color-mix(in srgb, #7c3aed 10%, var(--fog));
-  color: #7c3aed;
+  background: var(--fog);
+  color: var(--graphite);
 }
 
 /* Blacklist panel */
@@ -411,11 +411,11 @@
 }
 
 .bl-count {
-  background: color-mix(in srgb, #7c3aed 12%, var(--fog));
-  border-radius: 999px;
-  color: #7c3aed;
+  background: var(--fog);
+  border-radius: var(--radius);
+  color: var(--graphite);
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: 600;
   padding: 2px 9px;
 }
 
@@ -440,12 +440,12 @@
 }
 
 .bl-card--active {
-  background: color-mix(in srgb, #7c3aed 6%, var(--white));
-  border-color: color-mix(in srgb, #7c3aed 22%, var(--silver));
+  background: color-mix(in srgb, var(--fog) 56%, var(--white));
+  border-color: var(--silver);
 }
 
 .bl-card[data-selected="true"] {
-  border-color: color-mix(in srgb, var(--blue) 40%, var(--silver));
+  border-color: var(--silver);
 }
 
 .bl-card-info {
@@ -479,9 +479,9 @@
 }
 
 .bl-reason {
-  background: color-mix(in srgb, #7c3aed 10%, var(--fog));
+  background: var(--white);
   border-radius: var(--radius);
-  color: #7c3aed;
+  color: var(--graphite);
   font-size: 0.78rem;
   padding: 2px 8px;
 }
@@ -541,13 +541,18 @@
 }
 
 .restriction-duration-presets button[data-active="true"] {
-  background: color-mix(in srgb, var(--blue) 10%, var(--white));
-  border-color: color-mix(in srgb, var(--blue) 35%, var(--silver));
-  color: var(--blue);
+  background: var(--fog);
+  border-color: var(--silver);
+  color: var(--ink);
 }
 
 .restriction-form .danger-button {
+  color: var(--graphite);
   width: 100%;
+}
+
+.restriction-form .danger-button:disabled {
+  color: var(--silver);
 }
 
 .detail-section {

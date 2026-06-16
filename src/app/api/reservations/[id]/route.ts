@@ -10,6 +10,7 @@ import { hashRequestClientIp } from "@/lib/request-source";
 import { buildStudentCancellationRestriction } from "@/lib/reservation-service";
 import { enforceReservationRateLimit } from "@/lib/route-rate-limit";
 import { createMockSessionToken, requireSession, setSessionCookie, UnauthorizedSessionError } from "@/lib/session";
+import { maskStudentFacingSessionUser } from "@/lib/student-facing-session";
 
 export async function DELETE(request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
   const requestSafetyError = requireMutatingRequestSafety(request);
@@ -37,7 +38,11 @@ export async function DELETE(request: Request, context: { readonly params: Promi
       if (result.kind === "forbidden") {
         return jsonError(403, "forbidden", "예약을 취소할 권한이 없습니다.");
       }
-      const response = NextResponse.json({ reservation: result.reservation, user: result.user });
+      const { date, id, reason, status, studyPeriod, userId } = result.reservation;
+      const response = NextResponse.json({
+        reservation: { date, id, reason, status, studyPeriod, userId },
+        user: maskStudentFacingSessionUser(result.user)
+      });
       setSessionCookie(response, createMockSessionToken(result.user));
       return response;
     }
@@ -60,7 +65,7 @@ export async function DELETE(request: Request, context: { readonly params: Promi
         where: { id: reservation.id }
       });
 
-      if (reservation.userId === user.id && user.role !== "ADMIN") {
+      if (reservation.userId === user.id && user.role !== "ADMIN" && user.bookingStatus !== "SHADOW_BANNED") {
         const restriction = buildStudentCancellationRestriction(new Date());
         const updatedUser = await transaction.user.update({
           data: restriction,

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { filterAdminUsers, parseAdminUserStatusFilter } from "@/lib/admin-users";
+import type { Prisma } from "@prisma/client";
+
+import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
@@ -16,13 +18,24 @@ export async function GET(request: Request): Promise<NextResponse> {
     if (isNoDatabaseMockMode()) {
       return NextResponse.json({ users: getMockAdminUsers({ bookingStatus, query }) });
     }
+    const trimmedQuery = query.trim();
+    const where = {
+      ...(bookingStatus === "ALL" ? {} : { bookingStatus }),
+      ...(trimmedQuery
+        ? {
+            OR: [
+              { name: { contains: trimmedQuery, mode: "insensitive" as const } },
+              { studentNumber: { contains: trimmedQuery, mode: "insensitive" as const } }
+            ]
+          }
+        : {})
+    } satisfies Prisma.UserWhereInput;
     const users = await prisma.user.findMany({
       orderBy: [{ bookingStatus: "desc" }, { studentNumber: "asc" }],
-      take: 300
+      take: 100,
+      where
     });
-    return NextResponse.json({
-      users: filterAdminUsers(users, { bookingStatus, query }).slice(0, 100)
-    });
+    return NextResponse.json({ users });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);

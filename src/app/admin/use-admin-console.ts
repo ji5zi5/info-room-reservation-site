@@ -2,9 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { parseAdminReservationStatus } from "@/lib/admin-reservations";
-import { parseAdminUserStatusFilter } from "@/lib/admin-users";
-
 import {
   applyUserRestriction,
   cancelAdminReservation,
@@ -14,7 +11,6 @@ import {
   fetchAdminSettings,
   fetchAdminStatistics,
   fetchAdminUserDetail,
-  fetchAdminUsers,
   markReservationNoShow,
   removeUserRestriction,
   saveAdminSettings,
@@ -23,7 +19,10 @@ import {
 } from "./admin-api-client";
 import { todayKst } from "./admin-date";
 import { buildReservationCsv } from "./admin-csv";
+import { readReservationStatusFromLocation, writeReservationStatusToHistory } from "./admin-console-url";
 import { firstAdminReadError } from "./admin-read-error";
+import { patchRestrictionDrafts } from "./admin-restriction-drafts";
+import { fetchAdminUsersForSection } from "./admin-user-fetching";
 import {
   DEFAULT_RESTRICTION_DRAFT,
   type AdminConsoleState,
@@ -45,7 +44,7 @@ import {
   type StudyPeriod
 } from "./admin-types";
 
-export type { AdminSection } from "./admin-console-state";
+const SHADOW_BAN_RESTRICTION = { days: null, reason: "블랙리스트", status: "SHADOW_BANNED" } as const;
 
 export function useAdminConsole(): AdminConsoleState {
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
@@ -69,7 +68,7 @@ export function useAdminConsole(): AdminConsoleState {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    setStatusFilter(parseAdminReservationStatus(new URLSearchParams(window.location.search).get("status")));
+    setStatusFilter(readReservationStatusFromLocation(window.location));
   }, []);
 
   useEffect(() => {
@@ -111,7 +110,7 @@ export function useAdminConsole(): AdminConsoleState {
         studyPeriod: reservationPeriodFilter
       }),
       fetchAdminStatistics({ from: date, to: date }),
-      fetchAdminUsers({ query: userQuery, status: userStatusFilter }),
+      fetchAdminUsersForSection({ activeSection, query: userQuery, status: userStatusFilter }),
       fetchAdminAuditActions({ action: auditActionFilter, query: auditQuery })
     ]);
     const readError = firstAdminReadError([
@@ -184,11 +183,7 @@ export function useAdminConsole(): AdminConsoleState {
   }
 
   async function applyShadowBan(userId: string): Promise<void> {
-    const ok = await applyUserRestriction(userId, {
-      days: null,
-      reason: "블랙리스트",
-      status: "SHADOW_BANNED"
-    });
+    const ok = await applyUserRestriction(userId, SHADOW_BAN_RESTRICTION);
     setToast(ok ? "블랙리스트에 추가했습니다." : "블랙리스트 추가 실패");
     await refresh();
   }
@@ -199,9 +194,7 @@ export function useAdminConsole(): AdminConsoleState {
 
   function selectStatus(nextStatus: AdminReservationStatusFilter): void {
     setStatusFilter(nextStatus);
-    const url = new URL(window.location.href);
-    url.searchParams.set("status", nextStatus);
-    window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+    writeReservationStatusToHistory(window.location, window.history, nextStatus);
   }
 
   async function viewUser(userId: string): Promise<void> {
@@ -230,10 +223,7 @@ export function useAdminConsole(): AdminConsoleState {
   }
 
   function setRestrictionDraft(userId: string, patch: Partial<UserRestrictionDraft>): void {
-    setRestrictionDrafts((current) => ({
-      ...current,
-      [userId]: { ...(current[userId] ?? DEFAULT_RESTRICTION_DRAFT), ...patch }
-    }));
+    setRestrictionDrafts((current) => patchRestrictionDrafts(current, userId, patch));
   }
 
   return {
