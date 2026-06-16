@@ -16,7 +16,7 @@ import { type AdminSection, useAdminConsole } from "./use-admin-console";
 
 const SECTION_LABELS: Record<AdminSection, string> = {
   audit: "감사",
-  blacklist: "블랙리스트",
+  blacklist: "블랙",
   dashboard: "운영",
   reservations: "예약자",
   settings: "설정",

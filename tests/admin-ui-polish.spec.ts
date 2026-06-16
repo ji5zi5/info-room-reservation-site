@@ -13,6 +13,16 @@ const LOCAL_STUDENT_LOGIN_ID = process.env.E2E_STUDENT_LOGIN_ID ?? localOnlyEnv(
 const LOCAL_STUDENT_NUMBER = process.env.E2E_STUDENT_NUMBER ?? localOnlyEnv("LOCAL_STUDENT_NUMBER") ?? LOCAL_STUDENT_LOGIN_ID;
 const STUDENT_LOGIN_PASSWORD = process.env.E2E_STUDENT_LOGIN_PASSWORD ?? localOnlyEnv("LOCAL_STUDENT_LOGIN_PASSWORD") ?? "password";
 const TEST_IP_RUN_OCTET = (Date.now() % 200) + 1;
+const MOCK_ADMIN_USER = {
+  bookingStatus: "ACTIVE",
+  generation: 0,
+  id: "mock-admin",
+  name: "관리자",
+  restrictedUntil: null,
+  restrictionReason: null,
+  role: "ADMIN",
+  studentNumber: "0"
+} as const;
 let testIpCounter = 0;
 
 async function login(page: Page, loginId: string, fixedIso = e2eNow()): Promise<void> {
@@ -106,19 +116,11 @@ async function mockAdminStudentManagement(page: Page, selectedStudentNumber: str
   await page.route("**/api/me", async (route) => {
     await route.fulfill({
       contentType: "application/json",
-      json: {
-        user: {
-          bookingStatus: "ACTIVE",
-          generation: 0,
-          id: "mock-admin",
-          name: "관리자",
-          restrictedUntil: null,
-          restrictionReason: null,
-          role: "ADMIN",
-          studentNumber: "0"
-        }
-      }
+      json: { user: MOCK_ADMIN_USER }
     });
+  });
+  await page.route("**/api/auth/riro/login", async (route) => {
+    await route.fulfill({ contentType: "application/json", json: { user: MOCK_ADMIN_USER } });
   });
 
   await page.route("**/api/admin/**", async (route) => {
@@ -201,6 +203,20 @@ async function mockAdminStudentManagement(page: Page, selectedStudentNumber: str
     }
     await route.fulfill({ contentType: "application/json", json: { error: { message: "Unexpected mocked admin route" } }, status: 404 });
   });
+}
+
+async function openMockedAdminConsole(page: Page): Promise<void> {
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  const adminHeading = page.getByRole("heading", { name: "관리자" });
+  const loginButton = page.getByRole("button", { name: "인증하기" });
+  await expect(adminHeading.or(loginButton)).toBeVisible();
+  if (await adminHeading.isVisible()) {
+    return;
+  }
+  await page.getByLabel("리로스쿨 ID").fill("admin");
+  await page.getByLabel("리로스쿨 PW").fill("password");
+  await loginButton.click();
+  await expect(adminHeading).toBeVisible();
 }
 
 function mockAdminPeriods() {
@@ -293,7 +309,7 @@ test("admin student management keeps empty detail from clipping the 390px viewpo
 test("mobile admin navigation stays compact above the workspace", async ({ page }) => {
   await page.setViewportSize({ height: 900, width: 390 });
   await mockAdminStudentManagement(page, "25-39000");
-  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  await openMockedAdminConsole(page);
 
   const nav = page.locator(".admin-nav-panel");
   const sectionNav = page.locator(".admin-section-nav");
@@ -317,6 +333,8 @@ test("mobile admin navigation stays compact above the workspace", async ({ page 
     rootScrollWidth: document.documentElement.scrollWidth
   }));
 
+  await expect(sectionNav.locator("button")).toHaveCount(6);
+  await expect(sectionNav.getByRole("button", { name: "블랙" })).toBeVisible();
   expect(sectionNavBox.height, "admin menu should fit in one compact row").toBeLessThanOrEqual(44);
   expect(buttonRows, "admin menu buttons should not wrap into extra rows").toHaveLength(1);
   expect(navBox.height, "admin navigation should leave room for the workspace").toBeLessThanOrEqual(190);
@@ -359,6 +377,10 @@ test("admin panels keep concise headings and open student detail space only when
   await page.getByRole("button", { name: "예약자" }).click();
   await expect(page.getByText("검색 · 노쇼 · 관리자 취소 · 명단 복사")).toHaveCount(0);
   await expect(page.locator(".student-detail-panel")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "블랙" }).click();
+  await expect(page.getByText("블랙리스트 유저는 예약 시 랜덤 서버 에러가 발생")).toHaveCount(0);
+  await expect(page.getByText("이름이나 학번을 검색하면 아래에 결과가 표시됩니다.")).toHaveCount(0);
 
   await page.getByRole("button", { name: "설정" }).click();
   await expect(page.getByText("시간 설정 · 운영 현황 · 학생 관리")).toHaveCount(0);
@@ -423,8 +445,7 @@ test("mobile admin student detail flows below the list without clipping", async 
   const studentNumber = "25-39000";
   await page.setViewportSize({ height: 900, width: 390 });
   await mockAdminStudentManagement(page, studentNumber);
-  await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
+  await openMockedAdminConsole(page);
   await page.getByRole("button", { name: "학생" }).click();
   const studentRow = page.locator(".user-line").filter({ hasText: studentNumber }).first();
   await expect(studentRow).toBeVisible();

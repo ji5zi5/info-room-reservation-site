@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, EyeOff, ShieldOff, UserX } from "lucide-react";
+import { Ban, ShieldOff, UserX } from "lucide-react";
 import type { ReactElement } from "react";
 
 import type { AdminUser } from "./admin-types";
@@ -37,12 +37,9 @@ export function AdminBlacklistPanel({
       <div className="topbar">
         <div>
           <h2>블랙리스트 관리</h2>
-          <p className="muted">블랙리스트 유저는 예약 시 랜덤 서버 에러가 발생하며, 본인은 제한 사실을 알 수 없습니다.</p>
         </div>
-        <EyeOff aria-hidden="true" size={22} />
       </div>
 
-      {/* 현재 블랙리스트 */}
       <div className="bl-section">
         <div className="bl-section-head">
           <UserX size={15} />
@@ -79,14 +76,10 @@ export function AdminBlacklistPanel({
         </div>
       </div>
 
-      {/* 블랙리스트 추가 */}
       <div className="bl-section">
         <div className="bl-section-head">
           <Ban size={15} />
           <h3>학생 검색하여 추가</h3>
-        </div>
-        <div className="bl-search-note">
-          이름이나 학번을 검색하면 아래에 결과가 표시됩니다.
         </div>
         <label className="field">
           <span>이름 또는 학번</span>
