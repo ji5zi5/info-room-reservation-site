@@ -20,6 +20,7 @@ type LocalLoginAccount = {
   readonly enabled: boolean;
   readonly id: string;
   readonly password: string;
+  readonly passwordAliases: readonly string[];
   readonly profile: RiroProfile;
   readonly weakPasswordMessage: string;
 };
@@ -41,7 +42,7 @@ export function authenticateLocalLogin(
     return passwordSafetyError;
   }
 
-  if (!constantTimeEqual(input.password, account.password)) {
+  if (!constantTimeEqualAny(input.password, [account.password, ...account.passwordAliases])) {
     return {
       kind: "error",
       message: "아이디 또는 비밀번호가 틀렸습니다.",
@@ -66,6 +67,7 @@ export function buildLocalAdminLoginAccount(
     enabled,
     id: account.id,
     password: account.password,
+    passwordAliases: [],
     profile: {
       generation: 0,
       name: "관리자",
@@ -88,6 +90,7 @@ export function buildLocalStudentLoginAccount(
     enabled,
     id: account.id,
     password: account.password,
+    passwordAliases: [account.id],
     profile: {
       generation: 0,
       name: "일반 계정",
@@ -170,6 +173,14 @@ function constantTimeEqual(left: string, right: string): boolean {
   const leftDigest = createHash("sha256").update(left).digest();
   const rightDigest = createHash("sha256").update(right).digest();
   return timingSafeEqual(leftDigest, rightDigest);
+}
+
+function constantTimeEqualAny(input: string, candidates: readonly string[]): boolean {
+  let matches = false;
+  for (const candidate of candidates) {
+    matches = constantTimeEqual(input, candidate) || matches;
+  }
+  return matches;
 }
 
 function normalizeOptional(value: string | undefined): string | null {
