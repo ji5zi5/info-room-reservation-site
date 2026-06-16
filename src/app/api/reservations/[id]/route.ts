@@ -39,11 +39,12 @@ export async function DELETE(request: Request, context: { readonly params: Promi
         return jsonError(403, "forbidden", "예약을 취소할 권한이 없습니다.");
       }
       const { date, id, reason, status, studyPeriod, userId } = result.reservation;
+      const publicUser = maskStudentFacingSessionUser(result.user) ?? result.user;
       const response = NextResponse.json({
         reservation: { date, id, reason, status, studyPeriod, userId },
-        user: maskStudentFacingSessionUser(result.user)
+        user: publicUser
       });
-      setSessionCookie(response, createMockSessionToken(result.user));
+      setSessionCookie(response, createMockSessionToken(publicUser));
       return response;
     }
 

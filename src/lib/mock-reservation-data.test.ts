@@ -123,6 +123,20 @@ describe("mock reservation data", () => {
       bookingStatus: "SHADOW_BANNED",
       restrictionReason: "블랙리스트"
     });
+    expect(
+      reserveMockStudyPeriod({
+        date: "2026-06-14",
+        now: new Date("2026-06-14T00:45:00.000Z"),
+        reason: "다시 예약",
+        studyPeriod: "FIRST",
+        user: {
+          ...shadowBannedStudent,
+          bookingStatus: "ACTIVE",
+          restrictionReason: null,
+          restrictedUntil: null
+        }
+      })
+    ).toEqual({ kind: "error", reason: "shadow_banned" });
   });
 
   it("builds a student profile from mock users and reservations after cancellation", () => {

@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RateLimitResult } from "@/lib/rate-limit";
@@ -144,7 +146,13 @@ describe("student reservation cancellation shadow-ban handling", () => {
     routeMocks.userSanctionUpdateMany.mockResolvedValue({});
     routeMocks.auditLogCreate.mockResolvedValue({});
     routeMocks.transaction.mockImplementation(async (operation) => operation(transactionClient()));
-    routeMocks.createMockSessionToken.mockReturnValue("mock-shadow-token");
+    routeMocks.createMockSessionToken.mockImplementation((user) => {
+      const payload = { id: `mock-session-${user.id}`, user };
+      return `mock.${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}`;
+    });
+    routeMocks.setSessionCookie.mockImplementation((response, token) => {
+      response.headers.append("Set-Cookie", `info_room_session=${token}; Path=/; HttpOnly; SameSite=Lax`);
+    });
   });
 
   it("does not downgrade a database shadow-ban when the student cancels an existing reservation", async () => {
@@ -165,7 +173,7 @@ describe("student reservation cancellation shadow-ban handling", () => {
     expect(routeMocks.auditLogCreate).not.toHaveBeenCalled();
   });
 
-  it("masks mock shadow-ban cancellation responses while preserving the raw mock session token", async () => {
+  it("masks mock shadow-ban cancellation responses and the refreshed mock session cookie", async () => {
     routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
     routeMocks.cancelMockReservation.mockReturnValue({
       kind: "cancelled",
@@ -178,9 +186,9 @@ describe("student reservation cancellation shadow-ban handling", () => {
 
     expect(response.status).toBe(200);
     expect(routeMocks.createMockSessionToken).toHaveBeenCalledWith(
-      expect.objectContaining({ bookingStatus: "SHADOW_BANNED", restrictionReason: "블랙리스트" })
+      expect.objectContaining({ bookingStatus: "ACTIVE", restrictedUntil: null, restrictionReason: null })
     );
-    expect(routeMocks.setSessionCookie).toHaveBeenCalledWith(response, "mock-shadow-token");
+    expect(routeMocks.setSessionCookie).toHaveBeenCalledWith(response, expect.stringMatching(/^mock\./u));
     const text = await response.text();
     expect(JSON.parse(text)).toMatchObject({
       user: {
@@ -191,6 +199,14 @@ describe("student reservation cancellation shadow-ban handling", () => {
     });
     expect(text).not.toContain("SHADOW_BANNED");
     expect(text).not.toContain("블랙리스트");
+    expect(text).not.toContain("2026-07-01");
+    const decodedCookie = decodeMockSessionCookie(response);
+    expect(decodedCookie).toContain('"bookingStatus":"ACTIVE"');
+    expect(decodedCookie).toContain('"restrictionReason":null');
+    expect(decodedCookie).toContain('"restrictedUntil":null');
+    expect(decodedCookie).not.toContain("SHADOW_BANNED");
+    expect(decodedCookie).not.toContain("블랙리스트");
+    expect(decodedCookie).not.toContain("2026-07-01");
   });
 });
 
@@ -234,4 +250,11 @@ function mockCancelledReservation(): MockReservation {
       studentNumber: shadowBannedStudent.studentNumber
     }
   };
+}
+
+function decodeMockSessionCookie(response: Response): string {
+  const setCookie = response.headers.get("set-cookie") ?? "";
+  const cookieValue = setCookie.match(/info_room_session=([^;]+)/u)?.[1] ?? "";
+  const encodedPayload = cookieValue.replace(/^mock\./u, "");
+  return Buffer.from(encodedPayload, "base64url").toString("utf8");
 }
