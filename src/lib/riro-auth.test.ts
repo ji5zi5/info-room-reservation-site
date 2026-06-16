@@ -27,6 +27,38 @@ describe("riro auth parser", () => {
     });
   });
 
+  it("returns a typed invalid credential result when RiroSchool returns current email login 200 response", () => {
+    expect(
+      interpretLoginJson({
+        cid: "fake@gmail.com",
+        code: 200,
+        data: { lock: false, set_app: [], url: "/user.php?action=signin" },
+        msg: "아이디가 없거나 비밀번호가 맞지 않습니다. (1/5회 오류)",
+        token: null
+      })
+    ).toEqual({
+      kind: "error",
+      message: "아이디가 없거나 비밀번호가 맞지 않습니다. (1/5회 오류)",
+      reason: "invalid_credentials"
+    });
+  });
+
+  it("returns a typed invalid credential result when RiroSchool returns current email login 401 response", () => {
+    expect(
+      interpretLoginJson({
+        cid: "student@gmail.com",
+        code: 401,
+        data: { lock: false, set_app: [], url: "/user.php?action=signin" },
+        msg: "아이디가 없거나 비밀번호가 맞지 않습니다. (1/5회 오류)",
+        token: null
+      })
+    ).toEqual({
+      kind: "error",
+      message: "아이디가 없거나 비밀번호가 맞지 않습니다. (1/5회 오류)",
+      reason: "invalid_credentials"
+    });
+  });
+
   it("returns a typed invalid credential result when RiroSchool returns current 103 response", () => {
     expect(
       interpretLoginJson({

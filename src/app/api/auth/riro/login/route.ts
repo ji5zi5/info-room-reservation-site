@@ -11,7 +11,7 @@ import { setSessionCookie } from "@/lib/session";
 import { maskStudentFacingSessionUser } from "@/lib/student-facing-session";
 
 const LoginRequestSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().trim().min(1),
   password: z.string().min(1)
 });
 

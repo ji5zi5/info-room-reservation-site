@@ -117,6 +117,17 @@ describe("Riro login route", () => {
     expect(routeMocks.loginUserWithRiro).toHaveBeenCalledTimes(1);
   });
 
+  it("trims an email-shaped login id before rate limiting and authenticating", async () => {
+    const response = await POST(loginRequest(JSON.stringify({ id: "  student@gmail.com  ", password: "example-password" })));
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.enforceLoginRateLimit).toHaveBeenCalledWith(expect.any(Request), "student@gmail.com");
+    expect(routeMocks.loginUserWithRiro).toHaveBeenCalledWith({
+      id: "student@gmail.com",
+      password: "example-password"
+    });
+  });
+
   it("keeps no-database mock login free from rate-limit buckets", async () => {
     routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
 

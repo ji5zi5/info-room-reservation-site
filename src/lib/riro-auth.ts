@@ -10,7 +10,7 @@ const LoginJsonSchema = z
   })
   .passthrough();
 
-const INVALID_CREDENTIAL_CODES = new Set(["103", "400", "902"]);
+const INVALID_CREDENTIAL_CODES = new Set(["103", "200", "400", "401", "902"]);
 
 export type RiroRole = "STUDENT" | "TEACHER";
 
