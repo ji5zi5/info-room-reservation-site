@@ -282,12 +282,49 @@ test("admin student management keeps empty detail from clipping the 390px viewpo
   await page.getByRole("button", { name: "학생" }).click();
   await expect(page.getByRole("heading", { name: "학생 관리" })).toBeVisible();
 
-  await expect(page.locator(".student-detail-panel.empty-detail")).toBeHidden();
+  await expect(page.locator(".student-detail-panel")).toHaveCount(0);
   const metrics = await page.evaluate(() => ({
     rootClientWidth: document.documentElement.clientWidth,
     rootScrollWidth: document.documentElement.scrollWidth
   }));
   expect(metrics.rootScrollWidth, "student admin view should not have horizontal clipping").toBeLessThanOrEqual(metrics.rootClientWidth);
+});
+
+test("mobile admin navigation stays compact above the workspace", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 390 });
+  await mockAdminStudentManagement(page, "25-39000");
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+
+  const nav = page.locator(".admin-nav-panel");
+  const sectionNav = page.locator(".admin-section-nav");
+  const dashboardTopbar = page.locator(".admin-dashboard-topbar");
+  await expect(page.getByRole("heading", { name: "관리자" })).toBeVisible();
+  const navBox = await visibleBox(nav, "mobile admin navigation");
+  const sectionNavBox = await visibleBox(sectionNav, "mobile admin section navigation");
+  const dashboardTopbarBox = await visibleBox(dashboardTopbar, "mobile dashboard topbar");
+  const dashboardHeadingBox = await visibleBox(page.getByRole("heading", { name: "운영 대시보드" }), "dashboard title");
+  const dashboardActionBox = await visibleBox(
+    dashboardTopbar.getByRole("button", { name: "통계 복사" }),
+    "dashboard copy action"
+  );
+  const dashboardHeadingCenterY = dashboardHeadingBox.y + dashboardHeadingBox.height / 2;
+  const dashboardActionCenterY = dashboardActionBox.y + dashboardActionBox.height / 2;
+  const buttonRows = await sectionNav.locator("button").evaluateAll((buttons) =>
+    [...new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top)))]
+  );
+  const metrics = await page.evaluate(() => ({
+    rootClientWidth: document.documentElement.clientWidth,
+    rootScrollWidth: document.documentElement.scrollWidth
+  }));
+
+  expect(sectionNavBox.height, "admin menu should fit in one compact row").toBeLessThanOrEqual(44);
+  expect(buttonRows, "admin menu buttons should not wrap into extra rows").toHaveLength(1);
+  expect(navBox.height, "admin navigation should leave room for the workspace").toBeLessThanOrEqual(190);
+  expect(dashboardTopbarBox.height, "dashboard actions should not create a tall icon-only row").toBeLessThanOrEqual(48);
+  expect(Math.abs(Math.round(dashboardHeadingCenterY - dashboardActionCenterY))).toBeLessThanOrEqual(4);
+  expect(metrics.rootScrollWidth, "compact admin nav should not create horizontal clipping").toBeLessThanOrEqual(
+    metrics.rootClientWidth
+  );
 });
 
 test("admin E2E credential guard treats only loopback targets as local", () => {
@@ -312,7 +349,7 @@ test("admin panels keep concise headings and open student detail space only when
 
   await expect(page.getByText("현황 · 명단 · 학생 제재 · 설정")).toHaveCount(0);
   await expect(page.getByText("신청 현황 · 마감 상태 · Discord 발송")).toHaveCount(0);
-  await expect(page.locator(".student-detail-panel.empty-detail")).toHaveCount(0);
+  await expect(page.locator(".student-detail-panel")).toHaveCount(0);
   await expect(page.locator(".admin-workspace")).toHaveAttribute("data-detail", "closed");
   const dashboardTracks = await page
     .locator(".admin-workspace")
@@ -321,7 +358,7 @@ test("admin panels keep concise headings and open student detail space only when
 
   await page.getByRole("button", { name: "예약자" }).click();
   await expect(page.getByText("검색 · 노쇼 · 관리자 취소 · 명단 복사")).toHaveCount(0);
-  await expect(page.locator(".student-detail-panel.empty-detail")).toHaveCount(0);
+  await expect(page.locator(".student-detail-panel")).toHaveCount(0);
 
   await page.getByRole("button", { name: "설정" }).click();
   await expect(page.getByText("시간 설정 · 운영 현황 · 학생 관리")).toHaveCount(0);

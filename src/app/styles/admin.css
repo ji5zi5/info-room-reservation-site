@@ -20,8 +20,13 @@
   padding: 28px;
 }
 
+.admin-nav-panel .brand-row {
+  justify-content: flex-start;
+}
+
 .admin-nav-panel h1 {
-  font-size: 2rem;
+  font-size: 1.8rem;
+  line-height: 1.08;
 }
 
 .admin-section-nav {
@@ -227,6 +232,10 @@
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.admin-dashboard-topbar {
+  align-items: center;
 }
 
 .user-list {
@@ -537,7 +546,7 @@
   }
 
   .admin-section-nav {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .admin-section-nav button {
@@ -548,6 +557,16 @@
     padding: 22px;
   }
 
+  .admin-dashboard-topbar {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .admin-dashboard-topbar .admin-action-row,
+  .admin-dashboard-topbar .ghost-button {
+    width: auto;
+  }
+
   .student-detail-panel[data-open="true"] {
     order: 0;
   }
@@ -555,11 +574,14 @@
 
 @media (max-width: 640px) {
   .admin-nav-panel {
+    align-items: end;
     gap: 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
     padding: 14px 16px;
   }
 
   .admin-nav-panel .brand-row {
+    grid-column: 1 / -1;
     min-height: 34px;
   }
 
@@ -569,22 +591,30 @@
   }
 
   .admin-nav-panel h1 {
-    font-size: 1.52rem;
+    font-size: 1.32rem;
     line-height: 1.08;
   }
 
-  .admin-title-block {
-    display: grid;
-    gap: 4px;
+  .admin-section-nav {
+    gap: 5px;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
-  .admin-title-block .muted {
-    font-size: 0.8rem;
+  .admin-section-nav button {
+    gap: 0;
+    min-height: 36px;
+    padding: 0 6px;
+  }
+
+  .admin-section-nav button svg {
+    display: none;
   }
 
   .admin-date-picker {
     align-items: center;
     gap: 8px;
+    grid-column: 1;
     grid-template-columns: auto minmax(0, 1fr);
     margin-top: 0;
   }
@@ -594,8 +624,10 @@
   }
 
   .admin-nav-panel > .ghost-button {
-    justify-self: center;
+    grid-column: 2;
+    justify-self: end;
     min-height: 38px;
+    padding-inline: 10px;
     width: auto;
   }
 
@@ -607,16 +639,6 @@
 
   .admin-workspace {
     gap: 14px;
-  }
-
-  .admin-section-nav {
-    gap: 6px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .admin-section-nav button {
-    min-height: 38px;
-    padding: 0 10px;
   }
 
   .admin-dashboard-grid {
@@ -650,6 +672,11 @@
   .admin-action-row,
   .admin-action-row .ghost-button {
     width: 100%;
+  }
+
+  .admin-dashboard-topbar .admin-action-row,
+  .admin-dashboard-topbar .ghost-button {
+    width: auto;
   }
 
   .student-detail-head {

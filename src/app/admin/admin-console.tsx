@@ -50,9 +50,6 @@ export function AdminConsole(): ReactElement {
             <span className="brand-mark">
               <CalendarClock size={22} />
             </span>
-            <strong>정보실 운영</strong>
-          </div>
-          <div className="admin-title-block">
             <h1>관리자</h1>
           </div>
           <nav className="admin-section-nav" aria-label="관리자 메뉴">

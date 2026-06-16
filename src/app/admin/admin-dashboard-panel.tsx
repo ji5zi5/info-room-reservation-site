@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Bell, ClipboardList, Send, TrendingUp, Users } from "lucide-react";
+import { AlertTriangle, ClipboardList, Send, TrendingUp, Users } from "lucide-react";
 
 import { isStaleSendingDelivery } from "@/lib/closed-period-notifications";
 
@@ -24,7 +24,7 @@ export function AdminDashboardPanel({
 
   return (
     <section className="admin-panel stack">
-      <div className="topbar">
+      <div className="topbar admin-dashboard-topbar">
         <div>
           <h2>운영 대시보드</h2>
         </div>
@@ -35,7 +35,6 @@ export function AdminDashboardPanel({
               통계 복사
             </button>
           ) : null}
-          <Bell aria-hidden="true" size={22} />
         </div>
       </div>
       {statistics ? (
