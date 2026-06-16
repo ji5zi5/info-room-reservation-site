@@ -3,6 +3,7 @@
 import { ShieldOff, UserX } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 
+import { adminAccountDescription, adminAccountName } from "./admin-account-labels";
 import type { UserRestrictionDraft } from "./admin-console-state";
 import { AdminStudentRestrictionForm } from "./admin-student-restriction-form";
 import type { AdminUserDetail } from "./admin-types";
@@ -35,8 +36,8 @@ export function AdminStudentDetail({
       <div className="student-detail-head">
         <div>
           <span className="status-chip" data-status={detail.user.bookingStatus}>{statusLabel(detail.user.bookingStatus)}</span>
-          <h3>{detail.user.name}</h3>
-          <p className="muted">{detail.user.studentNumber} · {detail.user.generation}기</p>
+          <h3>{adminAccountName(detail.user)}</h3>
+          <p className="muted">{adminAccountDescription(detail.user)}</p>
         </div>
         {onClose ? <button className="icon-button" type="button" aria-label="학생 상세 닫기" onClick={onClose}>×</button> : null}
       </div>
@@ -128,7 +129,7 @@ export function AdminStudentDetail({
       </DetailSection>
       <DetailSection title="감사 로그">
         {detail.auditLogs.length > 0 ? (
-          detail.auditLogs.map((log) => <DetailLine key={log.id} left={log.action} right={formatKst(log.createdAt)} />)
+          detail.auditLogs.map((log) => <DetailLine key={log.id} left={actionLabel(log.action)} right={formatKst(log.createdAt)} />)
         ) : (
           <p className="muted">아직 로그 없음</p>
         )}
@@ -146,7 +147,7 @@ function actionLabel(action: string): string {
     case "STUDENT_RESERVATION_CANCEL_RESTRICTION":
       return "예약 취소 제한";
     case "USER_RESTRICTION_APPLY":
-      return "제한 적용";
+      return "학생 제재 적용";
     case "USER_RESTRICTION_REMOVE":
       return "제한 해제";
     case "USER_SESSIONS_REVOKE":

@@ -4,6 +4,7 @@ import { ShieldCheck } from "lucide-react";
 
 import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 
+import { adminAccountDescription, adminAccountName } from "./admin-account-labels";
 import { ADMIN_USER_STATUS_FILTERS, type AdminUser, type AdminUserStatusFilter } from "./admin-types";
 
 const USER_STATUS_LABELS: Record<AdminUserStatusFilter, string> = {
@@ -57,8 +58,8 @@ export function AdminUsersPanel({
         {users.map((user) => (
           <div className="user-line" data-selected={selectedUserId === user.id} key={user.id}>
             <div className="user-line-main">
-              <strong>{user.name}</strong>
-              <p className="muted">{user.studentNumber} · {user.generation}기</p>
+              <strong>{adminAccountName(user)}</strong>
+              <p className="muted">{adminAccountDescription(user)}</p>
             </div>
             <div className="user-line-summary">
               <span className="status-chip" data-status={user.bookingStatus}>{statusLabel(user.bookingStatus)}</span>

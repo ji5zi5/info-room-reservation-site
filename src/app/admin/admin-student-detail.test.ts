@@ -61,6 +61,30 @@ const detailWithCurrentReservation = {
   ]
 } satisfies AdminUserDetail;
 
+const detailWithAuditLog = {
+  ...detail,
+  auditLogs: [
+    {
+      action: "USER_RESTRICTION_APPLY",
+      actorId: "admin-1",
+      createdAt: "2026-06-16T00:00:00.000Z",
+      detail: "학생 제재 적용",
+      id: "audit-1"
+    }
+  ]
+} satisfies AdminUserDetail;
+
+const adminDetail = {
+  ...detail,
+  user: {
+    ...detail.user,
+    generation: 0,
+    name: "일반 계정",
+    role: "ADMIN",
+    studentNumber: "local_student_a"
+  }
+} satisfies AdminUserDetail;
+
 describe("AdminStudentDetail", () => {
   it("renders reservation metrics without a session count", () => {
     const markup = renderToStaticMarkup(
@@ -94,5 +118,39 @@ describe("AdminStudentDetail", () => {
 
     expect(markup).toContain("data-reservation-action=\"reservation-confirmed\"");
     expect(markup).not.toContain("data-reservation-action=\"reservation-cancelled\"");
+  });
+
+  it("renders audit log actions with Korean labels instead of internal codes", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminStudentDetail, {
+        detail: detailWithAuditLog,
+        onApplyRestriction: () => undefined,
+        onMarkNoShow: () => undefined,
+        onRelease: () => undefined,
+        onSetRestrictionDraft: () => undefined,
+        restrictionDraft
+      })
+    );
+
+    expect(markup).toContain("<span>학생 제재 적용</span>");
+    expect(markup).not.toContain("USER_RESTRICTION_APPLY");
+  });
+
+  it("renders admin accounts with an admin label instead of a student generation", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminStudentDetail, {
+        detail: adminDetail,
+        onApplyRestriction: () => undefined,
+        onMarkNoShow: () => undefined,
+        onRelease: () => undefined,
+        onSetRestrictionDraft: () => undefined,
+        restrictionDraft
+      })
+    );
+
+    expect(markup).toContain("<h3>관리자 계정</h3>");
+    expect(markup).toContain("local_student_a");
+    expect(markup).not.toContain("일반 계정");
+    expect(markup).not.toContain("local_student_a · 0기");
   });
 });
