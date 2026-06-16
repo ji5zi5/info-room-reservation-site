@@ -1,3 +1,4 @@
+import { persistAuthenticatedUserResult } from "./auth-user-persistence";
 import { prisma } from "./db";
 import { isLocalAdminLoginEnabled, isLocalStudentLoginEnabled, isMockLoginEnabled } from "./env";
 import {
@@ -61,39 +62,35 @@ export async function loginUserWithRiro(input: LoginInput): Promise<LoginResult>
     };
   }
 
-  const user = await prisma.user.upsert({
-    create: {
-      bookingStatus: "ACTIVE",
-      generation: authResult.profile.generation,
-      name: authResult.profile.name,
-      riroId: input.id,
-      role,
-      studentNumber: authResult.profile.studentNumber
-    },
-    update: {
-      generation: authResult.profile.generation,
-      name: authResult.profile.name,
-      riroId: input.id,
-      role
-    },
-    where: { studentNumber: authResult.profile.studentNumber }
-  });
-
-  const token = await createSession(user.id);
-  return {
-    kind: "success",
-    token,
-    user: {
-      bookingStatus: user.bookingStatus,
-      generation: user.generation,
-      id: user.id,
-      name: user.name,
-      restrictionReason: user.restrictionReason,
-      restrictedUntil: user.restrictedUntil ? user.restrictedUntil.toISOString() : null,
-      role: user.role,
-      studentNumber: user.studentNumber
+  const userResult = await persistAuthenticatedUserResult({ loginId: input.id, profile: authResult.profile, role });
+  switch (userResult.kind) {
+    case "error":
+      return userResult;
+    case "success": {
+      const user = userResult.user;
+      const token = await createSession(user.id);
+      return {
+        kind: "success",
+        token,
+        user: {
+          bookingStatus: user.bookingStatus,
+          generation: user.generation,
+          id: user.id,
+          name: user.name,
+          restrictionReason: user.restrictionReason,
+          restrictedUntil: user.restrictedUntil ? user.restrictedUntil.toISOString() : null,
+          role: user.role,
+          studentNumber: user.studentNumber
+        }
+      };
     }
-  };
+    default:
+      return assertNever(userResult);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unexpected auth result: ${JSON.stringify(value)}`);
 }
 
 function buildNoDatabaseMockUser(profile: RiroProfile, role: "ADMIN" | "STUDENT"): SessionUser {
