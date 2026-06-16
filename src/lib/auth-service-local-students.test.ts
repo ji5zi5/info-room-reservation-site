@@ -19,8 +19,8 @@ describe("multiple local student fallback accounts", () => {
     const calls: string[] = [];
     const options = {
       localStudentAccounts: [
-        { id: "local_student_a", password: "shared-secret", studentNumber: "local_student_a" },
-        { id: "local_student_b", password: "shared-secret", studentNumber: "local_student_b" }
+        { id: "local_student_a", password: "test-student-secret", studentNumber: "local_student_a" },
+        { id: "local_student_b", password: "test-student-secret", studentNumber: "local_student_b" }
       ],
       localStudentEnabled: true,
       mockLoginEnabled: false,
@@ -30,9 +30,9 @@ describe("multiple local student fallback accounts", () => {
       }
     };
 
-    const local_student_aResult = await authenticateWithConfiguredMode({ id: "local_student_a", password: "shared-secret" }, options);
+    const local_student_aResult = await authenticateWithConfiguredMode({ id: "local_student_a", password: "test-student-secret" }, options);
     const crispResult = await authenticateWithConfiguredMode(
-      { id: "local_student_b", password: "shared-secret" },
+      { id: "local_student_b", password: "test-student-secret" },
       options
     );
 
@@ -41,12 +41,12 @@ describe("multiple local student fallback accounts", () => {
     expect(crispResult).toMatchObject({ kind: "success", profile: { studentNumber: "local_student_b" } });
   });
 
-  it("accepts each configured local student id as its own fallback password", async () => {
+  it("rejects a local student id password when the shared fallback password differs", async () => {
     const calls: string[] = [];
     const options = {
       localStudentAccounts: [
-        { id: "local_student_a", password: "local_student_b", studentNumber: "local_student_a" },
-        { id: "local_student_b", password: "local_student_b", studentNumber: "local_student_b" }
+        { id: "local_student_a", password: "test-student-secret", studentNumber: "local_student_a" },
+        { id: "local_student_b", password: "test-student-secret", studentNumber: "local_student_b" }
       ],
       localStudentEnabled: true,
       mockLoginEnabled: false,
@@ -57,14 +57,9 @@ describe("multiple local student fallback accounts", () => {
     };
 
     const local_student_aResult = await authenticateWithConfiguredMode({ id: "local_student_a", password: "local_student_a" }, options);
-    const crispResult = await authenticateWithConfiguredMode(
-      { id: "local_student_b", password: "local_student_b" },
-      options
-    );
 
     expect(calls).toEqual([]);
-    expect(local_student_aResult).toMatchObject({ kind: "success", profile: { studentNumber: "local_student_a" } });
-    expect(crispResult).toMatchObject({ kind: "success", profile: { studentNumber: "local_student_b" } });
+    expect(local_student_aResult).toMatchObject({ kind: "error", reason: "invalid_credentials" });
   });
 
   it("rejects a local student id password when the configured fallback secret is weak", async () => {
