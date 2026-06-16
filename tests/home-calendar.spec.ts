@@ -43,7 +43,7 @@ test("weekly reservation calendar shows status and jumps between advance and tod
   await login(page, `calendar-${Date.now()}`);
 
   await expect(page.getByRole("heading", { name: "이번 주 예약" })).toBeVisible();
-  await expect(page.getByText("사전예약 06.12")).toBeVisible();
+  await expect(page.getByText(/^사전예약 \d{2}\.\d{2}/u)).toHaveCount(0);
 
   const friday = page.locator(".calendar-day").filter({ hasText: "06.12" });
   await expect(friday.getByText("내 예약")).toBeVisible();
@@ -85,7 +85,7 @@ test("manual advance date input keeps the prior date when a next-week date is ty
   expect(await invalidPeriodRequest).toBe("not-requested");
 });
 
-test("weekly reservation calendar keeps Friday advance closure visible", async ({ page }) => {
+test("weekly reservation calendar keeps Friday advance closure state without policy copy", async ({ page }) => {
   await mockPeriods(page, {
     [FIXED_FRIDAY_DATE]: [
       period({ label: "8면학", studyPeriod: "EIGHTH" }),
@@ -95,7 +95,7 @@ test("weekly reservation calendar keeps Friday advance closure visible", async (
   await login(page, `calendar-friday-${Date.now()}`, e2eNow(FIXED_FRIDAY_DATE));
 
   await expect(page.getByRole("heading", { name: "이번 주 예약" })).toBeVisible();
-  await expect(page.getByText("금요일 이후 사전예약 불가")).toBeVisible();
+  await expect(page.getByText("금요일 이후 사전예약 불가")).toHaveCount(0);
   await expect(page.locator(".calendar-day[data-advance='true']")).toHaveCount(0);
 });
 

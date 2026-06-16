@@ -34,7 +34,6 @@ export function ReservationCalendar({
       <div className="calendar-head">
         <div>
           <h3 id="reservation-calendar-title">이번 주 예약</h3>
-          <p className="muted">{calendarPolicyLabel(advancePolicy)}</p>
         </div>
         <button className="ghost-button calendar-today-button" type="button" onClick={onTodayClick}>
           <CalendarCheck aria-hidden="true" size={16} />
@@ -68,16 +67,6 @@ export function ReservationCalendar({
       </div>
     </section>
   );
-}
-
-function calendarPolicyLabel(policy: AdvanceReservationPolicy): string {
-  if (policy.kind === "unavailable") {
-    return "금요일 이후 사전예약 불가";
-  }
-  if (policy.minDate === policy.maxDate) {
-    return `사전예약 ${formatCalendarDate(policy.minDate)}`;
-  }
-  return `사전예약 ${formatCalendarDate(policy.minDate)}-${formatCalendarDate(policy.maxDate)}`;
 }
 
 function formatCalendarDate(date: string): string {

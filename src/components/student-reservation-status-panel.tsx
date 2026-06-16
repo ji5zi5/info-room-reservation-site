@@ -23,6 +23,7 @@ export function StudentReservationStatusPanel({
   const reservationSummary =
     reservations.length > 0 ? reservations.map(formatReservation).join(" / ") : "현재 예약 없음";
   const statusLabel = studentReservationStatusLabel(user);
+  const summaryLabel = restricted ? "해제 시점" : "예약 가능 시점";
 
   return (
     <section aria-label="내 예약 상태" className="student-status-panel">
@@ -36,7 +37,7 @@ export function StudentReservationStatusPanel({
         </span>
       </div>
       <p className="student-status-summary">
-        <span>{restricted ? "제한 중" : "예약 가능"}</span>
+        <span>{summaryLabel}</span>
         <strong>{nextReservableAtLabel(user)}</strong>
       </p>
     </section>

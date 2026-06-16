@@ -45,6 +45,7 @@ test("student reservation controls keep date selection compact", async ({ page }
 
   const statusPanelHeight = await visibleHeight(statusPanel, "student reservation status panel");
   expect(statusPanelHeight).toBeLessThanOrEqual(145);
+  await expect(statusPanel.locator(".student-status-summary span")).toHaveText("예약 가능 시점");
   await expectBorderRadius(statusPanel, "student reservation status panel", "4px");
   await expectBorderRadius(page.locator(".meter").first(), "reservation capacity meter", "4px");
 
@@ -89,6 +90,8 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
   const firstPeriodCard = page.locator(".period-card").first();
   const firstPeriodCardBox = await visibleBox(firstPeriodCard, "mobile first period card");
   const calendarBox = await visibleBox(page.locator(".reservation-calendar"), "mobile reservation calendar");
+  const calendarGrid = page.locator(".calendar-grid");
+  const calendarGridBox = await visibleBox(calendarGrid, "mobile calendar date strip");
 
   if (await calendarIcon.isVisible()) {
     const iconBox = await visibleBox(calendarIcon, "reservation topbar calendar icon");
@@ -106,6 +109,12 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
   expect(overflow.bodyWidth).toBeLessThanOrEqual(overflow.viewportWidth);
   expect(firstPeriodCardBox.y, "first reservation card should be reachable on the first mobile screen").toBeLessThanOrEqual(760);
   expect(calendarBox.y, "mobile calendar should be secondary to reservation cards").toBeGreaterThan(firstPeriodCardBox.y);
+  expect(calendarGridBox.height, "mobile calendar dates should fit in one compact strip").toBeLessThanOrEqual(120);
+
+  const applicantToggle = page.locator(".applicant-toggle").first();
+  await expect(applicantToggle).toHaveText(/신청자 \d+명 보기/u);
+  const applicantToggleBox = await visibleBox(applicantToggle, "mobile applicant toggle");
+  expect(applicantToggleBox.height, "applicant toggle should stay one compact row").toBeLessThanOrEqual(40);
 });
 
 async function login(page: Page): Promise<void> {

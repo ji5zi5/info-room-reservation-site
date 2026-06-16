@@ -135,13 +135,13 @@ export function ReservationHomePage(): React.ReactElement {
     setToast("로그아웃되었습니다.");
   }
 
-  function requestReserve(studyPeriod: "EIGHTH" | "FIRST"): void {
+  async function requestReserve(studyPeriod: "EIGHTH" | "FIRST"): Promise<void> {
     const restrictionMessage = reservationRestrictionMessage(user);
     if (restrictionMessage) {
       setToast(restrictionMessage);
       return;
     }
-    const period = periods.find((candidate) => candidate.studyPeriod === studyPeriod);
+    const period = (await refreshPeriods(targetDate)).find((candidate) => candidate.studyPeriod === studyPeriod);
     if (!canReservePeriod(period)) {
       setToast("최신 좌석 수를 반영했습니다. 다시 확인하세요.");
       return;

@@ -189,7 +189,6 @@ export function ReservationHomeView({
               {periods.map((period) => (
                 <ReservationPeriodCard
                   key={period.studyPeriod}
-                  lastRefreshedAt={lastRefreshedAt}
                   loading={loading}
                   period={period}
                   userReady={user !== null}

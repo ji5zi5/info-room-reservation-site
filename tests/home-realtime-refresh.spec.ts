@@ -5,13 +5,24 @@ import { e2eNow, FIXED_FRIDAY_DATE, FIXED_THURSDAY_DATE, mockClientDate } from "
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
 type StudyPeriod = "EIGHTH" | "FIRST";
+type MockSessionUser = {
+  readonly bookingStatus: "ACTIVE";
+  readonly generation: number;
+  readonly id: string;
+  readonly name: string;
+  readonly restrictedUntil: null;
+  readonly restrictionReason: null;
+  readonly role: "STUDENT";
+  readonly studentNumber: string;
+};
 
 test("returning to the tab refreshes seat counts and updates the last refresh time", async ({ page }) => {
   let full = false;
   await mockPeriodRoutes(page, () => full);
   await login(page, `visible-refresh-${Date.now()}`);
 
-  await expect(page.locator(".period-refresh-time").first()).toContainText("마지막 갱신:");
+  await expect(page.locator(".refresh-status")).toContainText("마지막 갱신");
+  await expect(page.locator(".period-refresh-time")).toHaveCount(0);
   await expect(page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: "8면학 예약" })).toBeVisible();
 
   full = true;
@@ -82,12 +93,38 @@ test("reservation click rechecks the server before opening the confirmation dial
 });
 
 async function login(page: Page, loginId: string): Promise<void> {
+  await mockAuth(page, buildMockSessionUser(loginId));
   await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.locator("input").nth(0).fill(loginId);
   await page.locator("input").nth(1).fill("password");
   await page.getByRole("button", { name: "인증하기" }).click();
   await page.locator(".period-card .period-badge").first().waitFor();
+}
+
+async function mockAuth(page: Page, user: MockSessionUser): Promise<void> {
+  let currentUser: MockSessionUser | null = null;
+  await page.route("**/api/me", async (route) => {
+    await route.fulfill({ contentType: "application/json", json: { user: currentUser } });
+  });
+  await page.route("**/api/auth/riro/login", async (route) => {
+    currentUser = user;
+    await route.fulfill({ contentType: "application/json", json: { user } });
+  });
+}
+
+function buildMockSessionUser(loginId: string): MockSessionUser {
+  const digits = loginId.replace(/\D/gu, "");
+  return {
+    bookingStatus: "ACTIVE",
+    generation: 25,
+    id: `mock-${loginId}`,
+    name: "테스트학생",
+    restrictedUntil: null,
+    restrictionReason: null,
+    role: "STUDENT",
+    studentNumber: digits.length >= 5 ? digits.slice(-5) : `9${digits.padStart(4, "0")}`
+  };
 }
 
 async function mockPeriodRoutes(
