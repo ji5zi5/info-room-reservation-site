@@ -173,6 +173,29 @@ describe("student reservation cancellation shadow-ban handling", () => {
     expect(routeMocks.auditLogCreate).not.toHaveBeenCalled();
   });
 
+  it("returns forbidden Given an admin session When deleting another student's reservation Then no cancellation mutations run", async () => {
+    // Given
+    routeMocks.requireSession.mockResolvedValue({
+      id: "session-admin",
+      user: { ...shadowBannedStudent, bookingStatus: "ACTIVE", id: "admin-user", role: "ADMIN", studentNumber: "admin-001" }
+    });
+    routeMocks.reservationFindUnique.mockResolvedValue({ ...confirmedReservation, id: "reservation-other", userId: "other-student" });
+    const { DELETE } = await loadCancelRoute();
+
+    // When
+    const response = await DELETE(deleteRequest(), routeContext("reservation-other"));
+
+    // Then
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: { code: "forbidden", message: "예약을 취소할 권한이 없습니다." } });
+    expect(routeMocks.reservationUpdate).not.toHaveBeenCalled();
+    expect(routeMocks.adminActionCreate).not.toHaveBeenCalled();
+    expect(routeMocks.auditLogCreate).not.toHaveBeenCalled();
+    expect(routeMocks.userUpdate).not.toHaveBeenCalled();
+    expect(routeMocks.userSanctionCreate).not.toHaveBeenCalled();
+    expect(routeMocks.userSanctionUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("masks mock shadow-ban cancellation responses and the refreshed mock session cookie", async () => {
     routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
     routeMocks.cancelMockReservation.mockReturnValue({

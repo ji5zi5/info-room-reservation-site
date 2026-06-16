@@ -29,6 +29,9 @@ export async function DELETE(request: Request, context: { readonly params: Promi
     if (rateLimitResult.kind === "blocked") {
       return jsonRateLimitError(rateLimitResult);
     }
+    if (user.role === "ADMIN") {
+      return jsonError(403, "forbidden", "예약을 취소할 권한이 없습니다.");
+    }
     const params = await context.params;
     if (isNoDatabaseMockMode()) {
       const result = cancelMockReservation({ id: params.id, now: new Date(), user });
