@@ -85,6 +85,17 @@ const adminDetail = {
   }
 } satisfies AdminUserDetail;
 
+const localStudentDetail = {
+  ...detail,
+  user: {
+    ...detail.user,
+    generation: 0,
+    name: "일반 계정",
+    role: "STUDENT",
+    studentNumber: "local_student_b"
+  }
+} satisfies AdminUserDetail;
+
 describe("AdminStudentDetail", () => {
   it("renders reservation metrics without a session count", () => {
     const markup = renderToStaticMarkup(
@@ -152,5 +163,22 @@ describe("AdminStudentDetail", () => {
     expect(markup).toContain("local_student_a");
     expect(markup).not.toContain("일반 계정");
     expect(markup).not.toContain("local_student_a · 0기");
+  });
+
+  it("hides the generation for zero-generation local student accounts", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminStudentDetail, {
+        detail: localStudentDetail,
+        onApplyRestriction: () => undefined,
+        onMarkNoShow: () => undefined,
+        onRelease: () => undefined,
+        onSetRestrictionDraft: () => undefined,
+        restrictionDraft
+      })
+    );
+
+    expect(markup).toContain("<h3>일반 계정</h3>");
+    expect(markup).toContain("local_student_b");
+    expect(markup).not.toContain("local_student_b · 0기");
   });
 });

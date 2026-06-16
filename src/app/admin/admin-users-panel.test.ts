@@ -16,6 +16,17 @@ const adminUser = {
   studentNumber: "local_student_a"
 } satisfies AdminUser;
 
+const localStudentUser = {
+  bookingStatus: "ACTIVE",
+  generation: 0,
+  id: "local-local_student_a-crisp",
+  name: "일반 계정",
+  restrictedUntil: null,
+  restrictionReason: null,
+  role: "STUDENT",
+  studentNumber: "local_student_b"
+} satisfies AdminUser;
+
 describe("AdminUsersPanel", () => {
   it("renders admin accounts with an admin label instead of a student generation", () => {
     const markup = renderToStaticMarkup(
@@ -34,5 +45,23 @@ describe("AdminUsersPanel", () => {
     expect(markup).toContain("local_student_a");
     expect(markup).not.toContain("일반 계정");
     expect(markup).not.toContain("local_student_a · 0기");
+  });
+
+  it("hides the generation for zero-generation local student accounts", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminUsersPanel, {
+        onSelectUser: () => undefined,
+        onSetQuery: () => undefined,
+        onSetStatus: () => undefined,
+        query: "",
+        selectedUserId: null,
+        status: "ALL",
+        users: [localStudentUser]
+      })
+    );
+
+    expect(markup).toContain("일반 계정");
+    expect(markup).toContain("local_student_b");
+    expect(markup).not.toContain("local_student_b · 0기");
   });
 });

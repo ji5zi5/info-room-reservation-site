@@ -10,5 +10,5 @@ export function adminAccountName(user: AdminAccountIdentity): string {
 }
 
 export function adminAccountDescription(user: AdminAccountIdentity): string {
-  return user.role === "ADMIN" ? user.studentNumber : `${user.studentNumber} · ${user.generation}기`;
+  return user.generation === 0 ? user.studentNumber : `${user.studentNumber} · ${user.generation}기`;
 }
