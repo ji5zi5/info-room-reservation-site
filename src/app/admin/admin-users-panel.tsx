@@ -1,7 +1,5 @@
 "use client";
 
-import { ShieldCheck } from "lucide-react";
-
 import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 
 import { adminAccountDescription, adminAccountName } from "./admin-account-labels";
@@ -38,7 +36,6 @@ export function AdminUsersPanel({
         <div>
           <h2>학생 관리</h2>
         </div>
-        <ShieldCheck aria-hidden="true" size={22} />
       </div>
       <div className="admin-row">
         <label className="field grow-field">

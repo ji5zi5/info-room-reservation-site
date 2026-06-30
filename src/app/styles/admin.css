@@ -206,8 +206,8 @@
   gap: var(--space-3);
 }
 
-.notification-settings-block svg {
-  color: var(--blue);
+.admin-console-layout input[type="checkbox"] {
+  accent-color: var(--blue);
 }
 
 .notification-toggle-grid {
@@ -257,7 +257,7 @@
 }
 
 .notification-pill[data-status="SENT"] {
-  color: var(--blue);
+  color: var(--graphite);
 }
 
 .notification-pill[data-status="FAILED"] {
@@ -809,6 +809,16 @@
 
   .admin-dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-stat-strip,
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-stat-strip span:last-child,
+  .metric-grid span:last-child {
+    grid-column: 1 / -1;
   }
 
   .student-detail-panel[data-open="true"] {
