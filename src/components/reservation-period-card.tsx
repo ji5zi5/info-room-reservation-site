@@ -40,6 +40,7 @@ export function ReservationPeriodCard({
 }: ReservationPeriodCardProps): ReactElement {
   const currentReservationId = period.myReservationId;
   const reserved = currentReservationId !== null;
+  const periodAvailable = period.enabled && period.remaining > 0 && period.windowState === "open";
   const reserveDisabled =
     reserved || !userReady || loading || period.remaining <= 0 || !period.enabled || period.windowState !== "open";
   const reserveButtonLabel = reserved
@@ -62,7 +63,7 @@ export function ReservationPeriodCard({
             <p className="muted">{period.closeTime} 마감 · 남은 자리 {period.remaining}/{period.capacity}</p>
           </div>
         </div>
-        <Check color={period.enabled && period.remaining > 0 && period.windowState === "open" ? "#3E6AE1" : "#5C5E62"} />
+        <Check aria-hidden="true" className="period-state-icon" data-active={periodAvailable ? "true" : "false"} />
       </div>
       <div className="meter">
         <span style={{ width: `${Math.round((period.confirmedCount / period.capacity) * 100)}%` }} />

@@ -87,7 +87,7 @@ export function ReservationSidebar({
                 <h2>{user.name}</h2>
                 <p className="muted">{user.studentNumber} · {user.role}</p>
               </div>
-              <ShieldCheck color="#3E6AE1" />
+              <ShieldCheck className="sidebar-user-mark" />
             </div>
             {user.role !== "ADMIN" ? (
               <button className="ghost-button" type="button" onClick={onOpenProfile}>

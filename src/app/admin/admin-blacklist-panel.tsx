@@ -93,7 +93,7 @@ export function AdminBlacklistPanel({
         </label>
         <div className="blacklist-grid">
           {query.trim() === "" ? (
-            <div className="bl-empty">이름 또는 학번을 검색하면 학생 목록이 표시됩니다.</div>
+            <div className="bl-empty">검색어를 입력하세요.</div>
           ) : filteredNormal.length === 0 ? (
             <div className="bl-empty">검색 결과가 없습니다.</div>
           ) : (

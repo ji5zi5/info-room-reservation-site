@@ -5,16 +5,17 @@
 html {
   background: var(--white);
   color: var(--ink);
-  font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   letter-spacing: 0;
   line-break: strict;
+  overflow-wrap: anywhere;
   scrollbar-gutter: stable;
-  word-break: keep-all;
+  word-break: normal;
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
 }
 
@@ -46,26 +47,26 @@ p {
 }
 
 h1 {
-  font-size: 2.5rem;
-  font-weight: 500;
-  line-height: 1.2;
+  font-size: var(--text-display);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
   text-wrap: balance;
 }
 
 h2 {
-  font-size: 1.06rem;
-  font-weight: 500;
-  line-height: 1.25;
+  font-size: var(--text-title);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-title);
 }
 
 h3 {
-  font-size: 0.95rem;
-  font-weight: 500;
-  line-height: 1.35;
+  font-size: var(--text-heading);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-body);
 }
 
 p,
 span,
 strong {
-  line-height: 1.43;
+  line-height: var(--leading-body);
 }
