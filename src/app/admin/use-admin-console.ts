@@ -180,8 +180,8 @@ export function useAdminConsole(): AdminConsoleState {
     await refresh();
   }
 
-  async function cancelReservation(reservationId: string): Promise<void> {
-    const ok = await cancelAdminReservation(reservationId);
+  async function cancelReservation(reservationId: string, reason: string): Promise<void> {
+    const ok = await cancelAdminReservation(reservationId, reason);
     setToast(ok ? "예약을 관리자 취소 처리했습니다." : "예약 취소 실패");
     await refresh();
   }

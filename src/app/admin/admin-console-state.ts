@@ -35,7 +35,7 @@ export type AdminConsoleState = {
   readonly auditQuery: string;
   readonly applyRestriction: (userId: string) => Promise<void>;
   readonly applyShadowBan: (userId: string) => Promise<void>;
-  readonly cancelReservation: (reservationId: string) => Promise<void>;
+  readonly cancelReservation: (reservationId: string, reason: string) => Promise<void>;
   readonly clearSelectedUser: () => void;
   readonly copyReservationsCsv: () => Promise<void>;
   readonly dashboardPeriods: readonly AdminDashboardPeriod[];

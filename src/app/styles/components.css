@@ -82,6 +82,12 @@
   color: var(--white);
 }
 
+.ghost-button:disabled,
+.danger-button:disabled {
+  color: var(--silver);
+  cursor: not-allowed;
+}
+
 .period-actions {
   display: grid;
   gap: 8px;
@@ -416,6 +422,11 @@
   overflow: hidden;
 }
 
+.student-notification-reason {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .student-notification-spinner {
   animation: refresh-spin 0.82s linear infinite;
 }
@@ -620,10 +631,11 @@
   background: rgba(23, 26, 32, 0.36);
   display: grid;
   inset: 0;
+  isolation: isolate;
   padding: 24px;
   place-items: center;
   position: fixed;
-  z-index: 30;
+  z-index: 1000;
 }
 
 .confirm-dialog {
@@ -637,6 +649,7 @@
   padding: 22px;
   position: relative;
   width: min(100%, 460px);
+  z-index: 1;
 }
 
 .confirm-close {

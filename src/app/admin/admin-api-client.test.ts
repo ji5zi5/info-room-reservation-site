@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  cancelAdminReservation,
   fetchAdminNotificationSettings,
   fetchAdminSettings,
   markReservationNoShow,
@@ -134,5 +135,17 @@ describe("admin api client", () => {
     const request = csrfFetchMock.mock.calls[0]?.[1];
     expect(request).toBeDefined();
     expect(request?.body).toBe(JSON.stringify({ reason: "정보실 예약 노쇼" }));
+  });
+
+  it("sends an admin cancellation reason when cancelling a reservation", async () => {
+    csrfFetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await expect(cancelAdminReservation("reservation-1", "행사 준비로 정보실 사용 불가")).resolves.toBe(true);
+
+    const [url, request] = csrfFetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/reservations/reservation-1/cancel");
+    expect(request).toBeDefined();
+    expect(request?.body).toBe(JSON.stringify({ reason: "행사 준비로 정보실 사용 불가" }));
+    expect(request?.headers).toEqual({ "content-type": "application/json" });
   });
 });

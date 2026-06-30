@@ -285,6 +285,16 @@
   justify-content: flex-end;
 }
 
+.admin-dialog-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-dialog-actions .ghost-button,
+.admin-dialog-actions .danger-button {
+  width: 100%;
+}
 
 .admin-dashboard-topbar {
   align-items: center;

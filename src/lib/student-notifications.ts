@@ -8,6 +8,7 @@ export type StudentNotification = {
   readonly createdAt: string;
   readonly id: string;
   readonly message: string;
+  readonly reason: string | null;
   readonly title: string;
 };
 
@@ -15,6 +16,7 @@ export type StudentNotificationActionRow = {
   readonly action: string;
   readonly createdAt: Date;
   readonly id: string;
+  readonly reason: string | null;
   readonly reservation: {
     readonly date: string;
     readonly studyPeriod: string;
@@ -41,6 +43,7 @@ function buildStudentNotification(row: StudentNotificationActionRow): StudentNot
         createdAt: row.createdAt.toISOString(),
         id: row.id,
         message: `${reservationName(row.reservation)} 신청이 취소되었습니다.`,
+        reason: notificationReason(row.reason),
         title: "관리자 취소 안내"
       };
     default:
@@ -58,6 +61,11 @@ function reservationName(reservation: StudentNotificationActionRow["reservation"
   }
   const studyPeriod = parseStudyPeriod(reservation.studyPeriod);
   return `${reservation.date} ${getStudyPeriodLabel(studyPeriod)}`;
+}
+
+function notificationReason(reason: string | null): string | null {
+  const normalized = reason?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 function assertNever(value: never): never {

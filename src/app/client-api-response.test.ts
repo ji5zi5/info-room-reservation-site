@@ -111,6 +111,7 @@ describe("readStudentNotificationsPayload", () => {
         createdAt: "2026-06-16T04:30:00.000Z",
         id: "action-cancel",
         message: "2026-06-17 8면학 신청이 취소되었습니다.",
+        reason: "행사 준비로 정보실 사용 불가",
         title: "관리자 취소 안내"
       }
     ] as const;

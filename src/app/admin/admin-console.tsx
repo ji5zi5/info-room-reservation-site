@@ -94,7 +94,7 @@ export function AdminConsole(): ReactElement {
                 query={consoleState.reservationQuery}
                 reservations={consoleState.reservations}
                 statusFilter={consoleState.statusFilter}
-                onCancelReservation={(reservationId) => void consoleState.cancelReservation(reservationId)}
+                onCancelReservation={(reservationId, reason) => void consoleState.cancelReservation(reservationId, reason)}
                 onCopyCsv={() => void consoleState.copyReservationsCsv()}
                 onMarkNoShow={(reservationId) => void consoleState.markNoShow(reservationId)}
                 onRefresh={() => void consoleState.refresh()}

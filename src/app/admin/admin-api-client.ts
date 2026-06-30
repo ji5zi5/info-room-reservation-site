@@ -164,8 +164,12 @@ export async function markReservationNoShow(reservationId: string): Promise<bool
   return response.ok;
 }
 
-export async function cancelAdminReservation(reservationId: string): Promise<boolean> {
-  const response = await csrfFetch(`/api/admin/reservations/${reservationId}/cancel`, { method: "POST" });
+export async function cancelAdminReservation(reservationId: string, reason: string): Promise<boolean> {
+  const response = await csrfFetch(`/api/admin/reservations/${reservationId}/cancel`, {
+    body: JSON.stringify({ reason }),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  });
   return response.ok;
 }
 

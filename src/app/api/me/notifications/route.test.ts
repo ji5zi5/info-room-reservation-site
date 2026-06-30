@@ -126,6 +126,7 @@ describe("student notifications route", () => {
         action: "ADMIN_RESERVATION_CANCEL",
         createdAt: new Date("2026-06-16T04:30:00.000Z"),
         id: "action-cancel",
+        reason: "행사 준비로 정보실 사용 불가",
         reservation: { date: "2026-06-17", studyPeriod: "EIGHTH" }
       }
     ]);
@@ -142,6 +143,7 @@ describe("student notifications route", () => {
           createdAt: "2026-06-16T04:30:00.000Z",
           id: "action-cancel",
           message: "2026-06-17 8면학 신청이 취소되었습니다.",
+          reason: "행사 준비로 정보실 사용 불가",
           title: "관리자 취소 안내"
         }
       ]
@@ -152,6 +154,7 @@ describe("student notifications route", () => {
         action: true,
         createdAt: true,
         id: true,
+        reason: true,
         reservation: { select: { date: true, studyPeriod: true } }
       },
       take: 5,

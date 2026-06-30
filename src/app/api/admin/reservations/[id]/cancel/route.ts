@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { canAdminCancelReservation } from "@/lib/admin-reservation-transition";
 import { prisma } from "@/lib/db";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
+import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
 import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
 import { requireAdminSession, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
+
+const AdminCancelReservationRequestSchema = z.object({
+  reason: z.string().trim().min(1).max(200)
+});
 
 export async function POST(request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
   const requestSafetyError = requireMutatingRequestSafety(request);
@@ -27,6 +33,13 @@ export async function POST(request: Request, context: { readonly params: Promise
       return jsonRateLimitError(rateLimitResult);
     }
     const params = await context.params;
+    const parsed = await readJsonRequest(request, {
+      message: "관리자 취소 사유를 입력하세요.",
+      schema: AdminCancelReservationRequestSchema
+    });
+    if (parsed.kind === "error") {
+      return parsed.response;
+    }
     const ipHash = hashRequestClientIp(request);
     const result = await prisma.$transaction(async (transaction) => {
       const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
@@ -47,6 +60,7 @@ export async function POST(request: Request, context: { readonly params: Promise
           after: JSON.stringify({ reservationStatus: updated.status }),
           before: JSON.stringify({ reservationStatus: reservation.status }),
           ipHash,
+          reason: parsed.data.reason,
           reservationId: reservation.id,
           targetUserId: reservation.userId
         }
@@ -55,7 +69,7 @@ export async function POST(request: Request, context: { readonly params: Promise
         data: {
           action: "ADMIN_RESERVATION_CANCEL",
           actorId: admin.id,
-          detail: JSON.stringify({ actionId: action.id, reservationId: reservation.id }),
+          detail: JSON.stringify({ actionId: action.id, reason: parsed.data.reason, reservationId: reservation.id }),
           userId: reservation.userId
         }
       });

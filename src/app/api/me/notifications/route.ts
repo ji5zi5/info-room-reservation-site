@@ -27,6 +27,7 @@ export async function GET(): Promise<NextResponse> {
             action: true,
             createdAt: true,
             id: true,
+            reason: true,
             reservation: { select: { date: true, studyPeriod: true } }
           },
           take: 5,

@@ -1,6 +1,7 @@
 "use client";
 
-import { ClipboardList, RotateCcw, UserSearch, UserX, XCircle } from "lucide-react";
+import { ClipboardList, RotateCcw, UserSearch, UserX, X, XCircle } from "lucide-react";
+import { useState, type ReactElement } from "react";
 
 import {
   ADMIN_RESERVATION_PERIOD_FILTERS,
@@ -37,7 +38,7 @@ export function AdminReservationsPanel({
   reservations,
   statusFilter
 }: {
-  readonly onCancelReservation: (reservationId: string) => void;
+  readonly onCancelReservation: (reservationId: string, reason: string) => void;
   readonly onCopyCsv: () => void;
   readonly onMarkNoShow: (reservationId: string) => void;
   readonly onRefresh: () => void;
@@ -49,7 +50,29 @@ export function AdminReservationsPanel({
   readonly query: string;
   readonly reservations: readonly AdminReservation[];
   readonly statusFilter: AdminReservationStatusFilter;
-}): React.ReactElement {
+}): ReactElement {
+  const [cancelDraft, setCancelDraft] = useState<AdminReservation | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const trimmedCancelReason = cancelReason.trim();
+
+  function openCancelDialog(reservation: AdminReservation): void {
+    setCancelDraft(reservation);
+    setCancelReason("");
+  }
+
+  function closeCancelDialog(): void {
+    setCancelDraft(null);
+    setCancelReason("");
+  }
+
+  function confirmCancelReservation(): void {
+    if (cancelDraft === null || !trimmedCancelReason) {
+      return;
+    }
+    onCancelReservation(cancelDraft.id, trimmedCancelReason);
+    closeCancelDialog();
+  }
+
   return (
     <section className="admin-panel stack">
       <div className="topbar">
@@ -105,7 +128,7 @@ export function AdminReservationsPanel({
               </button>
               {reservation.status === "CONFIRMED" ? (
                 <>
-                  <button className="ghost-button" type="button" onClick={() => onCancelReservation(reservation.id)}>
+                  <button className="ghost-button" type="button" onClick={() => openCancelDialog(reservation)}>
                     <XCircle size={16} />
                     취소
                   </button>
@@ -120,6 +143,65 @@ export function AdminReservationsPanel({
         ))}
         {reservations.length === 0 ? <div className="table-line muted">아직 예약자가 없습니다.</div> : null}
       </div>
+      {cancelDraft ? (
+        <div
+          className="confirm-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              closeCancelDialog();
+            }
+          }}
+        >
+          <section
+            aria-labelledby="admin-cancel-title"
+            aria-modal="true"
+            className="confirm-dialog admin-cancel-dialog"
+            role="dialog"
+          >
+            <button aria-label="닫기" className="icon-button confirm-close" type="button" onClick={closeCancelDialog}>
+              <X aria-hidden="true" size={18} />
+            </button>
+            <span className="confirm-mark">
+              <XCircle aria-hidden="true" size={22} />
+            </span>
+            <div>
+              <h3 id="admin-cancel-title">예약을 관리자 취소할까요?</h3>
+              <p className="muted">입력한 사유는 학생 알림과 감사 기록에 남습니다.</p>
+            </div>
+            <div className="cancel-policy-preview">
+              <p>
+                <strong>{cancelDraft.user.name}</strong>
+                <span className="muted">
+                  {cancelDraft.date} {studyPeriodLabel(cancelDraft.studyPeriod)}
+                </span>
+              </p>
+            </div>
+            <label className="field">
+              <span>취소 사유</span>
+              <textarea
+                maxLength={200}
+                rows={3}
+                value={cancelReason}
+                onChange={(event) => setCancelReason(event.currentTarget.value)}
+              />
+            </label>
+            <div className="admin-dialog-actions">
+              <button className="ghost-button" type="button" onClick={closeCancelDialog}>
+                닫기
+              </button>
+              <button
+                className="danger-button"
+                disabled={!trimmedCancelReason}
+                type="button"
+                onClick={confirmCancelReservation}
+              >
+                취소 확정
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -139,6 +221,10 @@ function parsePeriodFilter(value: string): AdminReservationStudyPeriodFilter {
     default:
       return "ALL";
   }
+}
+
+function studyPeriodLabel(studyPeriod: string): string {
+  return studyPeriod === "EIGHTH" ? "8면학" : "1면학";
 }
 
 function statusLabel(status: string): string {

@@ -129,6 +129,7 @@ function notificationBody(
           <time dateTime={latestNotification.createdAt}>{formatKstTime(latestNotification.createdAt)}</time>
         </div>
         <p>{latestNotification.message}</p>
+        {latestNotification.reason ? <p className="student-notification-reason">사유 {latestNotification.reason}</p> : null}
       </article>
     );
   }

@@ -106,6 +106,7 @@ const StudentNotificationSchema = z.object({
   createdAt: z.string(),
   id: z.string(),
   message: z.string(),
+  reason: z.string().nullable(),
   title: z.string()
 });
 
