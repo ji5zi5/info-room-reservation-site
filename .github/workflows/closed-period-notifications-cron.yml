@@ -1,8 +1,6 @@
 name: Closed Period Notifications Cron
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions: {}

@@ -1,10 +1,18 @@
 import * as cheerio from "cheerio";
-import ky, { type KyInstance } from "ky";
+import ky, { type Options } from "ky";
 import { z } from "zod";
+
+import { buildRiroHeaders, RiroCookieJar } from "./riro-cookie-session";
 
 const LoginJsonSchema = z
   .object({
     code: z.union([z.string(), z.number()]).optional(),
+    data: z
+      .object({
+        url: z.string().optional()
+      })
+      .passthrough()
+      .optional(),
     msg: z.string().optional(),
     token: z.string().nullable().optional()
   })
@@ -38,7 +46,11 @@ type ParseProfileInput = {
   readonly loginId: string;
 };
 
-type RiroHttpClient = Pick<KyInstance, "post">;
+type RiroResponse = Pick<Response, "headers" | "json" | "text">;
+
+type RiroHttpClient = {
+  readonly post: (url: string, options?: Options) => Promise<RiroResponse>;
+};
 
 type LoginWithRiroInput = {
   readonly id: string;
@@ -46,7 +58,13 @@ type LoginWithRiroInput = {
   readonly httpClient?: RiroHttpClient;
 };
 
-export function interpretLoginJson(input: unknown): RiroAuthResult | { readonly kind: "token"; readonly token: string } {
+type RiroLoginSuccess = {
+  readonly kind: "login";
+  readonly redirectUrl: string | null;
+  readonly token: string | null;
+};
+
+export function interpretLoginJson(input: unknown): RiroAuthResult | RiroLoginSuccess {
   const parsed = LoginJsonSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -73,7 +91,8 @@ export function interpretLoginJson(input: unknown): RiroAuthResult | { readonly 
     };
   }
 
-  if (!parsed.data.token) {
+  const redirectUrl = parsed.data.data?.url ?? null;
+  if (!parsed.data.token && !redirectUrl) {
     return {
       kind: "error",
       message: "Token not found",
@@ -82,8 +101,9 @@ export function interpretLoginJson(input: unknown): RiroAuthResult | { readonly 
   }
 
   return {
-    kind: "token",
-    token: parsed.data.token
+    kind: "login",
+    redirectUrl,
+    token: parsed.data.token ?? null
   };
 }
 
@@ -108,49 +128,47 @@ export function parseRiroProfileFromHtml(input: ParseProfileInput): RiroAuthResu
 
 export async function loginWithRiroSchool(input: LoginWithRiroInput): Promise<RiroAuthResult> {
   const httpClient = input.httpClient ?? ky.create({ timeout: 15_000 });
+  const cookieJar = new RiroCookieJar();
 
   try {
-    await httpClient.post("https://iscience.riroschool.kr/user.php?action=user_logout", {
+    const logoutResponse = await httpClient.post("https://iscience.riroschool.kr/user.php?action=user_logout", {
+      headers: buildRiroHeaders(cookieJar),
       throwHttpErrors: false,
       timeout: 10_000
     });
+    cookieJar.storeFromHeaders(logoutResponse.headers);
 
-    const loginResponse = await httpClient
-      .post("https://iscience.riroschool.kr/ajax.php", {
-        body: new URLSearchParams({
-          app: "user",
-          deeplink: "",
-          id: input.id,
-          mode: "login",
-          pw: input.password,
-          redirect_link: "",
-          userType: "1"
-        }),
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome"
-        },
-        timeout: 15_000
-      })
-      .json<unknown>();
+    const loginHttpResponse = await httpClient.post("https://iscience.riroschool.kr/ajax.php", {
+      body: new URLSearchParams({
+        app: "user",
+        deeplink: "",
+        id: input.id,
+        mode: "login",
+        pw: input.password,
+        redirect_link: "",
+        userType: "1"
+      }),
+      headers: buildRiroHeaders(cookieJar),
+      timeout: 15_000
+    });
+    cookieJar.storeFromHeaders(loginHttpResponse.headers);
+    const loginResponse = await loginHttpResponse.json();
 
     const interpreted = interpretLoginJson(loginResponse);
-    if (interpreted.kind !== "token") {
+    if (interpreted.kind !== "login") {
       return interpreted;
     }
+    if (interpreted.token) {
+      cookieJar.set("cookie_token", interpreted.token);
+    }
 
-    const profileHtml = await httpClient
-      .post("https://iscience.riroschool.kr/user.php", {
-        body: new URLSearchParams({ pw: input.password }),
-        headers: {
-          cookie: `cookie_token=${interpreted.token}`,
-          "content-type": "application/x-www-form-urlencoded",
-          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome"
-        },
-        redirect: "manual",
-        timeout: 15_000
-      })
-      .text();
+    const profileResponse = await httpClient.post("https://iscience.riroschool.kr/user.php", {
+      body: new URLSearchParams({ pw: input.password }),
+      headers: buildRiroHeaders(cookieJar),
+      redirect: "manual",
+      timeout: 15_000
+    });
+    const profileHtml = await profileResponse.text();
 
     return parseRiroProfileFromHtml({ html: profileHtml, loginId: input.id });
   } catch (error) {

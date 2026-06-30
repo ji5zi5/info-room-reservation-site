@@ -50,9 +50,9 @@ npm run db:seed
 ```env
 DATABASE_URL="postgresql://postgres.PROJECT_REF:PASSWORD@aws-N-ap-northeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1&sslmode=require"
 DIRECT_URL="postgresql://postgres.PROJECT_REF:PASSWORD@aws-N-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require"
-SESSION_SECRET="long-random-secret"
+SESSION_SECRET="replace-this-with-at-least-24-random-characters"
 ADMIN_STUDENT_NUMBERS=""
-CRON_SECRET="long-random-secret"
+CRON_SECRET="replace-this-with-at-least-24-random-characters"
 DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 TRUST_FORWARDED_IP_HEADERS="true"
 RIRO_MOCK_LOGIN="false"

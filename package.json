@@ -16,6 +16,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "cron:setup:external": "tsx scripts/setup-cron-job-org.ts",
     "predeploy:check": "tsx scripts/predeploy-check.ts"
   },
   "dependencies": {

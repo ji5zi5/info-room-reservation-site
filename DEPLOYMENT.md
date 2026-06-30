@@ -42,6 +42,12 @@ Supabase direct database hosts can require IPv6. If your network or deploy envir
 
 The pooler host can be `aws-0`, `aws-1`, or another Supabase-assigned shard. Copy the exact host from the Supabase connection string or `supabase/.temp/pooler-url`.
 
+### Row Level Security Readiness
+
+This app does not use Supabase Auth sessions. It authenticates with Riro, stores its own `Session` rows, and accesses Postgres through Prisma. Supabase RLS policies that depend on `auth.uid()` will not protect this app unless the database connection also receives a trustworthy per-request user context.
+
+Do not enable or force RLS on production tables until the Prisma data-access layer sets a request-scoped database context or uses limited database roles that match the policies. See `supabase/rls-readiness.sql` for the guarded rollout checklist. Until that rollout is complete, authorization is enforced in Next route handlers and domain services, so API guard tests and predeploy checks are part of the security boundary.
+
 ## First Deploy Checklist
 
 1. Create the managed Postgres database and set `DATABASE_URL` plus `DIRECT_URL`.
@@ -50,9 +56,9 @@ The pooler host can be `aws-0`, `aws-1`, or another Supabase-assigned shard. Cop
 4. Deploy with `npm run vercel-build`.
 5. Open the site, log in with a real Riro account, and confirm `/api/me` returns the current user.
 6. Open `/admin`, confirm the dashboard loads, and test one reservation close-list resend.
-7. Confirm Vercel cron has both jobs:
-   - `/api/cron/closed-period-notifications` at `0 8 * * *` (17:00 KST)
+7. Confirm Vercel cron has the maintenance job:
    - `/api/cron/maintenance` at `0 19 * * *` (04:00 KST)
+8. Configure the external 1-minute closed-period notification cron with `npm run cron:setup:external`.
 
 ## Cron Endpoints
 
@@ -64,7 +70,27 @@ Authorization: Bearer ${CRON_SECRET}
 
 `/api/cron/maintenance` removes expired sessions, expired CSRF tokens, expired rate-limit buckets, releases expired temporary reservation restrictions, and revokes expired temporary sanction rows.
 
-The checked-in cron schedules are Vercel Hobby-compatible daily jobs. For near-real-time closed-period Discord delivery, use a Vercel Pro plan with a more frequent schedule or trigger the manual resend action from the admin dashboard.
+`/api/cron/maintenance` is scheduled by Vercel because it is daily and Vercel Hobby-compatible.
+
+`/api/cron/closed-period-notifications` should be triggered by an external HTTP cron every 1 minute. GitHub Actions schedule events can be delayed under load, and Vercel Hobby cron is not suitable for a frequent production poll. The checked-in GitHub workflow is manual-only fallback now.
+
+Use cron-job.org with the project setup script:
+
+```bash
+EXTERNAL_CRON_BASE_URL=https://your-production-domain.example \
+CRON_JOB_ORG_API_KEY=... \
+CRON_SECRET=... \
+npm run cron:setup:external
+```
+
+The script creates or updates a cron-job.org job named `Info Room closed-period notifications`, calls:
+
+```text
+GET /api/cron/closed-period-notifications
+Authorization: Bearer ${CRON_SECRET}
+```
+
+and schedules it for every minute in `Asia/Seoul`.
 
 ## External Integration Smoke Gate
 

@@ -43,11 +43,16 @@ describe("server environment guards", () => {
 
   it("allows an explicit production local student fallback without the generic local toggle", () => {
     const productionEnv = {
+      ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      CRON_SECRET: "cron-secret-with-enough-length",
+      DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+      DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
       ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
       LOCAL_STUDENT_LOGIN_ID: "local-student",
       LOCAL_STUDENT_LOGIN_PASSWORD: "production-student-secret",
       NODE_ENV: "production",
+      SESSION_SECRET: "session-secret-with-enough-length",
       TRUST_FORWARDED_IP_HEADERS: "true"
     } as const;
 
@@ -59,11 +64,16 @@ describe("server environment guards", () => {
   it("rejects a weak explicit production local student password", () => {
     expect(() =>
       assertProductionEnvSafe({
+        ADMIN_STUDENT_NUMBERS: "test-admin-student",
+        CRON_SECRET: "cron-secret-with-enough-length",
+        DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+        DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
         DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
         ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
         LOCAL_STUDENT_LOGIN_ID: "local_student_a",
         LOCAL_STUDENT_LOGIN_PASSWORD: "short",
         NODE_ENV: "production",
+        SESSION_SECRET: "session-secret-with-enough-length",
         TRUST_FORWARDED_IP_HEADERS: "true"
       })
     ).toThrow("LOCAL_STUDENT_LOGIN_PASSWORD");
@@ -89,7 +99,7 @@ describe("server environment guards", () => {
   it("requires trusted forwarded IP headers in production", () => {
     const productionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
-      CRON_SECRET: "cron-secret",
+      CRON_SECRET: "cron-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:5432/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
@@ -105,6 +115,46 @@ describe("server environment guards", () => {
     expect(() =>
       assertProductionEnvSafe({ ...productionEnv, TRUST_FORWARDED_IP_HEADERS: "true" })
     ).not.toThrow();
+  });
+
+  it("requires all production deployment secrets at the runtime guard boundary", () => {
+    const baseProductionEnv = {
+      ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      CRON_SECRET: "cron-secret-with-enough-length",
+      DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+      DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
+      DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+      NODE_ENV: "production",
+      SESSION_SECRET: "session-secret-with-enough-length",
+      TRUST_FORWARDED_IP_HEADERS: "true"
+    } as const;
+
+    expect(() => assertProductionEnvSafe(baseProductionEnv)).not.toThrow();
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, DATABASE_URL: "" })).toThrow("DATABASE_URL");
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, DIRECT_URL: "" })).toThrow("DIRECT_URL");
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, SESSION_SECRET: "" })).toThrow("SESSION_SECRET");
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, ADMIN_STUDENT_NUMBERS: "" })).toThrow(
+      "ADMIN_STUDENT_NUMBERS"
+    );
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, CRON_SECRET: "" })).toThrow("CRON_SECRET");
+  });
+
+  it("rejects weak production shared secrets", () => {
+    const baseProductionEnv = {
+      ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      CRON_SECRET: "cron-secret-with-enough-length",
+      DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+      DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
+      DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+      NODE_ENV: "production",
+      SESSION_SECRET: "session-secret-with-enough-length",
+      TRUST_FORWARDED_IP_HEADERS: "true"
+    } as const;
+
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, SESSION_SECRET: "short" })).toThrow(
+      "SESSION_SECRET"
+    );
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, CRON_SECRET: "short" })).toThrow("CRON_SECRET");
   });
 
   it("enables mock login only in non-production no-database mode", () => {
@@ -148,11 +198,16 @@ describe("server environment guards", () => {
   it("allows multiple local student fallback ids with a shared strong password", () => {
     expect(() =>
       assertProductionEnvSafe({
+        ADMIN_STUDENT_NUMBERS: "test-admin-student",
+        CRON_SECRET: "cron-secret-with-enough-length",
+        DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+        DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
         ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
         LOCAL_STUDENT_LOGIN_ID: "local_student_a,local_student_b",
         LOCAL_STUDENT_LOGIN_PASSWORD: "shared-secret",
         NODE_ENV: "production",
         DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+        SESSION_SECRET: "session-secret-with-enough-length",
         TRUST_FORWARDED_IP_HEADERS: "true"
       })
     ).not.toThrow();
@@ -174,11 +229,16 @@ describe("server environment guards", () => {
   it("rejects any weak password in a multiple local student fallback list", () => {
     expect(() =>
       assertProductionEnvSafe({
+        ADMIN_STUDENT_NUMBERS: "test-admin-student",
+        CRON_SECRET: "cron-secret-with-enough-length",
+        DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+        DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
         ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
         LOCAL_STUDENT_LOGIN_ID: "local_student_a,local_student_b",
         LOCAL_STUDENT_LOGIN_PASSWORD: "short,another-strong-secret",
         NODE_ENV: "production",
         DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+        SESSION_SECRET: "session-secret-with-enough-length",
         TRUST_FORWARDED_IP_HEADERS: "true"
       })
     ).toThrow("LOCAL_STUDENT_LOGIN_PASSWORD");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { Options } from "ky";
 
-import { interpretLoginJson, parseRiroProfileFromHtml } from "./riro-auth";
+import { interpretLoginJson, loginWithRiroSchool, parseRiroProfileFromHtml } from "./riro-auth";
 
 describe("riro auth parser", () => {
   it("returns a typed invalid credential result when RiroSchool returns 902", () => {
@@ -113,4 +114,80 @@ describe("riro auth parser", () => {
       }
     });
   });
+
+  it("keeps the RiroSchool session cookies across email-style login requests", async () => {
+    const requests: Array<{ readonly options: Options | undefined; readonly url: string }> = [];
+    const fakeClient = {
+      async post(url: string, options?: Options): Promise<Response> {
+        requests.push({ options, url });
+        if (url.endsWith("user_logout")) {
+          return new Response("", {
+            headers: {
+              "set-cookie": "PHPSESSID=session-1; path=/"
+            }
+          });
+        }
+        if (url.endsWith("ajax.php")) {
+          return Response.json(
+            {
+              code: "000",
+              data: { url: "/user.php" },
+              token: "token-1"
+            },
+            {
+              headers: {
+                "set-cookie": "AWSALB=alb-1; Path=/"
+              }
+            }
+          );
+        }
+        return new Response(
+          `
+            <div class="td_title">통합아이디</div>
+            <div class="elem_fix">24012345 계정정보 1학년 2반)</div>
+            <div class="input_disabled">김하늘</div>
+            <div class="input_disabled">2-0789</div>
+          `
+        );
+      }
+    };
+
+    await expect(
+      loginWithRiroSchool({
+        httpClient: fakeClient,
+        id: "student@example.com",
+        password: "pw"
+      })
+    ).resolves.toEqual({
+      kind: "success",
+      profile: {
+        generation: 31,
+        name: "김하늘",
+        role: "STUDENT",
+        student: "1학년 2반",
+        studentNumber: "20789"
+      }
+    });
+
+    const loginHeaders = requests[1]?.options?.headers;
+    const profileHeaders = requests[2]?.options?.headers;
+    expect(readCookieHeader(loginHeaders)).toContain("PHPSESSID=session-1");
+    expect(readCookieHeader(profileHeaders)).toContain("PHPSESSID=session-1");
+    expect(readCookieHeader(profileHeaders)).toContain("AWSALB=alb-1");
+    expect(readCookieHeader(profileHeaders)).toContain("cookie_token=token-1");
+  });
 });
+
+function readCookieHeader(headers: Options["headers"]): string {
+  if (!headers) {
+    return "";
+  }
+  if (headers instanceof Headers) {
+    return headers.get("cookie") ?? "";
+  }
+  if (Array.isArray(headers)) {
+    const entry = headers.find(([name]) => name.toLowerCase() === "cookie");
+    return entry?.[1] ?? "";
+  }
+  return headers.cookie ?? "";
+}

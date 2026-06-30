@@ -10,6 +10,8 @@ describe("buildSecurityHeaders", () => {
   it("sets browser hardening headers", () => {
     const headers = headersFor("production");
 
+    expect(headers["Cross-Origin-Resource-Policy"]).toBe("same-origin");
+    expect(headers["Origin-Agent-Cluster"]).toBe("?1");
     expect(headers["X-Content-Type-Options"]).toBe("nosniff");
     expect(headers["X-Frame-Options"]).toBe("DENY");
     expect(headers["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");

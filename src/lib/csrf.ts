@@ -1,4 +1,6 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
+
+import { hashServerSecretValue } from "./secret-hash";
 
 export type CsrfErrorReason = "csrf_expired" | "csrf_invalid" | "csrf_missing";
 
@@ -64,5 +66,5 @@ export function messageForCsrfError(reason: CsrfErrorReason): string {
 }
 
 export function hashCsrfToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
+  return hashServerSecretValue(token, "csrf");
 }

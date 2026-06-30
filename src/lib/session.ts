@@ -1,11 +1,12 @@
 import { Buffer } from "node:buffer";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import { cookies } from "next/headers";
 import { z } from "zod";
 
 import { prisma } from "./db";
 import { isNoDatabaseMockMode } from "./mock-dev-mode";
+import { hashServerSecretValue } from "./secret-hash";
 
 export const SESSION_COOKIE_NAME = "info_room_session";
 
@@ -160,7 +161,7 @@ export function clearSessionCookie(response: Response): void {
 }
 
 export function hashSessionToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
+  return hashServerSecretValue(token, "session");
 }
 
 function readMockSessionToken(token: string): CurrentSession | null {

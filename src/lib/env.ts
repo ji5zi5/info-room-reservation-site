@@ -5,6 +5,14 @@ import { isDiscordWebhookUrl } from "./discord-webhook-url";
 type ServerEnvInput = Readonly<Record<string, string | undefined>>;
 
 const BooleanFlagSchema = z.union([z.literal("true"), z.literal("false")]).optional();
+const MIN_PRODUCTION_SECRET_LENGTH = 24;
+const REQUIRED_PRODUCTION_KEYS = [
+  "ADMIN_STUDENT_NUMBERS",
+  "CRON_SECRET",
+  "DATABASE_URL",
+  "DIRECT_URL",
+  "SESSION_SECRET"
+] as const;
 
 const ServerEnvSchema = z.object({
   ADMIN_LOGIN_ID: z.string().optional(),
@@ -76,7 +84,7 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
 export function assertProductionEnvSafe(raw: ServerEnvInput = process.env): void {
   const env = parseServerEnv(raw);
   if (env.nodeEnv === "production") {
-    const invalidKeys: string[] = [];
+    const invalidKeys: string[] = [...missingProductionKeys(env)];
     if (env.riroMockLogin) {
       invalidKeys.push("RIRO_MOCK_LOGIN");
     }
@@ -91,6 +99,12 @@ export function assertProductionEnvSafe(raw: ServerEnvInput = process.env): void
     }
     if (!env.trustForwardedIpHeaders) {
       invalidKeys.push("TRUST_FORWARDED_IP_HEADERS");
+    }
+    if (env.sessionSecret !== null && env.sessionSecret.length < MIN_PRODUCTION_SECRET_LENGTH) {
+      invalidKeys.push("SESSION_SECRET");
+    }
+    if (env.cronSecret !== null && env.cronSecret.length < MIN_PRODUCTION_SECRET_LENGTH) {
+      invalidKeys.push("CRON_SECRET");
     }
     if (invalidKeys.length > 0) {
       throw new ServerEnvError(invalidKeys);
@@ -167,6 +181,17 @@ function splitEnvList(value: string | null): readonly string[] {
 
 function isAnyLocalStudentLoginEnabled(env: ServerEnv): boolean {
   return env.enableLocalStudent || env.enableProductionLocalStudent;
+}
+
+function missingProductionKeys(env: ServerEnv): readonly string[] {
+  const values = {
+    ADMIN_STUDENT_NUMBERS: env.adminStudentNumbers,
+    CRON_SECRET: env.cronSecret,
+    DATABASE_URL: env.databaseUrl,
+    DIRECT_URL: env.directUrl,
+    SESSION_SECRET: env.sessionSecret
+  } satisfies Record<(typeof REQUIRED_PRODUCTION_KEYS)[number], string | null>;
+  return REQUIRED_PRODUCTION_KEYS.filter((key) => values[key] === null);
 }
 
 export class ServerEnvError extends Error {
