@@ -5,6 +5,8 @@ import { getStudyPeriodLabel, type StudyPeriod } from "./study-periods";
 
 const DISCORD_FIELD_VALUE_LIMIT = 1024;
 const DISCORD_SAFE_FIELD_VALUE_LIMIT = 900;
+const DISCORD_WEBHOOK_URL_PATTERN =
+  /(https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+)\/[^\s"')<>]+/gu;
 
 export type ClosedPeriodNotificationApplicant = {
   readonly name: string;
@@ -18,6 +20,14 @@ export type ClosedPeriodNotificationInput = {
   readonly closeTime: string;
   readonly confirmedCount: number;
   readonly date: string;
+  readonly studyPeriod: StudyPeriod;
+};
+
+export type ReservationCreatedNotificationInput = {
+  readonly date: string;
+  readonly reason: string | null;
+  readonly studentName: string;
+  readonly studentNumber: string;
   readonly studyPeriod: StudyPeriod;
 };
 
@@ -66,6 +76,35 @@ export function buildClosedPeriodDiscordPayload(input: ClosedPeriodNotificationI
   };
 }
 
+export function buildReservationCreatedDiscordPayload(
+  input: ReservationCreatedNotificationInput
+): DiscordWebhookPayload {
+  const label = getStudyPeriodLabel(input.studyPeriod);
+  return {
+    allowed_mentions: { parse: [] },
+    embeds: [
+      {
+        color: 0x1f6feb,
+        description: `${input.date} · ${label}`,
+        fields: [
+          {
+            inline: true,
+            name: "학생",
+            value: `${input.studentName} (${input.studentNumber})`
+          },
+          {
+            inline: false,
+            name: "사유",
+            value: reservationReasonLabel(input.reason)
+          }
+        ],
+        title: "신청 알림"
+      }
+    ],
+    username: "정보실 예약"
+  };
+}
+
 export function buildDiscordWebhookExecuteUrl(webhookUrl: string): string {
   const url = parseDiscordWebhookUrl(webhookUrl);
   url.searchParams.set("wait", "true");
@@ -84,6 +123,10 @@ export async function sendDiscordWebhook(input: {
     })
     .json<DiscordWebhookMessage>();
   return { messageIds: message.id ? [message.id] : [] };
+}
+
+export function redactDiscordWebhookTokens(message: string): string {
+  return message.replace(DISCORD_WEBHOOK_URL_PATTERN, "$1/[redacted]");
 }
 
 function buildApplicantFields(applicants: readonly ClosedPeriodNotificationApplicant[]): readonly DiscordEmbedField[] {

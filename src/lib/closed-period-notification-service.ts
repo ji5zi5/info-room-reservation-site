@@ -6,11 +6,13 @@ import {
   type ClosedPeriodDeliverySnapshot,
   type ClosedPeriodNotificationFinalStatus
 } from "./closed-period-notifications";
-import { buildClosedPeriodDiscordPayload, type DiscordWebhookPayload, type DiscordWebhookSendResult } from "./discord-notifications";
+import {
+  buildClosedPeriodDiscordPayload,
+  redactDiscordWebhookTokens,
+  type DiscordWebhookPayload,
+  type DiscordWebhookSendResult
+} from "./discord-notifications";
 import type { StudyPeriod } from "./study-periods";
-
-const DISCORD_WEBHOOK_URL_PATTERN =
-  /(https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+)\/[^\s"')<>]+/gu;
 
 export type ClosedPeriodNotificationPeriod = {
   readonly applicants: readonly {
@@ -160,8 +162,4 @@ function errorMessage(error: unknown): string {
     return redactDiscordWebhookTokens(error.message);
   }
   return "Unknown Discord notification error";
-}
-
-function redactDiscordWebhookTokens(message: string): string {
-  return message.replace(DISCORD_WEBHOOK_URL_PATTERN, "$1/[redacted]");
 }

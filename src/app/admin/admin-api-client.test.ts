@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAdminSettings, markReservationNoShow, saveAdminSettings } from "./admin-api-client";
+import {
+  fetchAdminNotificationSettings,
+  fetchAdminSettings,
+  markReservationNoShow,
+  saveAdminNotificationSettings,
+  saveAdminSettings
+} from "./admin-api-client";
 
 const csrfFetchMock = vi.hoisted(() =>
   vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
@@ -67,6 +73,55 @@ describe("admin api client", () => {
             windowState: "open"
           }
         ]
+      })
+    );
+  });
+
+  it("reads Discord notification settings from the separate admin endpoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(
+          JSON.stringify({
+            notificationSettings: {
+              closedPeriodNotificationsEnabled: true,
+              id: "global",
+              reservationCreatedNotificationsEnabled: false
+            }
+          }),
+          { status: 200 }
+        )
+    );
+
+    await expect(fetchAdminNotificationSettings()).resolves.toEqual({
+      data: {
+        closedPeriodNotificationsEnabled: true,
+        id: "global",
+        reservationCreatedNotificationsEnabled: false
+      },
+      kind: "ok"
+    });
+  });
+
+  it("saves only Discord notification toggle values", async () => {
+    csrfFetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await expect(
+      saveAdminNotificationSettings({
+        closedPeriodNotificationsEnabled: false,
+        id: "global",
+        reservationCreatedNotificationsEnabled: true
+      })
+    ).resolves.toBe(true);
+
+    const [url, request] = csrfFetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/notification-settings");
+    expect(request?.body).toBe(
+      JSON.stringify({
+        notificationSettings: {
+          closedPeriodNotificationsEnabled: false,
+          reservationCreatedNotificationsEnabled: true
+        }
       })
     );
   });

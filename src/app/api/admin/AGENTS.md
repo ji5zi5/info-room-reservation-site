@@ -9,6 +9,7 @@
 ```
 src/app/api/admin/
 ├── dashboard/                 # Daily period summaries for the console
+├── notification-settings/     # Global Discord notification toggles
 ├── period-settings/           # Date + period open/close/capacity writes
 ├── reservations/              # Admin reservation list and transitions
 ├── users/                     # Student search, detail, restrictions, sessions
@@ -21,7 +22,7 @@ src/app/api/admin/
 
 | Task | Location | Notes |
 | --- | --- | --- |
-| Settings writes | `period-settings/route.ts` | Patch `date + studyPeriod`; write `AdminAction` rows. |
+| Settings writes | `period-settings/route.ts`, `notification-settings/route.ts` | Patch period settings by date + studyPeriod and Discord notification settings globally; write `AdminAction` rows. |
 | Reservation cancel/no-show | `reservations/[id]/cancel/route.ts`, `reservations/[id]/no-show/route.ts` | Only transition `CONFIRMED` rows. |
 | User restriction | `users/[id]/restriction/route.ts`, `users/[id]/restriction/restriction-route-support.ts` | `BANNED` uses `days: null`; `RESTRICTED` requires days. |
 | Student detail | `users/[id]/route.ts` | Includes reservation history, active sanction, and action history. |

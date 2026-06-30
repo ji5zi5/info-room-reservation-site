@@ -3,7 +3,7 @@
 import { ClipboardList, ShieldAlert, UserSearch } from "lucide-react";
 import type { ReactElement } from "react";
 
-import { parseAdminAuditActionFilter } from "@/lib/admin-audit-actions";
+import { getAdminAuditActionLabel, parseAdminAuditActionFilter } from "@/lib/admin-audit-actions";
 
 import { buildAuditActionsCsv } from "./admin-csv";
 import { ADMIN_AUDIT_ACTION_FILTERS, type AdminAuditAction, type AdminAuditActionFilter } from "./admin-types";
@@ -17,17 +17,6 @@ const FILTER_LABELS: Record<AdminAuditActionFilter, string> = {
   RESTRICTION: "제재",
   SESSION: "세션",
   SETTINGS: "설정"
-};
-
-const ACTION_LABELS: Record<string, string> = {
-  ADMIN_RESERVATION_CANCEL: "관리자 예약 취소",
-  CLOSED_LIST_NOTIFICATION_SEND: "마감 명단 전송",
-  NO_SHOW_BAN: "노쇼 차단",
-  PERIOD_SETTINGS_PATCH: "운영 설정 변경",
-  STUDENT_RESERVATION_CANCEL_RESTRICTION: "학생 예약 취소 제한",
-  USER_RESTRICTION_APPLY: "학생 제재 적용",
-  USER_RESTRICTION_REMOVE: "학생 제재 해제",
-  USER_SESSIONS_REVOKE: "학생 세션 종료"
 };
 
 export function AdminAuditPanel({
@@ -91,7 +80,7 @@ export function AdminAuditPanel({
             <article className="audit-line" key={action.id}>
               <div>
                 <span className="status-chip">{FILTER_LABELS[action.category]}</span>
-                <strong>{ACTION_LABELS[action.action] ?? action.action}</strong>
+                <strong>{getAdminAuditActionLabel(action.action)}</strong>
                 <p className="muted">{formatDateTime(action.createdAt)}</p>
               </div>
               <div className="detail-lines">

@@ -32,7 +32,7 @@ Branch: main
 | Reservation business rules | `src/lib/reservation-service.ts`, `src/lib/period-settings.ts`, `src/lib/study-periods.ts` | Keep `8면학` before `1면학`. |
 | Riro login/session | `src/lib/riro-auth.ts`, `src/lib/auth-service.ts`, `src/lib/session.ts`, `src/lib/env.ts` | Real Riro is the normal path; mock/local fallback modes require explicit env gates. |
 | Admin filters/search/detail | `src/lib/admin-reservations.ts`, `src/lib/admin-users.ts`, `src/lib/admin-user-detail.ts` | Unit-tested pure helpers. |
-| Discord close-list notifications | `src/lib/closed-period-*`, `src/lib/discord-notifications.ts`, `src/app/api/cron/closed-period-notifications/route.ts` | Send only after close, not on reservation create. |
+| Discord notifications | `src/lib/closed-period-*`, `src/lib/reservation-created-notification-service.ts`, `src/lib/discord-notifications.ts`, `src/app/api/cron/closed-period-notifications/route.ts` | Closed-list auto sends after close; reservation-created alerts are optional and best-effort after confirmed reservations. |
 | Deployment readiness | `DEPLOYMENT.md`, `scripts/predeploy-check.ts`, `scripts/external-smoke.ts`, `.github/workflows/ci.yml` | Vercel + Postgres path uses Prisma migrate deploy and explicit smoke gates. |
 | E2E behavior | `tests/home-date-first.spec.ts`, `tests/home-auth-refresh.spec.ts`, `tests/admin-reservation-flow.spec.ts`, `tests/admin-ui-polish.spec.ts` | Keep new scenarios focused rather than expanding one large spec. |
 
@@ -45,14 +45,14 @@ Branch: main
 - Reservation windows use KST dates/times.
 - Advance reservation is date-first, opens from tomorrow, limited to the current week, and unavailable on Friday.
 - Restricted or banned users can log in but cannot create reservations.
-- Discord sends closed-period applicant lists only; reservation-created notifications are intentionally out of scope.
+- Discord closed-list auto sends and reservation-created alerts are controlled by admin notification settings; manual closed-list send remains available.
 
 ## DATA AND ENV
 
 - Prisma datasource is PostgreSQL. Local SQLite assumptions are stale.
 - Required production envs: `DATABASE_URL`, `DIRECT_URL`, `SESSION_SECRET`, `ADMIN_STUDENT_NUMBERS`, `CRON_SECRET`, `DISCORD_WEBHOOK_URL`, `TRUST_FORWARDED_IP_HEADERS=true`.
 - Development toggles: `RIRO_MOCK_LOGIN`, `ENABLE_LOCAL_ADMIN`, `ENABLE_LOCAL_STUDENT`, `ADMIN_LOGIN_ID`, `ADMIN_LOGIN_PASSWORD`, `LOCAL_STUDENT_*`. Production must not rely on these.
-- Current checked-in scheduling: GitHub Actions triggers `GET /api/cron/closed-period-notifications`; Vercel cron triggers `GET /api/cron/maintenance`; both use `Authorization: Bearer ${CRON_SECRET}`.
+- Current scheduling: external cron triggers `GET /api/cron/closed-period-notifications`; Vercel cron triggers `GET /api/cron/maintenance`; both use `Authorization: Bearer ${CRON_SECRET}`. GitHub Actions is fallback/manual only.
 - Production sessions should set Secure cookies via `src/lib/session.ts`.
 - External live checks use `npm run smoke:external`; never commit real smoke credentials or webhook URLs.
 

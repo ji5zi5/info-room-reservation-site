@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const auditedRouteFiles = [
+  "src/app/api/admin/notification-settings/route.ts",
   "src/app/api/admin/notifications/closed-periods/send/route.ts",
   "src/app/api/admin/period-settings/route.ts",
   "src/app/api/admin/reservations/[id]/cancel/route.ts",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildClosedListNotificationAdminAction,
+  buildNotificationSettingsPatchAdminAction,
   buildPeriodSettingsPatchAdminAction,
   summarizePeriodSettingsForAudit
 } from "./admin-operation-audit";
@@ -89,5 +90,40 @@ describe("admin operation audit builders", () => {
     });
     expect(failed.reason).toBe("마감 명단 재전송");
     expect(JSON.parse(failed.after)).toMatchObject({ kind: "failed", lastError: "webhook down", status: "FAILED" });
+  });
+
+  it("builds notification settings patch admin actions with before and after booleans", () => {
+    const action = buildNotificationSettingsPatchAdminAction({
+      actorId: "admin-1",
+      after: {
+        closedPeriodNotificationsEnabled: false,
+        id: "global",
+        reservationCreatedNotificationsEnabled: true
+      },
+      before: {
+        closedPeriodNotificationsEnabled: true,
+        id: "global",
+        reservationCreatedNotificationsEnabled: false
+      },
+      ipHash: "ip-hash"
+    });
+
+    expect(action).toMatchObject({
+      action: "NOTIFICATION_SETTINGS_PATCH",
+      actorId: "admin-1",
+      ipHash: "ip-hash",
+      reason: "알림 설정 변경"
+    });
+    if (action.before === null) {
+      throw new Error("notification settings patch audit should include a before snapshot");
+    }
+    expect(JSON.parse(action.before)).toEqual({
+      closedPeriodNotificationsEnabled: true,
+      reservationCreatedNotificationsEnabled: false
+    });
+    expect(JSON.parse(action.after)).toEqual({
+      closedPeriodNotificationsEnabled: false,
+      reservationCreatedNotificationsEnabled: true
+    });
   });
 });

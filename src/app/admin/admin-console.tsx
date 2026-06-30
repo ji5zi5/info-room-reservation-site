@@ -138,8 +138,10 @@ export function AdminConsole(): ReactElement {
             ) : null}
             {consoleState.activeSection === "settings" ? (
               <AdminSettingsPanel
+                notificationSettings={consoleState.notificationSettings}
                 periods={consoleState.periods}
                 onSave={() => void consoleState.saveSettings()}
+                onUpdateNotificationSettings={consoleState.updateNotificationSettings}
                 onUpdatePeriod={consoleState.updatePeriod}
               />
             ) : null}

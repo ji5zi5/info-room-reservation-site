@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyAdminAuditAction,
   filterAdminAuditActions,
+  getAdminAuditActionLabel,
   orderAdminAuditActions,
   parseAdminAuditActionFilter
 } from "./admin-audit-actions";
@@ -48,7 +49,13 @@ describe("admin audit action helpers", () => {
     expect(classifyAdminAuditAction("NO_SHOW_BAN")).toBe("NO_SHOW");
     expect(classifyAdminAuditAction("PERIOD_SETTINGS_PATCH")).toBe("SETTINGS");
     expect(classifyAdminAuditAction("CLOSED_LIST_NOTIFICATION_SEND")).toBe("NOTIFICATION");
+    expect(classifyAdminAuditAction("NOTIFICATION_SETTINGS_PATCH")).toBe("NOTIFICATION");
     expect(classifyAdminAuditAction("SOMETHING_NEW")).toBe("OTHER");
+  });
+
+  it("maps known admin action strings to Korean labels", () => {
+    expect(getAdminAuditActionLabel("NOTIFICATION_SETTINGS_PATCH")).toBe("알림 설정 변경");
+    expect(getAdminAuditActionLabel("SOMETHING_NEW")).toBe("SOMETHING_NEW");
   });
 
   it("filters by category and Korean query across actor, target, and reason", () => {

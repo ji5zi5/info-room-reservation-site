@@ -9,7 +9,7 @@ Target platform: Vercel with managed Postgres.
 - `SESSION_SECRET`: long random secret for session signing.
 - `ADMIN_STUDENT_NUMBERS`: comma-separated student numbers with admin access.
 - `CRON_SECRET`: bearer token used by cron endpoints.
-- `DISCORD_WEBHOOK_URL`: Discord webhook URL for closed-period notifications.
+- `DISCORD_WEBHOOK_URL`: Discord webhook URL for closed-period notifications and optional reservation-created alerts.
 - `TRUST_FORWARDED_IP_HEADERS`: must be `true` on Vercel production so login rate limits use the real client IP from trusted proxy headers.
 - `RIRO_MOCK_LOGIN`: must be `false` in production.
 

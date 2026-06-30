@@ -1,6 +1,6 @@
 # 정보실 예약 사이트
 
-리로스쿨 계정으로 로그인해 정보실 면학 시간대를 예약하고, 관리자가 예약 현황과 제재, 마감 명단 Discord 전송을 운영하는 Next.js App Router 애플리케이션입니다.
+리로스쿨 계정으로 로그인해 정보실 면학 시간대를 예약하고, 관리자가 예약 현황과 제재, Discord 알림을 운영하는 Next.js App Router 애플리케이션입니다.
 
 ## 주요 기능
 
@@ -9,7 +9,7 @@
 - 당일예약과 사전예약 날짜 선택
 - 예약 취소, 미출석, 관리자 취소에 따른 예약 제한
 - 관리자 콘솔의 기간 설정, 예약자 관리, 학생 제재, 감사 로그
-- 마감된 시간대 신청자 명단 Discord 전송
+- 마감 명단 및 선택형 신청 알림 Discord 전송
 - Vercel cron 기반 마감 알림과 유지보수 cleanup
 
 ## 기술 스택
@@ -153,6 +153,6 @@ tests/        Playwright E2E flows and helpers
 
 - 시간대 표기는 항상 `8면학` 다음 `1면학`입니다.
 - 예약 가능 여부, 정원, 중복, 제재 상태는 서버가 최종 판단합니다.
-- Discord는 마감된 시간대 신청자 명단만 전송합니다.
+- Discord 알림은 관리자 설정에 따라 마감 명단과 신청 알림을 전송합니다.
 - 운영 DB에는 `prisma db push`를 사용하지 않고 migration deploy만 사용합니다.
 - `.next`, `.omo`, `test-results`, `prisma/dev.db`, `tsconfig.tsbuildinfo`는 GitHub에 올리지 않습니다.

@@ -200,6 +200,57 @@
   padding: 12px;
 }
 
+.notification-settings-block {
+  background: var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.notification-settings-block h3 {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.notification-settings-block svg {
+  color: var(--blue);
+}
+
+.notification-toggle-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.notification-toggle {
+  align-items: center;
+  background: var(--white);
+  border: 1px solid var(--fog);
+  border-radius: var(--radius);
+  color: var(--graphite);
+  display: flex;
+  font-size: 0.88rem;
+  font-weight: 600;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 42px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.notification-toggle span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notification-toggle input {
+  flex: 0 0 auto;
+  height: 18px;
+  width: 18px;
+}
+
 .notification-pill {
   align-items: center;
   background: var(--white);
@@ -233,6 +284,7 @@
   gap: 8px;
   justify-content: flex-end;
 }
+
 
 .admin-dashboard-topbar {
   align-items: center;
@@ -838,6 +890,10 @@
   }
 
   .restriction-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-toggle-grid {
     grid-template-columns: 1fr;
   }
 

@@ -129,6 +129,10 @@ async function mockAdminStudentManagement(page: Page, selectedStudentNumber: str
       await route.fulfill({ contentType: "application/json", json: { periods: mockAdminPeriods() } });
       return;
     }
+    if (pathname === "/api/admin/notification-settings") {
+      await route.fulfill({ contentType: "application/json", json: { notificationSettings: mockNotificationSettings() } });
+      return;
+    }
     if (pathname === "/api/admin/dashboard") {
       await route.fulfill({
         contentType: "application/json",
@@ -246,6 +250,14 @@ function mockAdminPeriods() {
       windowState: "not_open_yet"
     }
   ];
+}
+
+function mockNotificationSettings() {
+  return {
+    closedPeriodNotificationsEnabled: true,
+    id: "global",
+    reservationCreatedNotificationsEnabled: false
+  };
 }
 
 function mockAdminStatistics() {

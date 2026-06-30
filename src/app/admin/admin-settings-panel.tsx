@@ -1,15 +1,19 @@
 "use client";
 
-import { Save } from "lucide-react";
+import { Bell, Save } from "lucide-react";
 
-import type { AdminPeriodSetting, StudyPeriod } from "./admin-types";
+import type { AdminNotificationSettings, AdminPeriodSetting, StudyPeriod } from "./admin-types";
 
 export function AdminSettingsPanel({
+  notificationSettings,
   onSave,
+  onUpdateNotificationSettings,
   onUpdatePeriod,
   periods
 }: {
+  readonly notificationSettings: AdminNotificationSettings;
   readonly onSave: () => void;
+  readonly onUpdateNotificationSettings: (patch: Partial<AdminNotificationSettings>) => void;
   readonly onUpdatePeriod: (studyPeriod: StudyPeriod, patch: Partial<AdminPeriodSetting>) => void;
   readonly periods: readonly AdminPeriodSetting[];
 }): React.ReactElement {
@@ -61,6 +65,36 @@ export function AdminSettingsPanel({
             </div>
           </div>
         ))}
+      </div>
+      <div className="notification-settings-block">
+        <div className="period-top">
+          <h3>
+            <Bell aria-hidden="true" size={18} />
+            디스코드 알림
+          </h3>
+        </div>
+        <div className="notification-toggle-grid">
+          <label className="notification-toggle">
+            <span>마감 명단</span>
+            <input
+              checked={notificationSettings.closedPeriodNotificationsEnabled}
+              type="checkbox"
+              onChange={(event) =>
+                onUpdateNotificationSettings({ closedPeriodNotificationsEnabled: event.currentTarget.checked })
+              }
+            />
+          </label>
+          <label className="notification-toggle">
+            <span>신청 알림</span>
+            <input
+              checked={notificationSettings.reservationCreatedNotificationsEnabled}
+              type="checkbox"
+              onChange={(event) =>
+                onUpdateNotificationSettings({ reservationCreatedNotificationsEnabled: event.currentTarget.checked })
+              }
+            />
+          </label>
+        </div>
       </div>
       <button className="primary-button" type="button" onClick={onSave}>
         <Save size={18} />

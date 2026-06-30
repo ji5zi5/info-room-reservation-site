@@ -1,6 +1,7 @@
 import {
   AdminAuditActionsPayloadSchema,
   AdminDashboardPayloadSchema,
+  AdminNotificationSettingsPayloadSchema,
   AdminReservationsPayloadSchema,
   AdminSettingsPayloadSchema,
   AdminStatisticsPayloadSchema,
@@ -9,6 +10,7 @@ import {
   type AdminAuditAction,
   type AdminAuditActionFilter,
   type AdminDashboardPeriod,
+  type AdminNotificationSettings,
   type AdminPeriodSetting,
   type AdminReservation,
   type AdminReservationStatusFilter,
@@ -44,6 +46,15 @@ export async function fetchAdminSettings(date: string): Promise<AdminReadResult<
   }
   const result = await readJsonResponse(response, AdminSettingsPayloadSchema);
   return result.kind === "ok" ? { data: result.data.periods, kind: "ok" } : result;
+}
+
+export async function fetchAdminNotificationSettings(): Promise<AdminReadResult<AdminNotificationSettings>> {
+  const response = await fetch("/api/admin/notification-settings");
+  if (response.status === 401 || response.status === 403) {
+    return { kind: "unauthorized" };
+  }
+  const result = await readJsonResponse(response, AdminNotificationSettingsPayloadSchema);
+  return result.kind === "ok" ? { data: result.data.notificationSettings, kind: "ok" } : result;
 }
 
 export async function fetchAdminDashboard(date: string): Promise<AdminReadResult<readonly AdminDashboardPeriod[]>> {
@@ -115,6 +126,20 @@ export async function saveAdminSettings(input: {
 }): Promise<boolean> {
   const response = await csrfFetch("/api/admin/period-settings", {
     body: JSON.stringify(normalizeAdminSettingsInput(input)),
+    headers: { "content-type": "application/json" },
+    method: "PATCH"
+  });
+  return response.ok;
+}
+
+export async function saveAdminNotificationSettings(input: AdminNotificationSettings): Promise<boolean> {
+  const response = await csrfFetch("/api/admin/notification-settings", {
+    body: JSON.stringify({
+      notificationSettings: {
+        closedPeriodNotificationsEnabled: input.closedPeriodNotificationsEnabled,
+        reservationCreatedNotificationsEnabled: input.reservationCreatedNotificationsEnabled
+      }
+    }),
     headers: { "content-type": "application/json" },
     method: "PATCH"
   });

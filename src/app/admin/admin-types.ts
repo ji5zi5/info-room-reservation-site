@@ -25,6 +25,12 @@ export const AdminPeriodSettingSchema = z.object({
   windowState: PeriodWindowStateSchema
 });
 
+export const AdminNotificationSettingsSchema = z.object({
+  closedPeriodNotificationsEnabled: z.boolean(),
+  id: z.literal("global"),
+  reservationCreatedNotificationsEnabled: z.boolean()
+});
+
 const AdminDashboardNotificationSchema = z.object({
   attempts: z.number(),
   lastError: z.string().nullable(),
@@ -74,6 +80,9 @@ export const AdminUserSchema = z.object({
 });
 
 export const AdminSettingsPayloadSchema = z.object({ periods: z.array(AdminPeriodSettingSchema) });
+export const AdminNotificationSettingsPayloadSchema = z.object({
+  notificationSettings: AdminNotificationSettingsSchema
+});
 export const AdminDashboardPayloadSchema = z.object({ periods: z.array(AdminDashboardPeriodSchema) });
 export const AdminReservationsPayloadSchema = z.object({ reservations: z.array(AdminReservationSchema) });
 export const AdminUsersPayloadSchema = z.object({ users: z.array(AdminUserSchema) });
@@ -233,6 +242,7 @@ export const AdminUserDetailSchema = z.object({
 
 export type AdminDashboardPeriod = z.infer<typeof AdminDashboardPeriodSchema>;
 export type AdminAuditAction = z.infer<typeof AdminAuditActionSchema>;
+export type AdminNotificationSettings = z.infer<typeof AdminNotificationSettingsSchema>;
 export type AdminPeriodSetting = z.infer<typeof AdminPeriodSettingSchema>;
 export type AdminReservation = z.infer<typeof AdminReservationSchema>;
 export type AdminStatistics = z.infer<typeof AdminStatisticsSchema>;

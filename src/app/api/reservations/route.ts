@@ -9,9 +9,12 @@ import { createPrismaReservationStoreForActor } from "@/lib/prisma-reservation-s
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { reserveMockStudyPeriod } from "@/lib/mock-reservation-data";
+import { getPrismaNotificationSettings } from "@/lib/prisma-notification-settings";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
+import { sendDiscordWebhook } from "@/lib/discord-notifications";
+import { sendReservationCreatedNotification } from "@/lib/reservation-created-notification-service";
 import { enforceReservationRateLimit } from "@/lib/route-rate-limit";
 import { requireSession, UnauthorizedSessionError } from "@/lib/session";
 
@@ -74,6 +77,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       studyPeriod: parsed.data.studyPeriod,
       userId: user.id
     });
+    if (result.kind === "confirmed") {
+      await sendReservationCreatedNotificationBestEffort({
+        reservation: result.reservation,
+        user: {
+          name: user.name,
+          studentNumber: user.studentNumber
+        }
+      });
+    }
 
     return buildReservationResponse(result);
   } catch (error) {
@@ -84,6 +96,28 @@ export async function POST(request: Request): Promise<NextResponse> {
       return jsonError(409, "duplicate", "이미 예약한 시간대입니다.");
     }
     throw error;
+  }
+}
+
+async function sendReservationCreatedNotificationBestEffort(input: {
+  readonly reservation: import("@/lib/reservation-service").Reservation;
+  readonly user: {
+    readonly name: string;
+    readonly studentNumber: string;
+  };
+}): Promise<void> {
+  try {
+    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    const notificationSettings = await getPrismaNotificationSettings();
+    await sendReservationCreatedNotification({
+      notificationSettings,
+      reservation: input.reservation,
+      sender: (payload) => sendDiscordWebhook({ payload, webhookUrl: webhookUrl ?? "" }),
+      user: input.user,
+      webhookUrl
+    });
+  } catch {
+    // Discord notifications are best-effort and must not change reservation results.
   }
 }
 

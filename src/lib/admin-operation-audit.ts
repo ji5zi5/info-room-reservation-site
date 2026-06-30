@@ -1,4 +1,5 @@
 import { STUDY_PERIODS, type StudyPeriod } from "./study-periods";
+import type { NotificationSettings } from "./notification-settings";
 
 export type PeriodSettingsAuditRow = {
   readonly capacity: number;
@@ -9,7 +10,7 @@ export type PeriodSettingsAuditRow = {
 };
 
 export type AdminOperationActionData = {
-  readonly action: "CLOSED_LIST_NOTIFICATION_SEND" | "PERIOD_SETTINGS_PATCH";
+  readonly action: "CLOSED_LIST_NOTIFICATION_SEND" | "NOTIFICATION_SETTINGS_PATCH" | "PERIOD_SETTINGS_PATCH";
   readonly actorId: string;
   readonly after: string;
   readonly before: string | null;
@@ -24,6 +25,11 @@ type ClosedListNotificationAuditResult = {
     readonly status: "FAILED" | "SENT";
   };
   readonly kind: "failed" | "sent";
+};
+
+type NotificationSettingsAuditSnapshot = {
+  readonly closedPeriodNotificationsEnabled: boolean;
+  readonly reservationCreatedNotificationsEnabled: boolean;
 };
 
 export function buildPeriodSettingsPatchAdminAction(input: {
@@ -69,10 +75,35 @@ export function buildClosedListNotificationAdminAction(input: {
   };
 }
 
+export function buildNotificationSettingsPatchAdminAction(input: {
+  readonly actorId: string;
+  readonly after: NotificationSettings;
+  readonly before: NotificationSettings;
+  readonly ipHash: string;
+}): AdminOperationActionData {
+  return {
+    action: "NOTIFICATION_SETTINGS_PATCH",
+    actorId: input.actorId,
+    after: JSON.stringify(summarizeNotificationSettingsForAudit(input.after)),
+    before: JSON.stringify(summarizeNotificationSettingsForAudit(input.before)),
+    ipHash: input.ipHash,
+    reason: "알림 설정 변경"
+  };
+}
+
 export function summarizePeriodSettingsForAudit(
   settings: readonly PeriodSettingsAuditRow[]
 ): readonly PeriodSettingsAuditRow[] {
   return [...settings].sort((left, right) => periodRank(left.studyPeriod) - periodRank(right.studyPeriod));
+}
+
+export function summarizeNotificationSettingsForAudit(
+  settings: NotificationSettings
+): NotificationSettingsAuditSnapshot {
+  return {
+    closedPeriodNotificationsEnabled: settings.closedPeriodNotificationsEnabled,
+    reservationCreatedNotificationsEnabled: settings.reservationCreatedNotificationsEnabled
+  };
 }
 
 function periodRank(studyPeriod: string): number {

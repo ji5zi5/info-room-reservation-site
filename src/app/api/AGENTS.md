@@ -21,16 +21,16 @@ src/app/api/
 
 | Task | Location | Notes |
 | --- | --- | --- |
-| Student reservation create | `reservations/route.ts` | Uses request safety, CSRF, user session, rate limit, and `createReservation`. |
+| Student reservation create | `reservations/route.ts` | Uses request safety, CSRF, user session, rate limit, `createReservation`, and optional best-effort reservation-created Discord alerts after confirmation. |
 | Student reservation cancel | `reservations/[id]/route.ts` | Must apply cancellation restriction through the service/store path. |
 | Riro login | `auth/riro/login/route.ts` | Keep mock and local admin gates aligned with `src/lib/env.ts`. |
 | Current user | `me/route.ts` | Include restriction expiry so expired temporary restrictions do not block UI forever. |
 | Period summaries | `periods/route.ts` | Do not create period settings for out-of-policy dates. |
-| Admin settings | `admin/period-settings/route.ts` | Admin-only; settings writes must stay date + period scoped. |
+| Admin settings | `admin/period-settings/route.ts`, `admin/notification-settings/route.ts` | Period writes stay date + period scoped; notification settings are global toggles. |
 | Admin API subtree | `admin/` | Nested `AGENTS.md` covers audit, mutation, and transition rules. |
 | Admin transitions | `admin/reservations/[id]/cancel/route.ts`, `admin/reservations/[id]/no-show/route.ts` | Only transition `CONFIRMED` reservations. |
 | User sanctions | `admin/users/[id]/restriction/route.ts` | `BANNED` uses `days: null`; `RESTRICTED` requires days. |
-| Discord send | `admin/notifications/closed-periods/send/route.ts` | Manual close-list send only; never reservation-created notifications. |
+| Discord send | `admin/notifications/closed-periods/send/route.ts`, `reservations/route.ts` | Manual close-list sends stay in admin; reservation-created alerts are student-route best-effort only. |
 | Cron | `cron/closed-period-notifications/route.ts`, `cron/maintenance/route.ts` | `Authorization: Bearer ${CRON_SECRET}` required. |
 
 ## CONVENTIONS

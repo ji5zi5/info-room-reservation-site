@@ -7,12 +7,14 @@ import {
   cancelAdminReservation,
   fetchAdminAuditActions,
   fetchAdminDashboard,
+  fetchAdminNotificationSettings,
   fetchAdminReservations,
   fetchAdminSettings,
   fetchAdminStatistics,
   fetchAdminUserDetail,
   markReservationNoShow,
   removeUserRestriction,
+  saveAdminNotificationSettings,
   saveAdminSettings,
   sendClosedPeriodNotification,
   updatePeriodSetting
@@ -33,6 +35,7 @@ import {
   type AdminAuditAction,
   type AdminAuditActionFilter,
   type AdminDashboardPeriod,
+  type AdminNotificationSettings,
   type AdminPeriodSetting,
   type AdminReservation,
   type AdminReservationStatusFilter,
@@ -46,10 +49,18 @@ import {
 
 const SHADOW_BAN_RESTRICTION = { days: null, reason: "블랙리스트", status: "SHADOW_BANNED" } as const;
 
+const DEFAULT_NOTIFICATION_SETTINGS = {
+  closedPeriodNotificationsEnabled: true,
+  id: "global",
+  reservationCreatedNotificationsEnabled: false
+} satisfies AdminNotificationSettings;
+
 export function useAdminConsole(): AdminConsoleState {
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [date, setDate] = useState(todayKst());
   const [periods, setPeriods] = useState<readonly AdminPeriodSetting[]>([]);
+  const [notificationSettings, setNotificationSettings] =
+    useState<AdminNotificationSettings>(DEFAULT_NOTIFICATION_SETTINGS);
   const [dashboardPeriods, setDashboardPeriods] = useState<readonly AdminDashboardPeriod[]>([]);
   const [reservations, setReservations] = useState<readonly AdminReservation[]>([]);
   const [statistics, setStatistics] = useState<AdminStatistics | null>(null);
@@ -92,13 +103,24 @@ export function useAdminConsole(): AdminConsoleState {
   }, [selectedUserId]);
 
   async function refresh(): Promise<void> {
-    const settingsPayload = await fetchAdminSettings(date);
+    const [settingsPayload, notificationSettingsPayload] = await Promise.all([
+      fetchAdminSettings(date),
+      fetchAdminNotificationSettings()
+    ]);
     if (settingsPayload.kind === "unauthorized") {
+      setToast("관리자 로그인이 필요합니다.");
+      return;
+    }
+    if (notificationSettingsPayload.kind === "unauthorized") {
       setToast("관리자 로그인이 필요합니다.");
       return;
     }
     if (settingsPayload.kind === "error") {
       setToast(settingsPayload.message);
+      return;
+    }
+    if (notificationSettingsPayload.kind === "error") {
+      setToast(notificationSettingsPayload.message);
       return;
     }
     const [dashboardPayload, reservationsPayload, statisticsPayload, usersPayload, auditPayload] = await Promise.all([
@@ -125,6 +147,7 @@ export function useAdminConsole(): AdminConsoleState {
       return;
     }
     setPeriods(settingsPayload.data);
+    setNotificationSettings(notificationSettingsPayload.data);
     setDashboardPeriods(dashboardPayload.kind === "ok" ? dashboardPayload.data : []);
     setReservations(reservationsPayload.kind === "ok" ? reservationsPayload.data : []);
     setStatistics(statisticsPayload.kind === "ok" ? statisticsPayload.data : null);
@@ -136,7 +159,11 @@ export function useAdminConsole(): AdminConsoleState {
   }
 
   async function saveSettings(): Promise<void> {
-    const ok = await saveAdminSettings({ date, periods });
+    const [periodsOk, notificationsOk] = await Promise.all([
+      saveAdminSettings({ date, periods }),
+      saveAdminNotificationSettings(notificationSettings)
+    ]);
+    const ok = periodsOk && notificationsOk;
     setToast(ok ? "설정이 저장되었습니다." : "설정 저장에 실패했습니다.");
     await refresh();
   }
@@ -192,6 +219,10 @@ export function useAdminConsole(): AdminConsoleState {
     setPeriods((current) => updatePeriodSetting(current, studyPeriod, patch));
   }
 
+  function updateNotificationSettings(patch: Partial<AdminNotificationSettings>): void {
+    setNotificationSettings((current) => ({ ...current, ...patch, id: "global" }));
+  }
+
   function selectStatus(nextStatus: AdminReservationStatusFilter): void {
     setStatusFilter(nextStatus);
     writeReservationStatusToHistory(window.location, window.history, nextStatus);
@@ -239,6 +270,7 @@ export function useAdminConsole(): AdminConsoleState {
     dashboardPeriods,
     date,
     markNoShow,
+    notificationSettings,
     periods,
     refresh,
     removeRestriction,
@@ -263,6 +295,7 @@ export function useAdminConsole(): AdminConsoleState {
     statusFilter,
     statistics,
     toast,
+    updateNotificationSettings,
     updatePeriod,
     userQuery,
     userStatusFilter,

@@ -2,6 +2,7 @@ import type {
   AdminAuditAction,
   AdminAuditActionFilter,
   AdminDashboardPeriod,
+  AdminNotificationSettings,
   AdminPeriodSetting,
   AdminReservation,
   AdminReservationStatusFilter,
@@ -40,6 +41,7 @@ export type AdminConsoleState = {
   readonly dashboardPeriods: readonly AdminDashboardPeriod[];
   readonly date: string;
   readonly markNoShow: (reservationId: string) => Promise<void>;
+  readonly notificationSettings: AdminNotificationSettings;
   readonly periods: readonly AdminPeriodSetting[];
   readonly refresh: () => Promise<void>;
   readonly removeRestriction: (userId: string) => Promise<void>;
@@ -64,6 +66,7 @@ export type AdminConsoleState = {
   readonly statusFilter: AdminReservationStatusFilter;
   readonly statistics: AdminStatistics | null;
   readonly toast: string | null;
+  readonly updateNotificationSettings: (patch: Partial<AdminNotificationSettings>) => void;
   readonly updatePeriod: (studyPeriod: StudyPeriod, patch: Partial<AdminPeriodSetting>) => void;
   readonly userQuery: string;
   readonly userStatusFilter: AdminUserStatusFilter;

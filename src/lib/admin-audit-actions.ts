@@ -35,11 +35,24 @@ const ADMIN_AUDIT_ACTION_CATEGORIES: Readonly<Record<string, AdminAuditActionCat
   ADMIN_RESERVATION_CANCEL: "RESERVATION",
   CLOSED_LIST_NOTIFICATION_SEND: "NOTIFICATION",
   NO_SHOW_BAN: "NO_SHOW",
+  NOTIFICATION_SETTINGS_PATCH: "NOTIFICATION",
   PERIOD_SETTINGS_PATCH: "SETTINGS",
   STUDENT_RESERVATION_CANCEL_RESTRICTION: "RESERVATION",
   USER_RESTRICTION_APPLY: "RESTRICTION",
   USER_RESTRICTION_REMOVE: "RESTRICTION",
   USER_SESSIONS_REVOKE: "SESSION"
+};
+
+const ADMIN_AUDIT_ACTION_LABELS: Readonly<Record<string, string>> = {
+  ADMIN_RESERVATION_CANCEL: "관리자 예약 취소",
+  CLOSED_LIST_NOTIFICATION_SEND: "마감 명단 전송",
+  NO_SHOW_BAN: "노쇼 차단",
+  NOTIFICATION_SETTINGS_PATCH: "알림 설정 변경",
+  PERIOD_SETTINGS_PATCH: "운영 설정 변경",
+  STUDENT_RESERVATION_CANCEL_RESTRICTION: "학생 예약 취소 제한",
+  USER_RESTRICTION_APPLY: "학생 제재 적용",
+  USER_RESTRICTION_REMOVE: "학생 제재 해제",
+  USER_SESSIONS_REVOKE: "학생 세션 종료"
 };
 
 export function parseAdminAuditActionFilter(value: string | null): AdminAuditActionFilter {
@@ -60,6 +73,10 @@ export function parseAdminAuditActionFilter(value: string | null): AdminAuditAct
 
 export function classifyAdminAuditAction(action: string): AdminAuditActionCategory {
   return ADMIN_AUDIT_ACTION_CATEGORIES[action] ?? "OTHER";
+}
+
+export function getAdminAuditActionLabel(action: string): string {
+  return ADMIN_AUDIT_ACTION_LABELS[action] ?? action;
 }
 
 export function filterAdminAuditActions<T extends AdminAuditActionRow>(
