@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { PeriodSummary } from "@/components/reservation-period-card";
+import type { StudentNotification } from "@/lib/student-notifications";
 import type { StudentProfilePayload } from "@/lib/student-profile";
 import type { ReservationSidebarUser } from "./reservation-sidebar";
 
@@ -11,6 +12,10 @@ type LoginPayload = {
 
 export type StudentProfilePayloadReadResult =
   | { readonly kind: "loaded"; readonly profile: StudentProfilePayload }
+  | { readonly kind: "error"; readonly message: string };
+
+export type StudentNotificationsReadResult =
+  | { readonly kind: "loaded"; readonly notifications: readonly StudentNotification[] }
   | { readonly kind: "error"; readonly message: string };
 
 type JsonBodyReadResult =
@@ -97,6 +102,17 @@ const StudentProfilePayloadSchema = z.object({
   })
 });
 
+const StudentNotificationSchema = z.object({
+  createdAt: z.string(),
+  id: z.string(),
+  message: z.string(),
+  title: z.string()
+});
+
+const StudentNotificationsPayloadSchema = z.object({
+  notifications: z.array(StudentNotificationSchema)
+});
+
 const CurrentUserPayloadSchema = z.object({
   user: ReservationSidebarUserSchema.nullable()
 });
@@ -174,6 +190,30 @@ export async function readStudentProfilePayload(response: Response): Promise<Stu
     }
     case "malformed":
       return { kind: "error", message: "프로필 응답을 읽을 수 없습니다." };
+    default:
+      return assertNever(payload);
+  }
+}
+
+export async function readStudentNotificationsPayload(response: Response): Promise<StudentNotificationsReadResult> {
+  if (!response.ok) {
+    const message = await readApiErrorMessage(response);
+    return { kind: "error", message: message ?? "알림을 불러오지 못했습니다." };
+  }
+
+  const payload = await readJsonBody(response);
+  switch (payload.kind) {
+    case "empty":
+      return { kind: "error", message: "알림 응답이 비어 있습니다." };
+    case "loaded": {
+      const parsed = StudentNotificationsPayloadSchema.safeParse(payload.value);
+      if (!parsed.success) {
+        return { kind: "error", message: "알림 응답 형식이 올바르지 않습니다." };
+      }
+      return { kind: "loaded", notifications: parsed.data.notifications };
+    }
+    case "malformed":
+      return { kind: "error", message: "알림 응답을 읽을 수 없습니다." };
     default:
       return assertNever(payload);
   }

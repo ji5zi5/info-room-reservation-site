@@ -21,11 +21,7 @@ type PeriodSettingUpsertInput = {
   };
 };
 
-type UserFindUniqueInput = {
-  readonly where: {
-    readonly id: string;
-  };
-};
+type UserFindUniqueInput = { readonly where: { readonly id: string } };
 
 type ReservationFindInput = {
   readonly where: {
@@ -54,10 +50,7 @@ type ReservationCreateInput = {
   };
 };
 
-type UserBookingRow = {
-  readonly bookingStatus: "ACTIVE" | "BANNED" | "RESTRICTED";
-  readonly restrictedUntil: Date | null;
-};
+type UserBookingRow = { readonly bookingStatus: "ACTIVE" | "BANNED" | "RESTRICTED"; readonly restrictedUntil: Date | null };
 
 type ReservationRow = {
   readonly date: string;
@@ -78,6 +71,7 @@ type PeriodSettingRow = {
 };
 
 type MockPrismaTransaction = {
+  readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
   readonly periodSetting: {
     readonly findMany: (input: PeriodSettingFindManyInput) => Promise<readonly PeriodSettingRow[]>;
     readonly upsert: (input: PeriodSettingUpsertInput) => Promise<never>;
@@ -92,11 +86,7 @@ type MockPrismaTransaction = {
   };
 };
 
-type TransactionOptions = {
-  readonly isolationLevel: Prisma.TransactionIsolationLevel;
-  readonly maxWait: number;
-  readonly timeout: number;
-};
+type TransactionOptions = { readonly isolationLevel: Prisma.TransactionIsolationLevel; readonly maxWait: number; readonly timeout: number };
 
 type PrismaTransactionMock = (
   operation: (transaction: MockPrismaTransaction) => Promise<unknown>,
@@ -105,7 +95,12 @@ type PrismaTransactionMock = (
 
 const prismaMocks = vi.hoisted(() => {
   const periodSettingsStore: PeriodSettingRow[] = [];
+  const rawCalls: Array<{ readonly strings: readonly string[]; readonly values: readonly unknown[] }> = [];
   const transactionClient = {
+    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
+      rawCalls.push({ strings: [...strings], values });
+      return 1;
+    },
     periodSetting: {
       findMany: vi.fn(async (input: PeriodSettingFindManyInput): Promise<readonly PeriodSettingRow[]> =>
         periodSettingsStore.filter(
@@ -134,6 +129,7 @@ const prismaMocks = vi.hoisted(() => {
 
   return {
     periodSettingsStore,
+    rawCalls,
     transaction: vi.fn<PrismaTransactionMock>(async (operation) => operation(transactionClient)),
     transactionClient
   };
@@ -156,6 +152,7 @@ import { reserveStudyPeriod } from "./reservation-service";
 
 beforeEach(() => {
   prismaMocks.periodSettingsStore.length = 0;
+  prismaMocks.rawCalls.length = 0;
   prismaMocks.transaction.mockClear();
   prismaMocks.transactionClient.periodSetting.findMany.mockClear();
   prismaMocks.transactionClient.periodSetting.upsert.mockClear();

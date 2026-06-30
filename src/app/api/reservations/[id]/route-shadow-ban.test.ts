@@ -12,7 +12,9 @@ type ReservationUpdate = (input: unknown) => Promise<Reservation>;
 type UserUpdate = (input: unknown) => Promise<unknown>;
 type AdminActionCreate = (input: unknown) => Promise<{ readonly id: string }>;
 type WriteMutation = (input: unknown) => Promise<unknown>;
+type RawDbCall = { readonly strings: readonly string[]; readonly values: readonly unknown[] };
 type TransactionClient = {
+  readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
   readonly adminAction: { readonly create: AdminActionCreate };
   readonly auditLog: { readonly create: WriteMutation };
   readonly reservation: { readonly findUnique: ReservationFindUnique; readonly update: ReservationUpdate };
@@ -37,6 +39,8 @@ const routeMocks = vi.hoisted(() => {
     }
   }
 
+  const rawCalls: RawDbCall[] = [];
+
   return {
     UnauthorizedSessionError,
     adminActionCreate: vi.fn<AdminActionCreate>(),
@@ -47,6 +51,7 @@ const routeMocks = vi.hoisted(() => {
     isNoDatabaseMockMode: vi.fn<IsNoDatabaseMockMode>(),
     requireMutatingRequestSafety: vi.fn<RequireMutatingRequestSafety>(),
     requireSession: vi.fn<RequireSession>(),
+    rawCalls,
     reservationFindUnique: vi.fn<ReservationFindUnique>(),
     reservationUpdate: vi.fn<ReservationUpdate>(),
     setSessionCookie: vi.fn<SetSessionCookie>(),
@@ -92,11 +97,7 @@ vi.mock("@/lib/session", () => ({
   setSessionCookie: routeMocks.setSessionCookie
 }));
 
-const allowedRateLimit: RateLimitResult = {
-  kind: "allowed",
-  remaining: 9,
-  resetAt: new Date("2026-06-17T00:00:00.000Z")
-};
+const allowedRateLimit: RateLimitResult = { kind: "allowed", remaining: 9, resetAt: new Date("2026-06-17T00:00:00.000Z") };
 
 const shadowBannedStudent: SessionUser = {
   bookingStatus: "SHADOW_BANNED",
@@ -118,10 +119,7 @@ const confirmedReservation: Reservation = {
   userId: shadowBannedStudent.id
 };
 
-const cancelledReservation: Reservation = {
-  ...confirmedReservation,
-  status: "CANCELLED"
-};
+const cancelledReservation: Reservation = { ...confirmedReservation, status: "CANCELLED" };
 
 describe("student reservation cancellation shadow-ban handling", () => {
   beforeEach(() => {
@@ -129,6 +127,7 @@ describe("student reservation cancellation shadow-ban handling", () => {
     vi.resetModules();
 
     routeMocks.requireMutatingRequestSafety.mockReturnValue(null);
+    routeMocks.rawCalls.length = 0;
     routeMocks.requireSession.mockResolvedValue({ id: "session-shadow", user: shadowBannedStudent });
     routeMocks.validateRequestCsrf.mockResolvedValue({ kind: "ok" });
     routeMocks.enforceReservationRateLimit.mockResolvedValue(allowedRateLimit);
@@ -235,6 +234,10 @@ describe("student reservation cancellation shadow-ban handling", () => {
 
 function transactionClient(): TransactionClient {
   return {
+    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
+      routeMocks.rawCalls.push({ strings: [...strings], values });
+      return 1;
+    },
     adminAction: { create: routeMocks.adminActionCreate },
     auditLog: { create: routeMocks.auditLogCreate },
     reservation: { findUnique: routeMocks.reservationFindUnique, update: routeMocks.reservationUpdate },

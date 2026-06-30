@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import type { ReactElement } from "react";
 
 import {
@@ -16,6 +16,7 @@ import type { StudentCurrentReservation } from "@/lib/student-reservation-status
 import { formatKstTime } from "@/lib/student-reservation-status";
 import type { StudentProfilePayload } from "@/lib/student-profile";
 import { ReservationSidebar, type ReservationSidebarUser } from "./reservation-sidebar";
+import { StudentNotificationPanel } from "./student-notification-panel";
 import { StudentProfilePanel } from "./student-profile-panel";
 
 export type ReservationHomeTab = "today" | "advance";
@@ -143,7 +144,7 @@ export function ReservationHomeView({
                 </p>
               ) : null}
             </div>
-            <CalendarDays color="#3E6AE1" />
+            <StudentNotificationPanel user={user} />
           </div>
           <div className="reservation-mode-row">
             <div className="tabbar" aria-label="예약 종류">

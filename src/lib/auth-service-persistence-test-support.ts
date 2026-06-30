@@ -32,6 +32,10 @@ type SessionCreateInput = {
   readonly data: { readonly expiresAt: Date; readonly tokenHash: string; readonly userId: string };
 };
 type MockAuthTransaction = {
+  readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
+  readonly session: {
+    readonly create: (input: SessionCreateInput) => Promise<{ readonly id: string }>;
+  };
   readonly user: {
     readonly create: (input: UserCreateInput) => Promise<UserRow>;
     readonly findUnique: (input: UserFindUniqueInput) => Promise<UserRow | null>;
@@ -49,6 +53,7 @@ export const prismaPersistenceMocks = (() => {
   const baseDate = new Date("2026-06-16T00:00:00.000Z");
   let userRows: UserRow[] = [];
   let nextUserId = 1;
+  const rawCalls: Array<{ readonly strings: readonly string[]; readonly values: readonly unknown[] }> = [];
 
   function findUser(where: UserWhereUnique): UserRow | null {
     if ("id" in where) {
@@ -103,7 +108,13 @@ export const prismaPersistenceMocks = (() => {
     return updatedUser;
   }
 
+  const sessionCreate = vi.fn(async (_input: SessionCreateInput): Promise<{ readonly id: string }> => ({ id: "session-1" }));
   const transactionClient = {
+    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
+      rawCalls.push({ strings: [...strings], values });
+      return 1;
+    },
+    session: { create: sessionCreate },
     user: {
       create: vi.fn(createUser),
       findUnique: vi.fn(async ({ where }: UserFindUniqueInput): Promise<UserRow | null> => findUser(where)),
@@ -123,6 +134,8 @@ export const prismaPersistenceMocks = (() => {
     reset: () => {
       userRows = [];
       nextUserId = 1;
+      rawCalls.length = 0;
+      transactionClient.session.create.mockClear();
       transactionClient.user.create.mockClear();
       transactionClient.user.findUnique.mockClear();
       transactionClient.user.update.mockClear();
@@ -132,7 +145,7 @@ export const prismaPersistenceMocks = (() => {
       userRows = rows.map((row) => ({ ...row }));
       nextUserId = rows.length + 1;
     },
-    sessionCreate: vi.fn(async (_input: SessionCreateInput): Promise<{ readonly id: string }> => ({ id: "session-1" })),
+    sessionCreate,
     transaction: vi.fn<TransactionMock>(async (operation) => operation(transactionClient)),
     transactionClient
   };

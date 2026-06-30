@@ -5,12 +5,44 @@ type UpdateManyInput = {
   readonly where: unknown;
 };
 
-const prismaMocks = vi.hoisted(() => ({
-  userSanctionUpdateMany: vi.fn(async (_input: UpdateManyInput): Promise<{ readonly count: number }> => ({ count: 3 }))
-}));
+type RawCall = {
+  readonly strings: readonly string[];
+  readonly values: readonly unknown[];
+};
+
+type FakePrismaTransaction = {
+  readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
+  readonly userSanction: {
+    readonly updateMany: (input: UpdateManyInput) => Promise<{ readonly count: number }>;
+  };
+};
+
+type TransactionOperation = (transaction: FakePrismaTransaction) => Promise<unknown>;
+
+const prismaMocks = vi.hoisted(() => {
+  const rawCalls: RawCall[] = [];
+  const userSanctionUpdateMany = vi.fn(async (_input: UpdateManyInput): Promise<{ readonly count: number }> => ({
+    count: 3
+  }));
+  const transactionObject: FakePrismaTransaction = {
+    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
+      rawCalls.push({ strings: [...strings], values });
+      return 1;
+    },
+    userSanction: {
+      updateMany: userSanctionUpdateMany
+    }
+  };
+  return {
+    rawCalls,
+    transaction: vi.fn(async (operation: TransactionOperation): Promise<unknown> => operation(transactionObject)),
+    userSanctionUpdateMany
+  };
+});
 
 vi.mock("./db", () => ({
   prisma: {
+    $transaction: prismaMocks.transaction,
     userSanction: {
       updateMany: prismaMocks.userSanctionUpdateMany
     }
@@ -20,6 +52,8 @@ vi.mock("./db", () => ({
 import { prismaMaintenanceCleanupStore } from "./prisma-maintenance-store";
 
 beforeEach(() => {
+  prismaMocks.rawCalls.length = 0;
+  prismaMocks.transaction.mockClear();
   prismaMocks.userSanctionUpdateMany.mockClear();
 });
 
@@ -29,6 +63,10 @@ describe("Prisma maintenance cleanup store", () => {
 
     await expect(prismaMaintenanceCleanupStore.revokeExpiredSanctions(now)).resolves.toBe(3);
 
+    expect(prismaMocks.rawCalls).toEqual([
+      { strings: ["select set_config(", ", ", ", true)"], values: ["app.current_user_id", ""] },
+      { strings: ["select set_config(", ", ", ", true)"], values: ["app.current_user_role", "SYSTEM"] }
+    ]);
     expect(prismaMocks.userSanctionUpdateMany).toHaveBeenCalledWith({
       data: {
         revokedAt: now,

@@ -312,6 +312,114 @@
   min-height: 68px;
 }
 
+.student-notification-widget {
+  background: var(--white);
+  border: 1px solid var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  flex: 0 1 clamp(220px, 28vw, 320px);
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.student-notification-head {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  font-size: 0.82rem;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.student-notification-head span {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.student-notification-head svg {
+  color: var(--blue);
+  flex: 0 0 auto;
+}
+
+.student-notification-count {
+  align-items: center;
+  background: var(--blue);
+  border-radius: var(--radius);
+  color: var(--white);
+  display: inline-flex;
+  font-size: 0.72rem;
+  justify-content: center;
+  min-height: 20px;
+  min-width: 22px;
+  padding: 2px 5px;
+}
+
+.student-notification-body {
+  color: var(--graphite);
+  display: grid;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  min-height: 34px;
+  min-width: 0;
+}
+
+.student-notification-muted,
+.student-notification-item p {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.student-notification-muted {
+  align-self: center;
+  color: var(--pewter);
+}
+
+.student-notification-item {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.student-notification-item div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.student-notification-item strong {
+  color: var(--ink);
+  font-size: 0.8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-notification-item time {
+  color: var(--pewter);
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+}
+
+.student-notification-item p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.student-notification-spinner {
+  animation: refresh-spin 0.82s linear infinite;
+}
+
 .advance-unavailable {
   background: var(--white);
   border-radius: var(--radius);
@@ -1027,8 +1135,17 @@
     min-width: 0;
   }
 
-  .tool-panel > .topbar > svg {
+  .tool-panel > .topbar > .student-notification-widget {
     flex: 0 0 auto;
+    width: min(58vw, 230px);
+  }
+
+  .student-notification-widget {
+    padding: 8px 10px;
+  }
+
+  .student-notification-body {
+    min-height: 28px;
   }
 
   .reservation-date-rail,
@@ -1082,6 +1199,10 @@
     justify-self: start;
     text-align: left;
   }
+
+  .tool-panel > .topbar > .student-notification-widget {
+    width: min(56vw, 210px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1100,6 +1221,7 @@
   .applicant-toggle svg,
   .applicant-content,
   .meter span,
+  .student-notification-spinner,
   .confirm-backdrop,
   .confirm-dialog,
   .student-profile-backdrop,
@@ -1109,6 +1231,7 @@
 
   .period-card,
   .refresh-status[data-refreshing="true"] .refresh-spinner,
+  .student-notification-spinner,
   .toast,
   .confirm-backdrop,
   .confirm-dialog,

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 
 import { prisma } from "./db";
+import { systemDatabaseActor, withDatabaseContext } from "./db-context";
 import { isNoDatabaseMockMode } from "./mock-dev-mode";
 import { hashServerSecretValue } from "./secret-hash";
 
@@ -47,11 +48,17 @@ const MockSessionPayloadSchema = z.object({
 
 export async function createSession(userId: string): Promise<string> {
   const token = randomBytes(32).toString("base64url");
-  await prisma.session.create({
-    data: {
-      expiresAt: new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000),
-      tokenHash: hashSessionToken(token),
-      userId
+  await withDatabaseContext({
+    actor: systemDatabaseActor(),
+    client: prisma,
+    operation: async (transaction) => {
+      await transaction.session.create({
+        data: {
+          expiresAt: new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000),
+          tokenHash: hashSessionToken(token),
+          userId
+        }
+      });
     }
   });
   return token;
@@ -81,9 +88,14 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
     return readMockSessionToken(token);
   }
 
-  const session = await prisma.session.findUnique({
-    include: { user: true },
-    where: { tokenHash: hashSessionToken(token) }
+  const session = await withDatabaseContext({
+    actor: systemDatabaseActor(),
+    client: prisma,
+    operation: (transaction) =>
+      transaction.session.findUnique({
+        include: { user: true },
+        where: { tokenHash: hashSessionToken(token) }
+      })
   });
 
   if (!session || session.expiresAt.getTime() <= Date.now()) {
@@ -144,7 +156,13 @@ export async function clearCurrentSession(): Promise<void> {
     return;
   }
   if (token) {
-    await prisma.session.deleteMany({ where: { tokenHash: hashSessionToken(token) } });
+    await withDatabaseContext({
+      actor: systemDatabaseActor(),
+      client: prisma,
+      operation: async (transaction) => {
+        await transaction.session.deleteMany({ where: { tokenHash: hashSessionToken(token) } });
+      }
+    });
   }
 }
 

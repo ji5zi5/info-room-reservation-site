@@ -1,9 +1,11 @@
 -- Supabase RLS readiness notes for the information-room reservation app.
 --
--- Do not run this file as a production migration. The app currently uses
--- Riro auth + Prisma sessions, not Supabase Auth. Policies based on auth.uid()
--- are ineffective for Prisma requests unless a trusted user context is passed
--- to Postgres for every transaction.
+-- Do not run this file as a production migration. The real staged migration is
+-- prisma/migrations/20260630150000_add_rls_policies/migration.sql.
+--
+-- The app uses Riro auth + Prisma sessions, not Supabase Auth. Policies based
+-- on auth.uid() are ineffective for Prisma requests unless a trusted user
+-- context is passed to Postgres for every transaction.
 
 -- Safe rollout order:
 -- 1. Create a limited runtime database role for the app instead of using a
@@ -12,12 +14,14 @@
 --    transaction that sets trusted request variables, for example:
 --      set local app.current_user_id = '<session user id>';
 --      set local app.current_user_role = 'STUDENT' | 'ADMIN';
--- 3. Write RLS policies against current_setting('app.current_user_id', true)
---    and current_setting('app.current_user_role', true), not auth.uid().
--- 4. Add integration tests that prove direct cross-user reads/writes fail
+-- 3. Keep policies against current_setting('app.current_user_id', true) and
+--    current_setting('app.current_user_role', true), not auth.uid().
+-- 4. Confirm every direct Prisma surface is wrapped with actor/system context.
+-- 5. Add integration tests that prove direct cross-user reads/writes fail
 --    through the same runtime DATABASE_URL used by Vercel.
--- 5. Enable RLS table by table. Only use FORCE ROW LEVEL SECURITY after the
---    runtime role and transaction context are proven in production-like smoke.
+-- 6. Enable limited runtime role usage only after production-like smoke passes.
+-- 7. Only use FORCE ROW LEVEL SECURITY after the runtime role and transaction
+--    context are proven table by table.
 
 -- Example shape only:
 --

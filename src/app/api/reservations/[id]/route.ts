@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { systemDatabaseActor, withDatabaseContext } from "@/lib/db-context";
 import { prisma } from "@/lib/db";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
@@ -52,7 +53,10 @@ export async function DELETE(request: Request, context: { readonly params: Promi
     }
 
     const ipHash = hashRequestClientIp(request);
-    const result = await prisma.$transaction(async (transaction) => {
+    const result = await withDatabaseContext({
+      actor: systemDatabaseActor(),
+      client: prisma,
+      operation: async (transaction) => {
       const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
       if (!reservation) {
         return { kind: "not_found" } as const;
@@ -127,6 +131,7 @@ export async function DELETE(request: Request, context: { readonly params: Promi
       }
 
       return { kind: "cancelled", reservation: updated } as const;
+      }
     });
 
     if (result.kind === "not_found") {

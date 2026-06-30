@@ -46,7 +46,20 @@ The pooler host can be `aws-0`, `aws-1`, or another Supabase-assigned shard. Cop
 
 This app does not use Supabase Auth sessions. It authenticates with Riro, stores its own `Session` rows, and accesses Postgres through Prisma. Supabase RLS policies that depend on `auth.uid()` will not protect this app unless the database connection also receives a trustworthy per-request user context.
 
-Do not enable or force RLS on production tables until the Prisma data-access layer sets a request-scoped database context or uses limited database roles that match the policies. See `supabase/rls-readiness.sql` for the guarded rollout checklist. Until that rollout is complete, authorization is enforced in Next route handlers and domain services, so API guard tests and predeploy checks are part of the security boundary.
+The committed migration `prisma/migrations/20260630150000_add_rls_policies/migration.sql` adds staged Postgres policies that read `app.current_user_id` and `app.current_user_role`. Runtime code sets those variables with transaction-local `set_config(..., true)` in the core auth/session/CSRF/rate-limit/maintenance/student-reservation paths.
+
+Do not switch `DATABASE_URL` to a limited non-owner role, and do not use `FORCE ROW LEVEL SECURITY`, until every remaining direct Prisma surface has been wrapped and smoke-tested with that exact runtime role. The current staged policy is safe to deploy because table owners still bypass RLS unless forced; it prepares the schema without pretending that Supabase `auth.uid()` applies to Riro sessions.
+
+Guarded rollout:
+
+1. Deploy the staged migration with the existing owner/migration role.
+2. Keep API authorization tests and route guards as the active production boundary.
+3. Wrap and smoke-test the remaining admin/profile/closed-list repository queries with actor or system database context.
+4. Create a limited runtime role for Vercel `DATABASE_URL`; keep `DIRECT_URL` as the migration owner.
+5. Run production-like smoke for login, `/api/me`, reservation create/cancel, admin dashboard, student profile, closed-list cron, and maintenance cron.
+6. Only after those pass, consider `FORCE ROW LEVEL SECURITY` table by table.
+
+See `supabase/rls-readiness.sql` for the operator checklist. A direct database credential leak still bypasses app-level checks if the leaked role can set arbitrary `app.current_*` variables or owns the tables, so database credentials must stay server-only.
 
 ## First Deploy Checklist
 

@@ -8,6 +8,7 @@ import {
   type UserBookingState
 } from "./reservation-service";
 import { prisma } from "./db";
+import { type DatabaseActor, systemDatabaseActor, withDatabaseContext } from "./db-context";
 import { parseStoredStudyPeriod } from "./period-settings";
 import { periodSettingReadDates, resolveEffectivePeriodSetting } from "./period-setting-values";
 import type { StudyPeriod } from "./study-periods";
@@ -29,17 +30,29 @@ export const PRISMA_RESERVATION_TRANSACTION_OPTIONS = {
 } satisfies PrismaInteractiveTransactionOptions;
 
 export class PrismaReservationStore implements TransactionalReservationStore {
+  private readonly actor: DatabaseActor;
+
+  public constructor(actor: DatabaseActor = systemDatabaseActor()) {
+    this.actor = actor;
+  }
+
   public async transaction<T>(operation: (store: ReservationStore) => Promise<T>): Promise<T> {
     return retrySerializableReservationTransaction(() =>
-      prisma.$transaction(
-        async (transaction) => operation(new PrismaReservationStoreUnit(transaction)),
-        PRISMA_RESERVATION_TRANSACTION_OPTIONS
-      )
+      withDatabaseContext({
+        actor: this.actor,
+        client: prisma,
+        operation: async (transaction) => operation(new PrismaReservationStoreUnit(transaction)),
+        options: PRISMA_RESERVATION_TRANSACTION_OPTIONS
+      })
     );
   }
 }
 
 export const prismaReservationStore = new PrismaReservationStore();
+
+export function createPrismaReservationStoreForActor(actor: DatabaseActor): PrismaReservationStore {
+  return new PrismaReservationStore(actor);
+}
 
 class PrismaReservationStoreUnit implements ReservationStore {
   private readonly client: PrismaTransaction;

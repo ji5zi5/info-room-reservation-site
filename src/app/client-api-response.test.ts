@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StudentProfilePayload } from "@/lib/student-profile";
-import { readStudentProfilePayload } from "./client-api-response";
+import { readStudentNotificationsPayload, readStudentProfilePayload } from "./client-api-response";
 
 const profileFixture = {
   currentReservations: [
@@ -100,6 +100,38 @@ describe("readStudentProfilePayload", () => {
 
     // Then
     expect(result).toEqual({ kind: "error", message: "로그인이 필요합니다." });
+  });
+});
+
+describe("readStudentNotificationsPayload", () => {
+  it("returns loaded notifications when the response contains valid student notifications", async () => {
+    // Given
+    const notifications = [
+      {
+        createdAt: "2026-06-16T04:30:00.000Z",
+        id: "action-cancel",
+        message: "2026-06-17 8면학 신청이 취소되었습니다.",
+        title: "관리자 취소 안내"
+      }
+    ] as const;
+    const response = jsonResponse({ notifications });
+
+    // When
+    const result = await readStudentNotificationsPayload(response);
+
+    // Then
+    expect(result).toEqual({ kind: "loaded", notifications });
+  });
+
+  it("returns a recoverable error when the notification response has the wrong shape", async () => {
+    // Given
+    const response = jsonResponse({ notifications: [{ id: "missing-fields" }] });
+
+    // When
+    const result = await readStudentNotificationsPayload(response);
+
+    // Then
+    expect(result).toEqual({ kind: "error", message: "알림 응답 형식이 올바르지 않습니다." });
   });
 });
 

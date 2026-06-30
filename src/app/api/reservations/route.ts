@@ -2,9 +2,10 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { prismaReservationStore } from "@/lib/prisma-reservation-store";
 import { isReservableDate } from "@/lib/advance-reservation-policy";
+import { databaseActorFromSessionUser } from "@/lib/db-context";
 import { reserveStudyPeriod } from "@/lib/reservation-service";
+import { createPrismaReservationStoreForActor } from "@/lib/prisma-reservation-store";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { reserveMockStudyPeriod } from "@/lib/mock-reservation-data";
@@ -69,7 +70,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       date: parsed.data.date,
       now,
       reason: parsed.data.reason,
-      store: prismaReservationStore,
+      store: createPrismaReservationStoreForActor(databaseActorFromSessionUser(user)),
       studyPeriod: parsed.data.studyPeriod,
       userId: user.id
     });

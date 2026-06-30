@@ -1,6 +1,7 @@
 import { Prisma, type User } from "@prisma/client";
 
 import { prisma } from "./db";
+import { systemDatabaseActor, withDatabaseContext } from "./db-context";
 import type { RiroProfile } from "./riro-auth";
 
 type AuthenticatedUserInput = {
@@ -40,7 +41,10 @@ export async function persistAuthenticatedUserResult(
 
 async function persistAuthenticatedUser(input: AuthenticatedUserInput): Promise<User> {
   const userData = authenticatedUserData(input);
-  return prisma.$transaction(async (transaction) => {
+  return withDatabaseContext({
+    actor: systemDatabaseActor(),
+    client: prisma,
+    operation: async (transaction) => {
     const riroUser = await transaction.user.findUnique({ where: { riroId: input.loginId } });
     if (riroUser) {
       if (riroUser.studentNumber !== input.profile.studentNumber) {
@@ -67,7 +71,9 @@ async function persistAuthenticatedUser(input: AuthenticatedUserInput): Promise<
       return transaction.user.update({ data: userData, where: { id: studentNumberUser.id } });
     }
     return transaction.user.create({ data: { bookingStatus: "ACTIVE", ...userData } });
-  }, PRISMA_AUTH_TRANSACTION_OPTIONS);
+    },
+    options: PRISMA_AUTH_TRANSACTION_OPTIONS
+  });
 }
 
 function authenticatedUserData(input: AuthenticatedUserInput): {
