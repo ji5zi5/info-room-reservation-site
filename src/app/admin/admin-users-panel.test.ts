@@ -8,7 +8,7 @@ import type { AdminUser } from "./admin-types";
 const adminUser = {
   bookingStatus: "ACTIVE",
   generation: 0,
-  id: "admin-local_student_a",
+  id: "admin-local-student-a",
   name: "일반 계정",
   restrictedUntil: null,
   restrictionReason: null,
@@ -19,7 +19,7 @@ const adminUser = {
 const localStudentUser = {
   bookingStatus: "ACTIVE",
   generation: 0,
-  id: "local-local_student_a-crisp",
+  id: "local-student-b",
   name: "일반 계정",
   restrictedUntil: null,
   restrictionReason: null,

@@ -30,15 +30,18 @@ describe("multiple local student fallback accounts", () => {
       }
     };
 
-    const local_student_aResult = await authenticateWithConfiguredMode({ id: "local_student_a", password: "test-student-secret" }, options);
-    const crispResult = await authenticateWithConfiguredMode(
+    const firstLocalStudentResult = await authenticateWithConfiguredMode(
+      { id: "local_student_a", password: "test-student-secret" },
+      options
+    );
+    const secondLocalStudentResult = await authenticateWithConfiguredMode(
       { id: "local_student_b", password: "test-student-secret" },
       options
     );
 
     expect(calls).toEqual([]);
-    expect(local_student_aResult).toMatchObject({ kind: "success", profile: { studentNumber: "local_student_a" } });
-    expect(crispResult).toMatchObject({ kind: "success", profile: { studentNumber: "local_student_b" } });
+    expect(firstLocalStudentResult).toMatchObject({ kind: "success", profile: { studentNumber: "local_student_a" } });
+    expect(secondLocalStudentResult).toMatchObject({ kind: "success", profile: { studentNumber: "local_student_b" } });
   });
 
   it("rejects a local student id password when the shared fallback password differs", async () => {
@@ -56,10 +59,13 @@ describe("multiple local student fallback accounts", () => {
       }
     };
 
-    const local_student_aResult = await authenticateWithConfiguredMode({ id: "local_student_a", password: "local_student_a" }, options);
+    const firstLocalStudentResult = await authenticateWithConfiguredMode(
+      { id: "local_student_a", password: "local_student_a" },
+      options
+    );
 
     expect(calls).toEqual([]);
-    expect(local_student_aResult).toMatchObject({ kind: "error", reason: "invalid_credentials" });
+    expect(firstLocalStudentResult).toMatchObject({ kind: "error", reason: "invalid_credentials" });
   });
 
   it("rejects a local student id password when the configured fallback secret is weak", async () => {
