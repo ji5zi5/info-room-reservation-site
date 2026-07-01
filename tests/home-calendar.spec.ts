@@ -29,7 +29,7 @@ type MockPeriodInput = {
   readonly windowState?: WindowState;
 };
 
-test("weekly reservation calendar shows status and jumps between advance and today", async ({ page }) => {
+test("weekly reservation calendar keeps date tiles focused on selection", async ({ page }) => {
   await mockPeriods(page, {
     [FIXED_THURSDAY_DATE]: [
       period({ label: "8면학", studyPeriod: "EIGHTH" }),
@@ -45,16 +45,46 @@ test("weekly reservation calendar shows status and jumps between advance and tod
   await expect(page.getByRole("heading", { name: "이번 주 예약" })).toBeVisible();
   await expect(page.getByText(/^사전예약 \d{2}\.\d{2}/u)).toHaveCount(0);
 
+  const calendar = page.locator(".reservation-calendar");
+  await expect(calendar.getByText(/내 예약|예약 가능|불가|지난 날짜|오픈 전/u)).toHaveCount(0);
+
+  const monday = page.locator(".calendar-day").filter({ hasText: "06.08" });
+  await expect(monday).toBeDisabled();
+  await expect(monday).toHaveAccessibleName(/지난 날짜/u);
+  await expect(monday).toHaveCSS("background-color", "rgb(238, 238, 238)");
+  await expect(monday.locator("strong")).toHaveCSS("color", "rgb(142, 142, 142)");
+
   const friday = page.locator(".calendar-day").filter({ hasText: "06.12" });
-  await expect(friday.getByText("내 예약")).toBeVisible();
-  await expect(friday.getByText("8면학 예약됨")).toBeVisible();
+  await expect(friday).toBeEnabled();
+  await expect(friday).toHaveAccessibleName(/현황 확인 가능/u);
+  await expect(friday.getByText("선택")).toHaveCount(0);
 
   await friday.click();
   await expect(page.getByRole("button", { name: "사전예약" })).toHaveAttribute("data-active", "true");
   await expect(page.getByLabel("사전예약 날짜")).toHaveValue(FIXED_FRIDAY_DATE);
+  await expect(friday.getByText("선택")).toBeVisible();
 
   await page.getByRole("button", { name: "오늘 예약" }).click();
   await expect(page.getByRole("button", { name: "당일예약" })).toHaveAttribute("data-active", "true");
+});
+
+test("weekly reservation calendar keeps full advance dates enterable for cancellation refreshes", async ({ page }) => {
+  await mockPeriods(page, {
+    [FIXED_FRIDAY_DATE]: [
+      period({ label: "8면학", remaining: 0, studyPeriod: "EIGHTH" }),
+      period({ label: "1면학", remaining: 0, studyPeriod: "FIRST" })
+    ]
+  });
+  await login(page, `calendar-full-${Date.now()}`);
+
+  const friday = page.locator(".calendar-day").filter({ hasText: "06.12" });
+  await expect(friday).toBeEnabled();
+
+  await friday.click();
+
+  await expect(page.getByRole("button", { name: "사전예약" })).toHaveAttribute("data-active", "true");
+  await expect(page.getByLabel("사전예약 날짜")).toHaveValue(FIXED_FRIDAY_DATE);
+  await expect(page.locator(".period-button").filter({ hasText: "마감" })).toHaveCount(2);
 });
 
 test("manual advance date input keeps the prior date when a previous date is typed", async ({ page }) => {

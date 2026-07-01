@@ -1,6 +1,6 @@
 "use client";
 
-import { ShieldOff, UserX } from "lucide-react";
+import { ShieldOff, UserX, X } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 
 import { adminAccountDescription, adminAccountName } from "./admin-account-labels";
@@ -39,7 +39,11 @@ export function AdminStudentDetail({
           <h3>{adminAccountName(detail.user)}</h3>
           <p className="muted">{adminAccountDescription(detail.user)}</p>
         </div>
-        {onClose ? <button className="icon-button" type="button" aria-label="학생 상세 닫기" onClick={onClose}>×</button> : null}
+        {onClose ? (
+          <button className="icon-button" type="button" aria-label="학생 상세 닫기" onClick={onClose}>
+            <X aria-hidden="true" size={18} />
+          </button>
+        ) : null}
       </div>
       <div className="detail-metrics">
         <span>확정 {detail.summary.confirmedCount}</span>

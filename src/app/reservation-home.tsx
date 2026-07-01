@@ -248,7 +248,6 @@ export function ReservationHomePage(): React.ReactElement {
       advanceDate={advanceDate}
       advancePolicy={advancePolicy}
       advanceUnavailable={advanceUnavailable}
-      calendarPeriodsByDate={calendarPeriodsByDate}
       currentReservations={currentReservations}
       id={id}
       lastRefreshedAt={lastRefreshedAt}

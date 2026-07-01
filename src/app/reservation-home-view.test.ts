@@ -23,7 +23,6 @@ describe("ReservationHomeView", () => {
         advanceDate: "",
         advancePolicy: null,
         advanceUnavailable: false,
-        calendarPeriodsByDate: {},
         currentReservations: [],
         id: "",
         lastRefreshedAt: null,

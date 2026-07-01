@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, ShieldAlert, UserSearch } from "lucide-react";
+import { ClipboardList, UserSearch } from "lucide-react";
 import type { ReactElement } from "react";
 
 import { getAdminAuditActionLabel, parseAdminAuditActionFilter } from "@/lib/admin-audit-actions";
@@ -49,7 +49,6 @@ export function AdminAuditPanel({
             <ClipboardList size={18} />
             감사 복사
           </button>
-          <ShieldAlert aria-hidden="true" size={22} />
         </div>
       </div>
       <div className="admin-row">

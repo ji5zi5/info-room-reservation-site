@@ -208,6 +208,8 @@
 
 .admin-console-layout input[type="checkbox"] {
   accent-color: var(--blue);
+  height: var(--badge-height-xs);
+  width: var(--badge-height-xs);
 }
 
 .notification-toggle-grid {

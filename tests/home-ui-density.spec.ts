@@ -78,7 +78,9 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await login(page);
-  await expect(page.getByRole("button", { name: "왼쪽 패널 열기" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "내 정보 패널 열기" })).toBeVisible();
+  await expect(page.locator(".login-panel[data-open='false'] .brand-mark")).toBeVisible();
+  await expect(page.locator(".login-panel[data-open='false'] .sidebar-toggle-label")).toHaveText("내 정보");
   await expect
     .poll(async () => Math.round((await visibleBox(page.locator(".login-panel"), "collapsed mobile login panel")).height))
     .toBeLessThanOrEqual(80);
@@ -110,11 +112,40 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
   expect(firstPeriodCardBox.y, "first reservation card should be reachable on the first mobile screen").toBeLessThanOrEqual(760);
   expect(calendarBox.y, "mobile calendar should be secondary to reservation cards").toBeGreaterThan(firstPeriodCardBox.y);
   expect(calendarGridBox.height, "mobile calendar dates should fit in one compact strip").toBeLessThanOrEqual(120);
+  expect(await visibleHeight(page.locator(".reservation-warning"), "reservation rule strip")).toBeLessThanOrEqual(64);
+  await expect(page.locator(".reservation-warning")).toContainText("예약 규칙");
 
   const applicantToggle = page.locator(".applicant-toggle").first();
   await expect(applicantToggle).toHaveText(/신청자 \d+명 보기/u);
   const applicantToggleBox = await visibleBox(applicantToggle, "mobile applicant toggle");
   expect(applicantToggleBox.height, "applicant toggle should stay one compact row").toBeLessThanOrEqual(40);
+});
+
+test("student notification panel opens and closes latest notification", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
+  await mockAuth(page);
+  await mockPeriods(page);
+  await mockNotifications(page);
+
+  await page.goto(BASE_URL, { waitUntil: "networkidle" });
+  await login(page);
+
+  const openButton = page.getByRole("button", { name: "학생 알림 열기" });
+  await expect(openButton).toBeVisible();
+  await expect(page.getByText("관리자 취소 안내")).toBeHidden();
+
+  await openButton.click();
+
+  const closeButton = page.getByRole("button", { name: "학생 알림 닫기" });
+  await expect(closeButton).toBeVisible();
+  await expect(page.getByText("관리자 취소 안내")).toBeVisible();
+  await expect(page.getByText("2026-06-12 8면학 신청이 취소되었습니다.")).toBeVisible();
+
+  await closeButton.click();
+
+  await expect(page.getByRole("button", { name: "학생 알림 열기" })).toBeVisible();
+  await expect(page.getByText("관리자 취소 안내")).toBeHidden();
 });
 
 async function login(page: Page): Promise<void> {
@@ -148,6 +179,25 @@ async function mockPeriods(page: Page): Promise<void> {
         date,
         periods: [buildPeriod(date, "EIGHTH", "8면학"), buildPeriod(date, "FIRST", "1면학")],
       },
+    });
+  });
+}
+
+async function mockNotifications(page: Page): Promise<void> {
+  await page.route("**/api/me/notifications", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        notifications: [
+          {
+            createdAt: "2026-06-11T09:00:00.000Z",
+            id: "notification-1",
+            message: "2026-06-12 8면학 신청이 취소되었습니다.",
+            reason: "관리자 조정",
+            title: "관리자 취소 안내"
+          }
+        ]
+      }
     });
   });
 }

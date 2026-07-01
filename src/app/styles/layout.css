@@ -15,7 +15,6 @@
   --sidebar-width: var(--sidebar-width-open);
 
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  transition: grid-template-columns var(--motion-layout);
 }
 
 .workspace[data-sidebar="closed"] {
@@ -40,10 +39,6 @@
 
 .login-panel {
   overflow: hidden;
-  transition:
-    gap var(--motion-panel),
-    min-height var(--motion-layout),
-    padding var(--motion-layout);
 }
 
 .login-panel[data-open="false"] {
@@ -74,8 +69,8 @@
   max-height: var(--sidebar-content-max-height);
   opacity: 1;
   transition:
-    max-height var(--motion-layout),
     opacity var(--motion-fast),
+    transform var(--motion-panel),
     visibility var(--motion-fast);
 }
 

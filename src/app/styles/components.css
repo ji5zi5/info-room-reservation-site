@@ -51,6 +51,10 @@
   justify-self: end;
 }
 
+.sidebar-toggle-label {
+  display: none;
+}
+
 .primary-button,
 .period-button {
   background: var(--blue);
@@ -314,28 +318,44 @@
   border: var(--stroke-width) solid var(--fog);
   border-radius: var(--radius);
   display: grid;
-  flex: 0 1 clamp(var(--field-min-width), 28vw, var(--sidebar-card-width));
   gap: var(--space-2);
+  flex: 0 0 auto;
   min-width: 0;
   padding: var(--space-4) var(--space-5);
 }
 
+.student-notification-widget[data-open="true"] {
+  flex: 0 1 clamp(var(--field-min-width), 28vw, var(--sidebar-card-width));
+}
+
 .student-notification-head {
   align-items: center;
+  background: transparent;
+  border: 0;
   color: var(--ink);
+  cursor: pointer;
   display: flex;
+  font-family: inherit;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   gap: var(--space-3);
   justify-content: space-between;
   min-width: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
 }
 
-.student-notification-head span {
+.student-notification-title,
+.student-notification-actions {
   align-items: center;
   display: inline-flex;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.student-notification-actions {
+  flex: 0 0 auto;
 }
 
 .student-notification-head svg {
@@ -363,6 +383,10 @@
   line-height: var(--leading-compact);
   min-height: var(--control-height-sm);
   min-width: 0;
+}
+
+.student-notification-body[hidden] {
+  display: none;
 }
 
 .student-notification-muted,
@@ -411,6 +435,8 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  overflow-wrap: break-word;
+  word-break: keep-all;
 }
 
 .student-notification-reason {
@@ -420,6 +446,14 @@
 
 .student-notification-spinner {
   animation: refresh-spin 0.82s linear infinite;
+}
+
+.student-notification-chevron {
+  transition: transform var(--motion);
+}
+
+.student-notification-widget[data-open="true"] .student-notification-chevron {
+  transform: rotate(180deg);
 }
 
 .advance-unavailable {
@@ -433,20 +467,31 @@
 }
 
 .reservation-warning {
+  align-items: center;
   background: var(--white);
   border: var(--stroke-width) solid var(--silver);
   border-radius: var(--radius);
-  display: grid;
-  gap: var(--space-3);
-  padding: var(--space-6) var(--space-7);
-}
-
-.reservation-warning p {
-  align-items: center;
   color: var(--graphite);
   display: flex;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.reservation-warning strong {
+  color: var(--ink);
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+}
+
+.reservation-warning span {
+  align-items: center;
+  display: inline-flex;
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+  line-height: var(--leading-compact);
   min-width: 0;
+  word-break: keep-all;
 }
 
 .reservation-warning svg {
@@ -492,7 +537,6 @@
   background: var(--blue);
   display: block;
   height: 100%;
-  transition: width var(--motion);
 }
 
 .applicant-list {
@@ -549,7 +593,6 @@
   opacity: 1;
   overflow: auto;
   transition:
-    max-height 0.24s ease,
     opacity 0.18s ease,
     visibility 0.18s ease;
   visibility: visible;
@@ -1019,12 +1062,34 @@
   }
 
   .login-panel[data-open="false"] {
+    border-bottom: var(--stroke-width) solid var(--fog);
     min-height: var(--row-height-lg);
-    padding: var(--space-3) 0;
+    padding: var(--space-3) var(--space-9);
   }
 
-  .login-panel[data-open="false"] .sidebar-content {
+  .login-panel[data-open="false"] .sidebar-head {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    inline-size: 100%;
+    max-width: none;
+    width: 100%;
+  }
+
+  .login-panel[data-open="false"] .brand-mark {
+    display: inline-flex;
+  }
+
+  .login-panel[data-open="false"] .auth-mark {
     display: none;
+  }
+
+  .login-panel[data-open="false"] .sidebar-toggle {
+    justify-self: end;
+    padding: 0 var(--space-4);
+    width: auto;
+  }
+
+  .login-panel[data-open="false"] .sidebar-toggle-label {
+    display: inline;
   }
 
   .tool-panel {
@@ -1072,6 +1137,7 @@
   .tool-panel > .topbar {
     align-items: center;
     flex-direction: row;
+    flex-wrap: wrap;
     min-height: var(--row-height-lg);
     order: 1;
   }
@@ -1082,7 +1148,13 @@
 
   .tool-panel > .topbar > .student-notification-widget {
     flex: 0 0 auto;
-    width: min(58vw, var(--profile-notification-width));
+    width: auto;
+  }
+
+  .tool-panel > .topbar > .student-notification-widget[data-open="true"] {
+    flex-basis: 100%;
+    order: 2;
+    width: 100%;
   }
 
   .student-notification-widget {
@@ -1100,7 +1172,6 @@
 
   .reservation-warning {
     order: 3;
-    padding: var(--space-4) var(--space-5);
   }
 
   .period-grid,
@@ -1153,7 +1224,11 @@
   }
 
   .tool-panel > .topbar > .student-notification-widget {
-    width: min(56vw, var(--profile-notification-compact-width));
+    width: auto;
+  }
+
+  .tool-panel > .topbar > .student-notification-widget[data-open="true"] {
+    width: 100%;
   }
 }
 
@@ -1174,6 +1249,7 @@
   .applicant-content,
   .meter span,
   .student-notification-spinner,
+  .student-notification-chevron,
   .confirm-backdrop,
   .confirm-dialog,
   .student-profile-backdrop,

@@ -68,12 +68,13 @@ export function ReservationSidebar({
         </span>
         <button
           aria-expanded={sidebarOpen}
-          aria-label={sidebarOpen ? "왼쪽 패널 접기" : "왼쪽 패널 열기"}
+          aria-label={sidebarOpen ? "내 정보 패널 접기" : "내 정보 패널 열기"}
           className="icon-button sidebar-toggle"
           type="button"
           onClick={onToggle}
         >
           {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          <span className="sidebar-toggle-label">내 정보</span>
         </button>
       </div>
       <div aria-hidden={!sidebarOpen} className="sidebar-content stack">

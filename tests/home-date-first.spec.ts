@@ -109,14 +109,14 @@ test("left panel collapses and expands", async ({ page }) => {
 
   const panel = page.locator(".login-panel");
   const openBox = await visibleBox(panel, "open left panel");
-  await page.getByRole("button", { name: "왼쪽 패널 접기" }).click();
+  await page.getByRole("button", { name: "내 정보 패널 접기" }).click();
 
-  await expect(page.getByRole("button", { name: "왼쪽 패널 열기" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "내 정보 패널 열기" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "정보실 예약" })).toBeHidden();
   await expect.poll(async () => (await visibleBox(panel, "closed left panel")).width).toBeLessThan(openBox.width / 2);
 
-  await page.getByRole("button", { name: "왼쪽 패널 열기" }).click();
-  await expect(page.getByRole("button", { name: "왼쪽 패널 접기" })).toBeVisible();
+  await page.getByRole("button", { name: "내 정보 패널 열기" }).click();
+  await expect(page.getByRole("button", { name: "내 정보 패널 접기" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "정보실 예약" })).toBeVisible();
 });
 

@@ -422,14 +422,14 @@ test("left panel exposes smooth width and content transitions", async ({ page })
   const panel = page.locator(".login-panel");
   const content = page.locator(".sidebar-content");
   const openBox = await visibleBox(panel, "open sidebar");
-  await page.getByRole("button", { name: "왼쪽 패널 접기" }).click();
-  await expect(page.getByRole("button", { name: "왼쪽 패널 열기" })).toBeVisible();
+  await page.getByRole("button", { name: "내 정보 패널 접기" }).click();
+  await expect(page.getByRole("button", { name: "내 정보 패널 열기" })).toBeVisible();
 
   const closedDisplay = await content.evaluate((element) => getComputedStyle(element).display);
   const closedTransition = await content.evaluate((element) => getComputedStyle(element).transitionProperty);
   await expect.poll(async () => Math.round((await visibleBox(panel, "closed sidebar")).width)).toBe(72);
   const closedBox = await visibleBox(panel, "closed sidebar");
-  const toggleBox = await visibleBox(page.getByRole("button", { name: "왼쪽 패널 열기" }), "closed sidebar toggle");
+  const toggleBox = await visibleBox(page.getByRole("button", { name: "내 정보 패널 열기" }), "closed sidebar toggle");
 
   expect(closedBox.height, "closing should keep a stable panel surface").toBeGreaterThan(70);
   expect(closedBox.y).toBe(openBox.y);
@@ -444,12 +444,12 @@ test("mobile left panel collapses to a reopen button and expands again", async (
   await page.setViewportSize({ height: 900, width: 390 });
   await login(page, `mobile-fold-${Date.now()}`);
 
-  await page.getByRole("button", { name: "왼쪽 패널 접기" }).click();
-  await expect(page.getByRole("button", { name: "왼쪽 패널 열기" })).toBeVisible();
+  await page.getByRole("button", { name: "내 정보 패널 열기" }).click();
+  await page.getByRole("button", { name: "내 정보 패널 접기" }).click();
   await expect.poll(async () => Math.round((await visibleBox(page.locator(".login-panel"), "closed mobile panel")).height)).toBeLessThanOrEqual(80);
 
-  await page.getByRole("button", { name: "왼쪽 패널 열기" }).click();
-  await expect(page.getByRole("button", { name: "왼쪽 패널 접기" })).toBeVisible();
+  await page.getByRole("button", { name: "내 정보 패널 열기" }).click();
+  await expect(page.getByRole("button", { name: "내 정보 패널 접기" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "정보실 예약" })).toBeVisible();
 });
 
@@ -465,6 +465,9 @@ test("mobile admin student detail flows below the list without clipping", async 
 
   const detail = page.locator(".student-detail-panel[data-open='true']");
   await expect(detail).toBeVisible();
+  const closeButton = detail.getByRole("button", { name: "학생 상세 닫기" });
+  await expect(closeButton.locator("svg")).toHaveCount(1);
+  await expect(closeButton).not.toHaveText("×");
   await expect(detail.getByRole("button", { name: "로그아웃 처리" })).toHaveCount(0);
   const metrics = await page.evaluate(() => {
     const detailElement = document.querySelector(".student-detail-panel[data-open='true']");
@@ -507,6 +510,27 @@ test("mobile admin student detail flows below the list without clipping", async 
   expect(metrics.detailTop, "student detail should sit below the student list on mobile").toBeGreaterThanOrEqual(
     metrics.mainPanelBottom - 1
   );
+});
+
+test("admin setting toggles keep visible checkbox targets comfortable", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 390 });
+  await mockAdminStudentManagement(page, "25-39000");
+  await openMockedAdminConsole(page);
+
+  await page.getByRole("button", { name: "설정" }).click();
+
+  const checkboxMetrics = await page.locator(".admin-console-layout input[type='checkbox']").evaluateAll((inputs) =>
+    inputs.map((input) => {
+      const box = input.getBoundingClientRect();
+      return { height: box.height, width: box.width };
+    })
+  );
+
+  expect(checkboxMetrics.length).toBeGreaterThanOrEqual(4);
+  for (const metric of checkboxMetrics) {
+    expect(metric.width).toBeGreaterThanOrEqual(20);
+    expect(metric.height).toBeGreaterThanOrEqual(20);
+  }
 });
 
 async function expectBorderRadius(locator: Locator, label: string, expectedRadius: string): Promise<void> {

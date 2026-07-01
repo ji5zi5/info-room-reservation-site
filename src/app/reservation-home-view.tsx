@@ -34,7 +34,6 @@ type ReservationHomeViewProps = {
   readonly advanceDate: string;
   readonly advancePolicy: AdvanceReservationPolicy | null;
   readonly advanceUnavailable: boolean;
-  readonly calendarPeriodsByDate: Readonly<Record<string, readonly PeriodSummary[] | undefined>>;
   readonly currentReservations: readonly StudentCurrentReservation[];
   readonly id: string;
   readonly lastRefreshedAt: string | null;
@@ -71,7 +70,6 @@ export function ReservationHomeView({
   advanceDate,
   advancePolicy,
   advanceUnavailable,
-  calendarPeriodsByDate,
   currentReservations,
   id,
   lastRefreshedAt,
@@ -173,7 +171,6 @@ export function ReservationHomeView({
           {advancePolicy && user ? (
             <ReservationCalendar
               advancePolicy={advancePolicy}
-              periodsByDate={calendarPeriodsByDate}
               selectedDate={targetDate}
               onSelectDate={onSelectCalendarDate}
               onTodayClick={onSelectToday}

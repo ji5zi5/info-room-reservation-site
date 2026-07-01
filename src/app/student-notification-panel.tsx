@@ -1,8 +1,8 @@
 "use client";
 
-import { Bell, LoaderCircle } from "lucide-react";
+import { Bell, ChevronDown, LoaderCircle } from "lucide-react";
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 import type { StudentNotification } from "@/lib/student-notifications";
 import { formatKstTime } from "@/lib/student-reservation-status";
@@ -29,26 +29,43 @@ const STUDENT_NOTIFICATION_REFRESH_INTERVAL_MS = 60_000;
 
 export function StudentNotificationPanel({ user }: StudentNotificationPanelProps): ReactElement {
   const state = useStudentNotificationState(user);
+  const [open, setOpen] = useState(false);
+  const bodyId = useId();
   const latestNotification = state.notifications[0] ?? null;
   const countLabel = state.notifications.length > 9 ? "9+" : String(state.notifications.length);
+
+  useEffect(() => {
+    setOpen(false);
+  }, [user?.id, user?.role]);
 
   return (
     <section
       aria-label="학생 알림"
       className="student-notification-widget"
+      data-open={open}
       data-state={notificationStateName(user, state)}
     >
-      <div className="student-notification-head">
-        <span>
+      <button
+        aria-controls={bodyId}
+        aria-expanded={open}
+        aria-label={open ? "학생 알림 닫기" : "학생 알림 열기"}
+        className="student-notification-head"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="student-notification-title">
           <Bell aria-hidden="true" size={16} />
           알림
         </span>
-        {state.loading ? <LoaderCircle aria-hidden="true" className="student-notification-spinner" size={14} /> : null}
-        {!state.loading && state.notifications.length > 0 ? (
-          <strong className="student-notification-count">{countLabel}</strong>
-        ) : null}
-      </div>
-      <div aria-live="polite" className="student-notification-body">
+        <span className="student-notification-actions">
+          {state.loading ? <LoaderCircle aria-hidden="true" className="student-notification-spinner" size={14} /> : null}
+          {!state.loading && state.notifications.length > 0 ? (
+            <strong className="student-notification-count">{countLabel}</strong>
+          ) : null}
+          <ChevronDown aria-hidden="true" className="student-notification-chevron" size={16} />
+        </span>
+      </button>
+      <div aria-live="polite" className="student-notification-body" hidden={!open} id={bodyId}>
         {notificationBody(user, state, latestNotification)}
       </div>
     </section>

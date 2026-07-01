@@ -93,8 +93,8 @@
   --row-height-xl: 64px;
   --toolbar-min-height: 68px;
   --period-panel-min-height: 253px;
-  --calendar-day-height: 78px;
-  --calendar-day-height-mobile: 82px;
+  --calendar-day-height: 64px;
+  --calendar-day-height-mobile: 60px;
   --dialog-width: 460px;
   --profile-panel-width: 420px;
   --profile-notification-width: 230px;
