@@ -25,6 +25,10 @@ describe("production CI contract", () => {
     const workflow = read(".github/workflows/ci.yml");
 
     expect(workflow).toContain("permissions:\n  contents: read");
+    expect(workflow).toContain("actions/checkout@v6");
+    expect(workflow).toContain("actions/setup-node@v6");
+    expect(workflow).not.toContain("actions/checkout@v4");
+    expect(workflow).not.toContain("actions/setup-node@v4");
     expect(workflow).toContain("image: postgres:16");
     expect(workflow).toContain("npx prisma migrate deploy");
     expect(workflow).toContain("npm run test:integration");
