@@ -4,6 +4,7 @@ import { e2eNow, FIXED_FRIDAY_DATE, FIXED_THURSDAY_DATE, mockClientDate } from "
 import { visibleBox, visiblePosition } from "./playwright-layout";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+const SCHOOL_WEEK_DATES = ["2026-06-08", "2026-06-09", "2026-06-10", FIXED_THURSDAY_DATE, FIXED_FRIDAY_DATE] as const;
 
 const mockUser = {
   bookingStatus: "ACTIVE",
@@ -52,16 +53,16 @@ test("student reservation controls keep date selection compact", async ({ page }
   await advanceTab.click();
   await expect(todayTab).toHaveAttribute("data-active", "false");
   await expect(advanceTab).toHaveAttribute("data-active", "true");
-  const datePicker = page.getByLabel("사전예약 날짜");
-  await expect(datePicker).toBeVisible();
-  await expect(datePicker).toHaveAttribute("min", FIXED_FRIDAY_DATE);
-  await expect(datePicker).toHaveAttribute("max", FIXED_FRIDAY_DATE);
-  await expect(page.getByRole("heading", { name: "이번 주 예약" })).toBeVisible();
+  await expect(page.locator('input[type="date"]')).toHaveCount(0);
+  const calendar = page.locator(".reservation-calendar");
+  await expect(calendar).toBeVisible();
+  await expect(page.getByRole("heading", { name: "이번 주" })).toBeVisible();
 
-  const datePickerBox = await visibleBox(datePicker, "advance date picker");
+  const calendarBox = await visibleBox(calendar, "advance calendar");
+  const calendarHeight = await visibleHeight(calendar, "advance calendar");
   const advancePeriodPosition = await visiblePosition(firstPeriodCard, "advance first period card");
-  expect(datePickerBox.y).toBeLessThan(advancePeriodPosition.y);
-  expect(Math.abs(Math.round(advancePeriodPosition.y - todayPeriodPosition.y))).toBeLessThanOrEqual(2);
+  expect(calendarBox.y).toBeLessThan(advancePeriodPosition.y);
+  expect(calendarHeight).toBeLessThanOrEqual(150);
 
   await todayTab.click();
   await expect(todayTab).toHaveAttribute("data-active", "true");
@@ -110,15 +111,12 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
   expect(overflow.documentWidth).toBeLessThanOrEqual(overflow.viewportWidth);
   expect(overflow.bodyWidth).toBeLessThanOrEqual(overflow.viewportWidth);
   expect(firstPeriodCardBox.y, "first reservation card should be reachable on the first mobile screen").toBeLessThanOrEqual(760);
-  expect(calendarBox.y, "mobile calendar should be secondary to reservation cards").toBeGreaterThan(firstPeriodCardBox.y);
+  expect(calendarBox.y, "mobile calendar should stay above reservation cards").toBeLessThan(firstPeriodCardBox.y);
   expect(calendarGridBox.height, "mobile calendar dates should fit in one compact strip").toBeLessThanOrEqual(120);
   expect(await visibleHeight(page.locator(".reservation-warning"), "reservation rule strip")).toBeLessThanOrEqual(64);
   await expect(page.locator(".reservation-warning")).toContainText("예약 규칙");
 
-  const applicantToggle = page.locator(".applicant-toggle").first();
-  await expect(applicantToggle).toHaveText(/신청자 \d+명 보기/u);
-  const applicantToggleBox = await visibleBox(applicantToggle, "mobile applicant toggle");
-  expect(applicantToggleBox.height, "applicant toggle should stay one compact row").toBeLessThanOrEqual(40);
+  await expect(page.locator(".applicant-toggle")).toHaveCount(0);
 });
 
 test("student notification panel opens and closes latest notification", async ({ page }) => {
@@ -172,7 +170,20 @@ async function mockAuth(page: Page): Promise<void> {
 async function mockPeriods(page: Page): Promise<void> {
   await page.route("**/api/periods**", async (route) => {
     const url = new URL(route.request().url());
+    const weekStart = url.searchParams.get("weekStart");
     const date = url.searchParams.get("date") ?? FIXED_THURSDAY_DATE;
+    if (weekStart) {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          dates: SCHOOL_WEEK_DATES.map((weekDate) => ({
+            date: weekDate,
+            periods: [buildWeekPeriod("EIGHTH"), buildWeekPeriod("FIRST")]
+          }))
+        }
+      });
+      return;
+    }
     await route.fulfill({
       contentType: "application/json",
       json: {
@@ -181,6 +192,19 @@ async function mockPeriods(page: Page): Promise<void> {
       },
     });
   });
+}
+
+function buildWeekPeriod(studyPeriod: "EIGHTH" | "FIRST") {
+  return {
+    availability: 10,
+    capacity: 10,
+    closeTime: "21:00",
+    enabled: true,
+    myReservationId: null,
+    openTime: "20:00",
+    reservedCount: 0,
+    studyPeriod
+  };
 }
 
 async function mockNotifications(page: Page): Promise<void> {

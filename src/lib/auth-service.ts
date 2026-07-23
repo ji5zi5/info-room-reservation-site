@@ -15,6 +15,7 @@ import { isNoDatabaseMockMode } from "./mock-dev-mode";
 import { upsertMockReservationUser } from "./mock-reservation-data";
 import { loginWithRiroSchool, type RiroAuthResult, type RiroProfile } from "./riro-auth";
 import { createMockSessionToken, createSession, type SessionUser } from "./session";
+import { DEFAULT_SHADOW_BAN_PROFILE } from "./shadow-ban-profile";
 
 type LoginInput = {
   readonly id: string;
@@ -80,6 +81,7 @@ export async function loginUserWithRiro(input: LoginInput): Promise<LoginResult>
           restrictionReason: user.restrictionReason,
           restrictedUntil: user.restrictedUntil ? user.restrictedUntil.toISOString() : null,
           role: user.role,
+          shadowBanProfile: user.shadowBanProfile,
           studentNumber: user.studentNumber
         }
       };
@@ -102,6 +104,7 @@ function buildNoDatabaseMockUser(profile: RiroProfile, role: "ADMIN" | "STUDENT"
     restrictionReason: null,
     restrictedUntil: null,
     role,
+    shadowBanProfile: DEFAULT_SHADOW_BAN_PROFILE,
     studentNumber: profile.studentNumber
   };
 }

@@ -137,6 +137,7 @@ async function mockAdminStudentManagement(page: Page, selectedStudentNumber: str
       await route.fulfill({
         contentType: "application/json",
         json: {
+          notificationBacklog: [],
           periods: mockAdminPeriods().map((period) => ({
             ...period,
             applicants: [],

@@ -1,0 +1,68 @@
+export const OPERATIONAL_JOB_POLICIES = {
+  CLOSED_PERIOD_NOTIFICATIONS: {
+    intervalMs: 60_000,
+    timeoutMs: 2 * 60_000
+  },
+  MAINTENANCE: {
+    intervalMs: 24 * 60 * 60_000,
+    timeoutMs: 15 * 60_000
+  }
+} as const;
+
+export type OperationalJobName = keyof typeof OPERATIONAL_JOB_POLICIES;
+export type OperationalJobStatus = "FAILED" | "RUNNING" | "SUCCEEDED";
+
+export type OperationalJobState = {
+  readonly consecutiveFailures: number;
+  readonly finishedAt: Date | null;
+  readonly lastAttemptAt: Date;
+  readonly lastSuccessAt: Date | null;
+  readonly startedAt: Date;
+  readonly status: OperationalJobStatus;
+};
+
+export type OperationalJobReadiness = {
+  readonly code:
+    | "disabled"
+    | "healthy"
+    | "last_attempt_failed"
+    | "never_run"
+    | "never_succeeded"
+    | "repeated_failures"
+    | "running"
+    | "running_timeout"
+    | "stale";
+  readonly status: "degraded" | "ok" | "unready";
+};
+
+export function evaluateOperationalJobReadiness(input: {
+  readonly enabled: boolean;
+  readonly now: Date;
+  readonly policy: { readonly intervalMs: number; readonly timeoutMs: number };
+  readonly state: OperationalJobState | null;
+}): OperationalJobReadiness {
+  if (!input.enabled) {
+    return { code: "disabled", status: "ok" };
+  }
+  if (!input.state) {
+    return { code: "never_run", status: "unready" };
+  }
+  if (input.state.status === "RUNNING") {
+    return input.now.getTime() - input.state.startedAt.getTime() > input.policy.timeoutMs
+      ? { code: "running_timeout", status: "unready" }
+      : { code: "running", status: "degraded" };
+  }
+  if (input.state.consecutiveFailures >= 2) {
+    return { code: "repeated_failures", status: "unready" };
+  }
+  if (!input.state.lastSuccessAt) {
+    return { code: "never_succeeded", status: "unready" };
+  }
+  if (input.now.getTime() - input.state.lastSuccessAt.getTime() > input.policy.intervalMs * 3) {
+    return { code: "stale", status: "unready" };
+  }
+  if (input.state.status === "FAILED") {
+    return { code: "last_attempt_failed", status: "degraded" };
+  }
+  return { code: "healthy", status: "ok" };
+}

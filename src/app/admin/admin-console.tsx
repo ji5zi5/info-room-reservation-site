@@ -83,13 +83,18 @@ export function AdminConsole(): ReactElement {
           <section className="admin-main-panel" aria-live="polite">
             {consoleState.activeSection === "dashboard" ? (
               <AdminDashboardPanel
+                notificationBacklog={consoleState.notificationBacklog}
                 periods={consoleState.dashboardPeriods}
                 statistics={consoleState.statistics}
-                onSendNotification={(period, force) => void consoleState.sendNotification(period, force)}
+                onReconcileNotification={(item, action) =>
+                  void consoleState.reconcileNotification(item, action)
+                }
+                onSendNotification={(period) => void consoleState.sendNotification(period)}
               />
             ) : null}
             {consoleState.activeSection === "reservations" ? (
               <AdminReservationsPanel
+                date={consoleState.date}
                 periodFilter={consoleState.reservationPeriodFilter}
                 query={consoleState.reservationQuery}
                 reservations={consoleState.reservations}

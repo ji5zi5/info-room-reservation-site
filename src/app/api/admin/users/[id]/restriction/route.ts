@@ -1,16 +1,24 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { assertRestrictableUser } from "@/lib/admin-users";
+import {
+  databaseActorFromSessionUser,
+  TransactionRetryExhaustedError,
+  userMutationLockKey,
+  withDatabaseMutation
+} from "@/lib/db-context";
 import { prisma } from "@/lib/db";
-import { jsonError } from "@/lib/http";
+import { toKstDate } from "@/lib/date";
+import { jsonError, jsonTransactionRetryExhaustedError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { applyMockUserRestriction, removeMockUserRestriction, type MockUserRestrictionResult } from "@/lib/mock-user-restrictions";
 import { readJsonRequest } from "@/lib/request-json";
 import { hashRequestClientIp } from "@/lib/request-source";
+import { DEFAULT_SHADOW_BAN_PROFILE, parseShadowBanProfile } from "@/lib/shadow-ban-profile";
 
 import {
   adminSessionErrorResponse,
-  findRestrictableTarget,
   prepareAdminRestrictionMutation,
   stringifyRestrictionSnapshot
 } from "./restriction-route-support";
@@ -18,8 +26,10 @@ import {
 const RestrictionRequestSchema = z.object({
   days: z.number().int().min(1).max(365).nullable().optional(),
   reason: z.string().trim().min(1).max(200),
+  shadowBanProfile: z.union([z.literal("LOW"), z.literal("NORMAL"), z.literal("HIGH")]).optional(),
   status: z.union([z.literal("RESTRICTED"), z.literal("BANNED"), z.literal("SHADOW_BANNED")])
 });
+type RestrictionStatus = z.infer<typeof RestrictionRequestSchema>["status"];
 
 export async function POST(request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
   try {
@@ -36,6 +46,9 @@ export async function POST(request: Request, context: { readonly params: Promise
       return parsed.response;
     }
     const restrictionDays = parsed.data.days ?? null;
+    const shadowBanProfile =
+      parsed.data.status === "SHADOW_BANNED" ? parseShadowBanProfile(parsed.data.shadowBanProfile) : DEFAULT_SHADOW_BAN_PROFILE;
+    const now = new Date();
 
     let restrictedUntil: Date | null = null;
     if ((parsed.data.status === "BANNED" || parsed.data.status === "SHADOW_BANNED") && restrictionDays !== null) {
@@ -45,34 +58,60 @@ export async function POST(request: Request, context: { readonly params: Promise
       if (restrictionDays === null) {
         return jsonError(400, "bad_request", "기간 제한 일수가 필요합니다.");
       }
-      restrictedUntil = new Date(Date.now() + restrictionDays * 24 * 60 * 60 * 1000);
+      restrictedUntil = new Date(now.getTime() + restrictionDays * 24 * 60 * 60 * 1000);
     }
     if (isNoDatabaseMockMode()) {
       return mockRestrictionResultResponse(
         applyMockUserRestriction({
           actorId: admin.id,
           bookingStatus: parsed.data.status,
+          now,
           restrictedUntil,
           restrictionReason: parsed.data.reason,
+          shadowBanProfile,
           targetUserId: params.id
         })
       );
     }
-    const target = await findRestrictableTarget(admin.id, params.id);
-    if (target instanceof NextResponse) {
-      return target;
-    }
     const ipHash = hashRequestClientIp(request);
 
-    const user = await prisma.$transaction(async (transaction) => {
+    const result = await withDatabaseMutation({
+      actor: databaseActorFromSessionUser(admin),
+      client: prisma,
+      lockKeys: [userMutationLockKey(params.id)],
+      operation: async (transaction) => {
+      const target = await transaction.user.findUnique({ where: { id: params.id } });
+      if (!target) {
+        return { kind: "not_found" } as const;
+      }
+      const guard = assertRestrictableUser({ actorId: admin.id, target });
+      if (guard.kind === "error") {
+        return { kind: "forbidden", reason: guard.reason } as const;
+      }
+      if (target.bookingStatus === "BANNED" && parsed.data.status !== "BANNED") {
+        return { kind: "weaker_status" } as const;
+      }
       const updated = await transaction.user.update({
         data: {
           bookingStatus: parsed.data.status,
           restrictedUntil,
-          restrictionReason: parsed.data.reason
+          restrictionReason: parsed.data.reason,
+          shadowBanProfile
         },
         where: { id: params.id }
       });
+      const cancelledFutureReservationCount = shouldCancelFutureReservations(parsed.data.status)
+        ? (
+            await transaction.reservation.updateMany({
+              data: { status: "CANCELLED" },
+              where: {
+                date: { gte: toKstDate(now) },
+                status: "CONFIRMED",
+                userId: params.id
+              }
+            })
+          ).count
+        : 0;
       const action = await transaction.adminAction.create({
         data: {
           action: "USER_RESTRICTION_APPLY",
@@ -112,19 +151,39 @@ export async function POST(request: Request, context: { readonly params: Promise
           action: "USER_RESTRICTION_APPLY",
           actorId: admin.id,
           detail: JSON.stringify({
+            cancelledFutureReservationCount,
             days: restrictionDays,
             reason: parsed.data.reason,
             restrictedUntil,
+            shadowBanProfile,
             status: parsed.data.status
           }),
           userId: params.id
         }
       });
-      return updated;
+      return { cancelledFutureReservationCount, kind: "ok", user: updated } as const;
+      }
     });
 
-    return NextResponse.json({ user });
+    if (result.kind === "not_found") {
+      return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
+    }
+    if (result.kind === "forbidden") {
+      return jsonError(
+        403,
+        result.reason,
+        result.reason === "self_restriction" ? "자기 자신은 제한할 수 없습니다." : "관리자 계정은 제한할 수 없습니다."
+      );
+    }
+    if (result.kind === "weaker_status") {
+      return jsonError(409, "bad_request", "영구 차단 상태는 먼저 해제해야 합니다.");
+    }
+
+    return NextResponse.json({ cancelledFutureReservationCount: result.cancelledFutureReservationCount, user: result.user });
   } catch (error) {
+    if (error instanceof TransactionRetryExhaustedError) {
+      return jsonTransactionRetryExhaustedError();
+    }
     const response = adminSessionErrorResponse(error);
     if (response) {
       return response;
@@ -143,18 +202,27 @@ export async function DELETE(request: Request, context: { readonly params: Promi
     if (isNoDatabaseMockMode()) {
       return mockRestrictionResultResponse(removeMockUserRestriction({ actorId: admin.id, targetUserId: params.id }));
     }
-    const target = await findRestrictableTarget(admin.id, params.id);
-    if (target instanceof NextResponse) {
-      return target;
-    }
     const ipHash = hashRequestClientIp(request);
 
-    const user = await prisma.$transaction(async (transaction) => {
+    const result = await withDatabaseMutation({
+      actor: databaseActorFromSessionUser(admin),
+      client: prisma,
+      lockKeys: [userMutationLockKey(params.id)],
+      operation: async (transaction) => {
+      const target = await transaction.user.findUnique({ where: { id: params.id } });
+      if (!target) {
+        return { kind: "not_found" } as const;
+      }
+      const guard = assertRestrictableUser({ actorId: admin.id, target });
+      if (guard.kind === "error") {
+        return { kind: "forbidden", reason: guard.reason } as const;
+      }
       const updated = await transaction.user.update({
         data: {
           bookingStatus: "ACTIVE",
           restrictedUntil: null,
-          restrictionReason: null
+          restrictionReason: null,
+          shadowBanProfile: DEFAULT_SHADOW_BAN_PROFILE
         },
         where: { id: params.id }
       });
@@ -189,10 +257,24 @@ export async function DELETE(request: Request, context: { readonly params: Promi
           userId: params.id
         }
       });
-      return updated;
+      return { kind: "ok", user: updated } as const;
+      }
     });
-    return NextResponse.json({ user });
+    if (result.kind === "not_found") {
+      return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
+    }
+    if (result.kind === "forbidden") {
+      return jsonError(
+        403,
+        result.reason,
+        result.reason === "self_restriction" ? "자기 자신은 제한할 수 없습니다." : "관리자 계정은 제한할 수 없습니다."
+      );
+    }
+    return NextResponse.json({ user: result.user });
   } catch (error) {
+    if (error instanceof TransactionRetryExhaustedError) {
+      return jsonTransactionRetryExhaustedError();
+    }
     const response = adminSessionErrorResponse(error);
     if (response) {
       return response;
@@ -201,10 +283,14 @@ export async function DELETE(request: Request, context: { readonly params: Promi
   }
 }
 
+function shouldCancelFutureReservations(status: RestrictionStatus): boolean {
+  return status === "BANNED";
+}
+
 function mockRestrictionResultResponse(result: MockUserRestrictionResult): NextResponse {
   switch (result.kind) {
     case "ok":
-      return NextResponse.json({ user: result.user });
+      return NextResponse.json({ cancelledFutureReservationCount: result.cancelledFutureReservationCount, user: result.user });
     case "not_found":
       return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
     case "forbidden":

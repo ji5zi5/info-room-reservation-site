@@ -1,8 +1,10 @@
 import { prisma } from "./db";
+import { addDays } from "./date";
 import { getPeriodWindowState, type PeriodWindowState } from "./period-window";
 import {
   DEFAULT_PERIOD_CLOSE_TIME,
   DEFAULT_PERIOD_OPEN_TIME,
+  GLOBAL_PERIOD_SETTINGS_DATE,
   buildDefaultPeriodSetting,
   periodSettingReadDates,
   resolveEffectivePeriodSetting,
@@ -25,6 +27,26 @@ export type PeriodSummary = {
   readonly windowState: PeriodWindowState;
 };
 
+export type PeriodWeekSummary = {
+  readonly dates: readonly PeriodWeekDateSummary[];
+};
+
+export type PeriodWeekDateSummary = {
+  readonly date: string;
+  readonly periods: readonly PeriodWeekPeriodSummary[];
+};
+
+export type PeriodWeekPeriodSummary = {
+  readonly studyPeriod: StudyPeriod;
+  readonly openTime: string;
+  readonly closeTime: string;
+  readonly capacity: number;
+  readonly reservedCount: number;
+  readonly enabled: boolean;
+  readonly availability: number;
+  readonly myReservationId: string | null;
+};
+
 export type PeriodApplicant = {
   readonly name: string;
   readonly reservationId: string;
@@ -40,6 +62,11 @@ type PeriodReservationOwner = {
   readonly reservationId: string;
   readonly studyPeriod: StudyPeriod;
   readonly userId: string;
+};
+
+type PeriodReservationData = {
+  readonly applicants: readonly PeriodApplicantRow[];
+  readonly owners: readonly PeriodReservationOwner[];
 };
 
 type PeriodSummaryOptions = {
@@ -63,20 +90,20 @@ export async function getPeriodSummaries(
   options: PeriodSummaryOptions = {}
 ): Promise<readonly PeriodSummary[]> {
   const now = options.now ?? new Date();
-  const [settings, counts, applicants] = await Promise.all([
+  const [settings, counts, reservationData] = await Promise.all([
     prisma.periodSetting.findMany({ where: { date: { in: [...periodSettingReadDates(date)] } } }),
     prisma.reservation.groupBy({
       by: ["studyPeriod"],
       where: { date, status: "CONFIRMED" },
       _count: { _all: true }
     }),
-    getPeriodApplicants(date, options.includeApplicants === true)
+    getPeriodReservationData(date, options)
   ]);
 
   return STUDY_PERIODS.map((studyPeriod) => {
     const setting = resolveEffectivePeriodSetting(date, studyPeriod, settings);
     const count = counts.find((candidate) => candidate.studyPeriod === studyPeriod)?._count._all ?? 0;
-    const periodApplicants = applicantsForPeriod(studyPeriod, applicants);
+    const periodApplicants = applicantsForPeriod(studyPeriod, reservationData.applicants);
     return {
       applicants: periodApplicants,
       capacity: setting.capacity,
@@ -85,7 +112,7 @@ export async function getPeriodSummaries(
       date,
       enabled: setting.enabled,
       label: getStudyPeriodLabel(studyPeriod),
-      myReservationId: findMyReservationId(studyPeriod, applicants, options.currentUserId),
+      myReservationId: findMyReservationId(studyPeriod, reservationData.owners, options.currentUserId),
       openTime: setting.openTime,
       remaining: Math.max(setting.capacity - count, 0),
       studyPeriod,
@@ -94,10 +121,78 @@ export async function getPeriodSummaries(
   });
 }
 
-async function getPeriodApplicants(date: string, includeApplicants: boolean): Promise<readonly PeriodApplicantRow[]> {
-  if (!includeApplicants) {
-    return [];
+export async function getPeriodWeekSummaries(
+  weekStart: string,
+  options: { readonly currentUserId: string }
+): Promise<PeriodWeekSummary> {
+  const dates = Array.from({ length: 5 }, (_, index) => addDays(weekStart, index));
+  const settingDates = [GLOBAL_PERIOD_SETTINGS_DATE, ...dates];
+  const [settings, counts, reservations] = await Promise.all([
+    prisma.periodSetting.findMany({ where: { date: { in: settingDates } } }),
+    prisma.reservation.groupBy({
+      _count: { _all: true },
+      by: ["date", "studyPeriod"],
+      where: { date: { in: dates }, status: "CONFIRMED" }
+    }),
+    prisma.reservation.findMany({
+      orderBy: { createdAt: "asc" },
+      select: { date: true, id: true, studyPeriod: true },
+      where: { date: { in: dates }, status: "CONFIRMED", userId: options.currentUserId }
+    })
+  ]);
+
+  return {
+    dates: dates.map((date) => ({
+      date,
+      periods: STUDY_PERIODS.map((studyPeriod) => {
+        const setting = resolveEffectivePeriodSetting(date, studyPeriod, settings);
+        const reservedCount =
+          counts.find(
+            (count) => count.date === date && parseStudyPeriod(count.studyPeriod) === studyPeriod
+          )?._count._all ?? 0;
+        const myReservationId =
+          reservations.find(
+            (reservation) =>
+              reservation.date === date && parseStudyPeriod(reservation.studyPeriod) === studyPeriod
+          )?.id ?? null;
+        return {
+          studyPeriod,
+          openTime: setting.openTime,
+          closeTime: setting.closeTime,
+          capacity: setting.capacity,
+          reservedCount,
+          enabled: setting.enabled,
+          availability: Math.max(setting.capacity - reservedCount, 0),
+          myReservationId
+        };
+      })
+    }))
+  };
+}
+
+async function getPeriodReservationData(
+  date: string,
+  options: PeriodSummaryOptions
+): Promise<PeriodReservationData> {
+  if (options.includeApplicants !== true) {
+    if (!options.currentUserId) {
+      return { applicants: [], owners: [] };
+    }
+    const reservations = await prisma.reservation.findMany({
+      orderBy: { createdAt: "asc" },
+      select: { id: true, studyPeriod: true, userId: true },
+      where: { date, status: "CONFIRMED", userId: options.currentUserId }
+    });
+    return {
+      applicants: [],
+      owners: reservations.map((reservation) => ({
+        reservationId: reservation.id,
+        studyPeriod: parseStudyPeriod(reservation.studyPeriod),
+        userId: reservation.userId
+      }))
+    };
   }
+
   const reservations = await prisma.reservation.findMany({
     orderBy: { createdAt: "asc" },
     select: {
@@ -114,13 +209,14 @@ async function getPeriodApplicants(date: string, includeApplicants: boolean): Pr
     where: { date, status: "CONFIRMED" }
   });
 
-  return reservations.map((reservation) => ({
+  const applicants = reservations.map((reservation) => ({
     name: reservation.user.name,
     reservationId: reservation.id,
     studentNumber: reservation.user.studentNumber,
     studyPeriod: parseStudyPeriod(reservation.studyPeriod),
     userId: reservation.userId
   }));
+  return { applicants, owners: applicants };
 }
 
 function applicantsForPeriod(

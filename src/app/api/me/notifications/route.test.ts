@@ -119,7 +119,7 @@ describe("student notifications route", () => {
     expect(routeMocks.adminActionFindMany).not.toHaveBeenCalled();
   });
 
-  it("loads only the current student's admin cancellation actions", async () => {
+  it("loads only the current student's cancellation notification actions", async () => {
     // Given
     routeMocks.adminActionFindMany.mockResolvedValue([
       {

@@ -1,4 +1,5 @@
 import { isReservableDate } from "./advance-reservation-policy";
+import { periodMutationLockKey, userMutationLockKey } from "./db-context";
 import { getPeriodWindowState } from "./period-window";
 import type { StudyPeriod } from "./study-periods";
 
@@ -73,7 +74,14 @@ export interface ReservationStore {
 }
 
 export interface TransactionalReservationStore {
-  transaction<T>(operation: (store: ReservationStore) => Promise<T>): Promise<T>;
+  transaction<T>(lockKeys: readonly string[], operation: (store: ReservationStore) => Promise<T>): Promise<T>;
+}
+
+export class ReservationIdentityConflictError extends Error {
+  public constructor() {
+    super("Reservation identity already exists");
+    this.name = "ReservationIdentityConflictError";
+  }
 }
 
 export type ReserveStudyPeriodInput = {
@@ -104,61 +112,71 @@ export function buildNoShowBan(reason: string): BookingRestrictionUpdate {
 }
 
 export async function reserveStudyPeriod(input: ReserveStudyPeriodInput): Promise<ReservationResult> {
-  return input.store.transaction(async (store) => {
-    const userState = await store.getUserBookingState(input.userId);
-    if (!userState) {
-      return { kind: "error", reason: "not_found" };
-    }
+  try {
+    return await input.store.transaction(
+      [periodMutationLockKey(input.date, input.studyPeriod), userMutationLockKey(input.userId)],
+      async (store) => {
+        const userState = await store.getUserBookingState(input.userId);
+        if (!userState) {
+          return { kind: "error", reason: "not_found" };
+        }
 
-    if (userState.bookingStatus === "SHADOW_BANNED") {
-      return { kind: "error", reason: "shadow_banned" };
-    }
+        if (userState.bookingStatus === "SHADOW_BANNED") {
+          return { kind: "error", reason: "shadow_banned" };
+        }
 
-    if (isRestricted(userState, input.now)) {
-      return { kind: "error", reason: "restricted" };
-    }
+        if (isRestricted(userState, input.now)) {
+          return { kind: "error", reason: "restricted" };
+        }
 
-    if (!isReservableDate(input.date, input.now)) {
-      return { kind: "error", reason: "advance_unavailable" };
-    }
+        if (!isReservableDate(input.date, input.now)) {
+          return { kind: "error", reason: "advance_unavailable" };
+        }
 
-    const setting = await store.getPeriodSetting(input.date, input.studyPeriod);
-    if (!setting) {
-      return { kind: "error", reason: "not_found" };
-    }
+        const setting = await store.getPeriodSetting(input.date, input.studyPeriod);
+        if (!setting) {
+          return { kind: "error", reason: "not_found" };
+        }
 
-    if (!setting.enabled) {
-      return { kind: "error", reason: "disabled" };
-    }
+        if (!setting.enabled) {
+          return { kind: "error", reason: "disabled" };
+        }
 
-    const windowState = getPeriodWindowState(setting, input.now);
-    if (windowState !== "open") {
-      return { kind: "error", reason: windowState };
-    }
+        const windowState = getPeriodWindowState(setting, input.now);
+        if (windowState !== "open") {
+          return { kind: "error", reason: windowState };
+        }
 
-    const existing = await store.findReservation({
-      date: input.date,
-      studyPeriod: input.studyPeriod,
-      userId: input.userId
-    });
-    if (existing?.status === "CONFIRMED") {
+        const existing = await store.findReservation({
+          date: input.date,
+          studyPeriod: input.studyPeriod,
+          userId: input.userId
+        });
+        if (existing?.status === "CONFIRMED") {
+          return { kind: "error", reason: "duplicate" };
+        }
+
+        const confirmedCount = await store.countConfirmedReservations(input.date, input.studyPeriod);
+        if (confirmedCount >= setting.capacity) {
+          return { kind: "error", reason: "full" };
+        }
+
+        const reservation = await store.createReservation({
+          date: input.date,
+          reason: input.reason,
+          studyPeriod: input.studyPeriod,
+          userId: input.userId
+        });
+
+        return { kind: "confirmed", reservation };
+      }
+    );
+  } catch (error) {
+    if (error instanceof ReservationIdentityConflictError) {
       return { kind: "error", reason: "duplicate" };
     }
-
-    const confirmedCount = await store.countConfirmedReservations(input.date, input.studyPeriod);
-    if (confirmedCount >= setting.capacity) {
-      return { kind: "error", reason: "full" };
-    }
-
-    const reservation = await store.createReservation({
-      date: input.date,
-      reason: input.reason,
-      studyPeriod: input.studyPeriod,
-      userId: input.userId
-    });
-
-    return { kind: "confirmed", reservation };
-  });
+    throw error;
+  }
 }
 
 function isRestricted(userState: UserBookingState, now: Date): boolean {

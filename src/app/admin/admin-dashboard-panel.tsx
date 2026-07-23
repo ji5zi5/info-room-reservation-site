@@ -1,18 +1,37 @@
 "use client";
 
-import { AlertTriangle, ClipboardList, Send, TrendingUp, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ClipboardList,
+  RotateCcw,
+  Send,
+  TrendingUp,
+  Users,
+  X
+} from "lucide-react";
 
-import { isStaleSendingDelivery } from "@/lib/closed-period-notifications";
-
-import type { AdminDashboardPeriod, AdminStatistics } from "./admin-types";
+import type {
+  AdminDashboardPeriod,
+  AdminNotificationBacklogItem,
+  AdminNotificationReconciliationAction,
+  AdminStatistics
+} from "./admin-types";
 import { buildStatisticsCsv } from "./admin-csv";
 
 export function AdminDashboardPanel({
+  notificationBacklog,
+  onReconcileNotification,
   onSendNotification,
   periods,
   statistics
 }: {
-  readonly onSendNotification: (period: AdminDashboardPeriod, force: boolean) => void;
+  readonly notificationBacklog: readonly AdminNotificationBacklogItem[];
+  readonly onReconcileNotification: (
+    item: AdminNotificationBacklogItem,
+    action: AdminNotificationReconciliationAction
+  ) => void;
+  readonly onSendNotification: (period: AdminDashboardPeriod) => void;
   readonly periods: readonly AdminDashboardPeriod[];
   readonly statistics: AdminStatistics | null;
 }): React.ReactElement {
@@ -52,6 +71,62 @@ export function AdminDashboardPanel({
           </span>
         </div>
       ) : null}
+      {notificationBacklog.length > 0 ? (
+        <section className="admin-notification-review" aria-label="확인이 필요한 Discord 알림">
+          <div className="period-top">
+            <h3>알림 확인 필요</h3>
+            <span className="period-badge">{notificationBacklog.length}건</span>
+          </div>
+          <div className="admin-notification-review-list">
+            {notificationBacklog.map((item) => (
+              <div
+                className="admin-notification-review-row"
+                key={`${item.date}-${item.studyPeriod}`}
+              >
+                <div className="admin-notification-review-summary">
+                  <div className="admin-notification-review-heading">
+                    <strong>
+                      {formatDate(item.date)} · {studyPeriodLabel(item.studyPeriod)}
+                    </strong>
+                    <span className="notification-pill" data-status={item.status}>
+                      {reconciliationStatusLabel(item.status)}
+                    </span>
+                  </div>
+                  {item.lastError ? <span className="muted">{item.lastError}</span> : null}
+                </div>
+                <div className="admin-notification-review-actions">
+                  {item.status === "UNKNOWN" ? (
+                    <button
+                      className="primary-button detail-line-action"
+                      type="button"
+                      onClick={() => onReconcileNotification(item, "confirm_sent")}
+                    >
+                      <Check size={16} />
+                      전송됨 처리
+                    </button>
+                  ) : null}
+                  <button
+                    className="ghost-button detail-line-action"
+                    type="button"
+                    onClick={() => onReconcileNotification(item, "retry")}
+                  >
+                    <RotateCcw size={16} />
+                    다시 시도
+                  </button>
+                  <button
+                    className="ghost-button detail-line-action"
+                    type="button"
+                    onClick={() => onReconcileNotification(item, "abandon")}
+                  >
+                    <X size={16} />
+                    종료
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <div className="admin-dashboard-grid">
         {periods.map((period) => (
           <article className="metric-card" key={period.studyPeriod}>
@@ -70,15 +145,17 @@ export function AdminDashboardPanel({
               </span>
               {period.notification?.sentAt ? <p className="muted">마지막 전송 {formatKst(period.notification.sentAt)}</p> : null}
               {period.notification?.lastError ? <p className="muted">실패 원인 {period.notification.lastError}</p> : null}
-              <button
-                className={period.notification?.status === "SENT" ? "ghost-button" : "primary-button"}
-                disabled={!period.isClosed || isFreshSendingNotification(period)}
-                type="button"
-                onClick={() => onSendNotification(period, shouldForceNotification(period))}
-              >
-                <Send size={16} />
-                {notificationActionLabel(period)}
-              </button>
+              {shouldOfferManualSend(period) ? (
+                <button
+                  className="primary-button"
+                  disabled={!period.isClosed}
+                  type="button"
+                  onClick={() => onSendNotification(period)}
+                >
+                  <Send size={16} />
+                  마감 명단 보내기
+                </button>
+              ) : null}
             </div>
           </article>
         ))}
@@ -129,31 +206,8 @@ export function AdminDashboardPanel({
   );
 }
 
-function isFreshSendingNotification(period: AdminDashboardPeriod): boolean {
-  const notification = period.notification;
-  if (notification?.status !== "SENDING") {
-    return false;
-  }
-  return !isStaleSendingDelivery({ status: notification.status, updatedAt: new Date(notification.updatedAt) }, new Date());
-}
-
-function isStaleSendingNotification(period: AdminDashboardPeriod): boolean {
-  const notification = period.notification;
-  return notification?.status === "SENDING" && !isFreshSendingNotification(period);
-}
-
-function notificationActionLabel(period: AdminDashboardPeriod): string {
-  if (isFreshSendingNotification(period)) {
-    return "전송 중";
-  }
-  if (period.notification?.status === "SENT" || isStaleSendingNotification(period)) {
-    return "재전송";
-  }
-  return "마감 명단 보내기";
-}
-
-function shouldForceNotification(period: AdminDashboardPeriod): boolean {
-  return period.notification?.status === "SENT" || isStaleSendingNotification(period);
+function shouldOfferManualSend(period: AdminDashboardPeriod): boolean {
+  return period.notification === null || period.notification.status === "PENDING";
 }
 
 function notificationLabel(period: AdminDashboardPeriod): string {
@@ -161,13 +215,44 @@ function notificationLabel(period: AdminDashboardPeriod): string {
     return "전송 대기";
   }
   switch (period.notification.status) {
+    case "ABANDONED":
+      return "확인 종료";
     case "FAILED":
       return `전송 실패 · ${period.notification.attempts}회`;
+    case "PENDING":
+      return "전송 대기";
+    case "PENDING_REVIEW":
+      return "확인 대기";
     case "SENDING":
       return `전송 중 · ${period.notification.attempts}회`;
     case "SENT":
-      return `전송됨 · ${period.notification.messageIds.length}건`;
+      return "전송됨";
+    case "UNKNOWN":
+      return "결과 확인 필요";
   }
+}
+
+function reconciliationStatusLabel(status: AdminNotificationBacklogItem["status"]): string {
+  switch (status) {
+    case "FAILED":
+      return "전송 실패";
+    case "PENDING_REVIEW":
+      return "확인 대기";
+    case "UNKNOWN":
+      return "결과 확인 필요";
+  }
+}
+
+function studyPeriodLabel(studyPeriod: AdminNotificationBacklogItem["studyPeriod"]): string {
+  return studyPeriod === "EIGHTH" ? "8면학" : "1면학";
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("ko-KR", {
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Seoul"
+  }).format(new Date(`${value}T00:00:00+09:00`));
 }
 
 function formatKst(value: string): string {

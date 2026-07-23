@@ -87,7 +87,7 @@ describe("closed period notification candidate selection", () => {
     expect(candidates).toEqual([]);
   });
 
-  it("selects a period with a stale sending delivery", () => {
+  it("does not automatically retry a stale sending delivery", () => {
     const staleSendingDelivery = {
       date: "2026-06-12",
       kind: CLOSED_LIST_NOTIFICATION_KIND,
@@ -105,7 +105,52 @@ describe("closed period notification candidate selection", () => {
       settings: [closedEighthSetting]
     });
 
-    expect(candidates).toEqual([closedEighthSetting]);
+    expect(candidates).toEqual([]);
+  });
+
+  it("does not automatically send unresolved reconciliation states", () => {
+    for (const status of ["UNKNOWN", "PENDING_REVIEW"] as const) {
+      expect(
+        selectClosedPeriodNotificationCandidates({
+          deliveries: [
+            {
+              date: "2026-06-12",
+              kind: CLOSED_LIST_NOTIFICATION_KIND,
+              status,
+              studyPeriod: "EIGHTH",
+              updatedAt: new Date("2026-06-12T07:20:00.000Z")
+            }
+          ],
+          now: new Date("2026-06-12T07:25:00.000Z"),
+          settings: [closedEighthSetting]
+        })
+      ).toEqual([]);
+    }
+  });
+
+  it("waits for a failed delivery backoff before retrying", () => {
+    const failedDelivery = {
+      date: "2026-06-12",
+      kind: CLOSED_LIST_NOTIFICATION_KIND,
+      nextAttemptAt: new Date("2026-06-12T07:26:00.000Z"),
+      status: "FAILED",
+      studyPeriod: "EIGHTH"
+    } as const;
+
+    expect(
+      selectClosedPeriodNotificationCandidates({
+        deliveries: [failedDelivery],
+        now: new Date("2026-06-12T07:25:00.000Z"),
+        settings: [closedEighthSetting]
+      })
+    ).toEqual([]);
+    expect(
+      selectClosedPeriodNotificationCandidates({
+        deliveries: [failedDelivery],
+        now: new Date("2026-06-12T07:26:00.000Z"),
+        settings: [closedEighthSetting]
+      })
+    ).toEqual([closedEighthSetting]);
   });
 
   it("does not treat the exact close minute as closed until the next minute", () => {

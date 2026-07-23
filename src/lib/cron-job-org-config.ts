@@ -1,5 +1,7 @@
 export const CLOSED_PERIOD_CRON_TITLE = "Info Room closed-period notifications";
 export const CLOSED_PERIOD_CRON_PATH = "/api/cron/closed-period-notifications";
+export const MAINTENANCE_CRON_TITLE = "Info Room maintenance";
+export const MAINTENANCE_CRON_PATH = "/api/cron/maintenance";
 
 const EVERY_MINUTE = [
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
@@ -39,6 +41,44 @@ export type ClosedPeriodCronInput = {
 };
 
 export function buildClosedPeriodCronJob(input: ClosedPeriodCronInput): CronJobOrgPayload {
+  return buildCronJob({
+    ...input,
+    path: CLOSED_PERIOD_CRON_PATH,
+    schedule: {
+      expiresAt: 0,
+      hours: [-1],
+      mdays: [-1],
+      minutes: EVERY_MINUTE,
+      months: [-1],
+      timezone: "Asia/Seoul",
+      wdays: [-1]
+    },
+    title: CLOSED_PERIOD_CRON_TITLE
+  });
+}
+
+export function buildMaintenanceCronJob(input: ClosedPeriodCronInput): CronJobOrgPayload {
+  return buildCronJob({
+    ...input,
+    path: MAINTENANCE_CRON_PATH,
+    schedule: {
+      expiresAt: 0,
+      hours: [4],
+      mdays: [-1],
+      minutes: [0],
+      months: [-1],
+      timezone: "Asia/Seoul",
+      wdays: [-1]
+    },
+    title: MAINTENANCE_CRON_TITLE
+  });
+}
+
+function buildCronJob(input: ClosedPeriodCronInput & {
+  readonly path: string;
+  readonly schedule: CronJobOrgSchedule;
+  readonly title: string;
+}): CronJobOrgPayload {
   return {
     enabled: true,
     extendedData: {
@@ -49,17 +89,9 @@ export function buildClosedPeriodCronJob(input: ClosedPeriodCronInput): CronJobO
     requestMethod: 0,
     requestTimeout: 25,
     saveResponses: true,
-    schedule: {
-      expiresAt: 0,
-      hours: [-1],
-      mdays: [-1],
-      minutes: EVERY_MINUTE,
-      months: [-1],
-      timezone: "Asia/Seoul",
-      wdays: [-1]
-    },
-    title: CLOSED_PERIOD_CRON_TITLE,
-    url: `${normalizeCronBaseUrl(input.baseUrl)}${CLOSED_PERIOD_CRON_PATH}`
+    schedule: input.schedule,
+    title: input.title,
+    url: `${normalizeCronBaseUrl(input.baseUrl)}${input.path}`
   };
 }
 

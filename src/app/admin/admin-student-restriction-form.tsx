@@ -3,6 +3,7 @@
 import { Ban, CalendarCheck } from "lucide-react";
 import type { ReactElement } from "react";
 
+import { SHADOW_BAN_PROFILES, shadowBanProfileLabel } from "@/lib/shadow-ban-profile";
 import type { UserRestrictionDraft } from "./admin-console-state";
 
 const DAY_PRESETS = ["7", "14", "30"] as const;
@@ -64,6 +65,22 @@ export function AdminStudentRestrictionForm({
           블랙리스트(숨김)
         </button>
       </fieldset>
+      {draft.status === "SHADOW_BANNED" ? (
+        <fieldset className="restriction-duration-presets shadow-ban-profile-presets" aria-label="블랙리스트 강도">
+          <legend>강도</legend>
+          {SHADOW_BAN_PROFILES.map((profile) => (
+            <button
+              data-active={draft.shadowBanProfile === profile}
+              key={profile}
+              className="ghost-button"
+              type="button"
+              onClick={() => onSetDraft({ shadowBanProfile: profile })}
+            >
+              {shadowBanProfileLabel(profile)}
+            </button>
+          ))}
+        </fieldset>
+      ) : null}
       <button className="danger-button" disabled={!reasonReady} type="button" onClick={onApply}>
         <Ban size={16} />
         학생 제재 적용

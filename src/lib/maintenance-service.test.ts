@@ -6,6 +6,20 @@ describe("maintenance cleanup service", () => {
   it("cleans expired runtime data and releases expired restrictions", async () => {
     const calls: string[] = [];
     const store: MaintenanceCleanupStore = {
+      async applyRetentionPolicy(now) {
+        calls.push(`retention:${now.toISOString()}`);
+        return {
+          counts: {
+            adminActionDetails: 1,
+            auditDetails: 2,
+            departedUserIdentities: 3,
+            reservationReasons: 4,
+            sanctionReasons: 5
+          },
+          kind: "applied",
+          policyVersion: "school-policy-v1"
+        };
+      },
       async deleteExpiredCsrfTokens(now) {
         calls.push(`csrf:${now.toISOString()}`);
         return 2;
@@ -34,6 +48,17 @@ describe("maintenance cleanup service", () => {
       csrfTokensDeleted: 2,
       expiredSanctionsRevoked: 5,
       rateLimitBucketsDeleted: 3,
+      retention: {
+        counts: {
+          adminActionDetails: 1,
+          auditDetails: 2,
+          departedUserIdentities: 3,
+          reservationReasons: 4,
+          sanctionReasons: 5
+        },
+        kind: "applied",
+        policyVersion: "school-policy-v1"
+      },
       restrictionsReleased: 4,
       sessionsDeleted: 1
     });
@@ -42,7 +67,8 @@ describe("maintenance cleanup service", () => {
       "csrf:2026-06-14T12:00:00.000Z",
       "rate:2026-06-14T12:00:00.000Z",
       "restrictions:2026-06-14T12:00:00.000Z",
-      "sanctions:2026-06-14T12:00:00.000Z"
+      "sanctions:2026-06-14T12:00:00.000Z",
+      "retention:2026-06-14T12:00:00.000Z"
     ]);
   });
 });

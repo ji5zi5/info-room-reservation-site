@@ -1,6 +1,7 @@
 import type { AdminUserListRow } from "./admin-users";
 import type { Reservation } from "./reservation-service";
 import type { SessionUser } from "./session";
+import { DEFAULT_SHADOW_BAN_PROFILE } from "./shadow-ban-profile";
 
 export type MockUser = AdminUserListRow;
 
@@ -35,6 +36,7 @@ export function upsertMockReservationUserRecord(user: SessionUser): MockUser {
     restrictedUntil: existing?.restrictedUntil ?? parseNullableDate(user.restrictedUntil),
     restrictionReason: existing?.restrictionReason ?? null,
     role: user.role,
+    shadowBanProfile: existing?.shadowBanProfile ?? user.shadowBanProfile ?? DEFAULT_SHADOW_BAN_PROFILE,
     studentNumber: user.studentNumber
   } satisfies MockUser;
   mockReservationUsersById.set(user.id, nextUser);

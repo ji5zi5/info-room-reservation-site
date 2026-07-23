@@ -11,6 +11,14 @@ const RLS_MIGRATION_PATH = join(
   "migration.sql"
 );
 
+const RETENTION_MIGRATION_PATH = join(
+  process.cwd(),
+  "prisma",
+  "migrations",
+  "20260724010000_add_retention_policy",
+  "migration.sql"
+);
+
 const RLS_TABLES = [
   "AdminAction",
   "AuditLog",
@@ -53,5 +61,13 @@ describe("Postgres row level security policy migration", () => {
     expect(sql).toContain('app_private.can_access_user("userId")');
     expect(sql).toContain("app_private.is_admin_or_system()");
     expect(sql).toContain("app_private.is_system()");
+  });
+
+  it("restricts retention policy access to admin and system roles", () => {
+    const sql = readFileSync(RETENTION_MIGRATION_PATH, "utf8");
+
+    expect(sql).toContain('ALTER TABLE "RetentionPolicy" ENABLE ROW LEVEL SECURITY;');
+    expect(sql).toContain('CREATE POLICY "retention_policy_admin_system_all"');
+    expect(sql).toContain("app_private.is_admin_or_system()");
   });
 });

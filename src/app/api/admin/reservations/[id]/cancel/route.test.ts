@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { TransactionRetryExhaustedError } from "@/lib/db-context";
 import type { RateLimitResult } from "@/lib/rate-limit";
 import type { CurrentSession, SessionUser } from "@/lib/session";
 
@@ -10,14 +11,17 @@ type ReservationRow = {
 };
 type ReservationFindUnique = (input: unknown) => Promise<ReservationRow | null>;
 type ReservationUpdate = (input: unknown) => Promise<ReservationRow>;
+type ReservationUpdateMany = (input: unknown) => Promise<{ readonly count: number }>;
 type AdminActionCreate = (input: unknown) => Promise<{ readonly id: string }>;
 type AuditLogCreate = (input: unknown) => Promise<unknown>;
 type TransactionClient = {
+  readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
   readonly adminAction: { readonly create: AdminActionCreate };
   readonly auditLog: { readonly create: AuditLogCreate };
   readonly reservation: {
     readonly findUnique: ReservationFindUnique;
     readonly update: ReservationUpdate;
+    readonly updateMany: ReservationUpdateMany;
   };
 };
 type PrismaTransaction = <T>(operation: (transaction: TransactionClient) => Promise<T>) => Promise<T>;
@@ -30,15 +34,18 @@ const routeMocks = vi.hoisted(() => ({
   enforceAdminMutationRateLimit: vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
   requireAdminSession: vi.fn<RequireAdminSession>(),
   requireMutatingRequestSafety: vi.fn<(request: Request) => null>(),
+  rawCalls: [] as Array<{ readonly strings: readonly string[]; readonly values: readonly unknown[] }>,
   reservationFindUnique: vi.fn<ReservationFindUnique>(),
   reservationUpdate: vi.fn<ReservationUpdate>(),
+  reservationUpdateMany: vi.fn<ReservationUpdateMany>(),
   transaction: vi.fn<PrismaTransaction>(),
   validateRequestCsrf: vi.fn<ValidateRequestCsrf>()
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    $transaction: routeMocks.transaction
+    $transaction: routeMocks.transaction,
+    reservation: { findUnique: routeMocks.reservationFindUnique }
   }
 }));
 
@@ -89,12 +96,14 @@ const allowedRateLimit: RateLimitResult = {
 describe("admin reservation cancel route", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    routeMocks.rawCalls.length = 0;
     routeMocks.requireMutatingRequestSafety.mockReturnValue(null);
     routeMocks.requireAdminSession.mockResolvedValue({ id: "session-admin", user: adminUser });
     routeMocks.validateRequestCsrf.mockResolvedValue({ kind: "ok" });
     routeMocks.enforceAdminMutationRateLimit.mockResolvedValue(allowedRateLimit);
     routeMocks.reservationFindUnique.mockResolvedValue(reservation);
     routeMocks.reservationUpdate.mockResolvedValue({ ...reservation, status: "CANCELLED" });
+    routeMocks.reservationUpdateMany.mockResolvedValue({ count: 1 });
     routeMocks.adminActionCreate.mockResolvedValue({ id: "action-cancel" });
     routeMocks.auditLogCreate.mockResolvedValue({});
     routeMocks.transaction.mockImplementation(async (operation) => operation(transactionClient()));
@@ -128,6 +137,35 @@ describe("admin reservation cancel route", () => {
         userId: reservation.userId
       }
     });
+    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledWith({
+      data: { status: "CANCELLED" },
+      where: { id: reservation.id, status: "CONFIRMED" }
+    });
+    const lockValues = routeMocks.rawCalls
+      .filter((call) => call.strings.join("?").includes("pg_advisory_xact_lock"))
+      .map((call) => call.values);
+    expect(lockValues).toEqual([[`user:${reservation.userId}`]]);
+  });
+
+  it("records only one admin cancellation for stale concurrent reads", async () => {
+    routeMocks.reservationUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+
+    const first = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
+    const second = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    expect(routeMocks.adminActionCreate).toHaveBeenCalledTimes(1);
+    expect(routeMocks.auditLogCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a retryable 503 when admin cancellation serialization is exhausted", async () => {
+    routeMocks.transaction.mockRejectedValueOnce(new TransactionRetryExhaustedError(new Error("P2034")));
+
+    const response = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("1");
   });
 
   it("rejects an admin cancellation without a reason before mutating reservations", async () => {
@@ -140,11 +178,16 @@ describe("admin reservation cancel route", () => {
 
 function transactionClient(): TransactionClient {
   return {
+    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
+      routeMocks.rawCalls.push({ strings: [...strings], values });
+      return 1;
+    },
     adminAction: { create: routeMocks.adminActionCreate },
     auditLog: { create: routeMocks.auditLogCreate },
     reservation: {
       findUnique: routeMocks.reservationFindUnique,
-      update: routeMocks.reservationUpdate
+      update: routeMocks.reservationUpdate,
+      updateMany: routeMocks.reservationUpdateMany
     }
   };
 }

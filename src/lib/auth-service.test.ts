@@ -231,6 +231,7 @@ describe("loginUserWithRiro", () => {
     expect(result.user).toMatchObject({
       bookingStatus: "ACTIVE",
       role: "STUDENT",
+      shadowBanProfile: "NORMAL",
       studentNumber: "12345"
     });
   });

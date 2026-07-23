@@ -2,16 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { createClosedPeriodNotificationService } from "./closed-period-notification-service";
 import { createMemoryNotificationRepository, testClosedPeriod } from "./closed-period-notification-service-test-utils";
+import { DiscordWebhookDeliveryError } from "./discord-notifications";
 
 describe("closed period notification service", () => {
   it("sends a closed list and stores the Discord message id", async () => {
     const repository = createMemoryNotificationRepository({ period: testClosedPeriod });
     const sentTitles: string[] = [];
+    const sentPayloads: string[] = [];
     const service = createClosedPeriodNotificationService({
       now: new Date("2026-06-12T07:25:00.000Z"),
       repository,
       sender: async (payload) => {
         sentTitles.push(payload.embeds[0]?.title ?? "");
+        sentPayloads.push(JSON.stringify(payload));
         return { messageIds: ["discord-message-1"] };
       }
     });
@@ -19,7 +22,9 @@ describe("closed period notification service", () => {
     const result = await service.sendClosedPeriod({ date: "2026-06-12", studyPeriod: "EIGHTH" });
 
     expect(result.kind).toBe("sent");
-    expect(sentTitles).toEqual(["8면학 마감 신청자 명단"]);
+    expect(sentTitles).toEqual(["8면학 마감 알림"]);
+    expect(sentPayloads[0]).not.toContain("26001");
+    expect(sentPayloads[0]).not.toContain("자습");
     expect(repository.writes).toEqual([
       expect.objectContaining({
         date: "2026-06-12",
@@ -68,6 +73,32 @@ describe("closed period notification service", () => {
         messageIds: [],
         status: "FAILED",
         studyPeriod: "EIGHTH"
+      })
+    ]);
+  });
+
+  it("records an unknown delivery instead of retrying an ambiguous timeout", async () => {
+    const repository = createMemoryNotificationRepository({ period: testClosedPeriod });
+    const service = createClosedPeriodNotificationService({
+      now: new Date("2026-06-12T07:25:00.000Z"),
+      repository,
+      sender: async () => {
+        throw new DiscordWebhookDeliveryError({
+          code: "discord_timeout",
+          message: "Discord response timed out",
+          outcome: "UNKNOWN"
+        });
+      }
+    });
+
+    const result = await service.sendClosedPeriod({ date: "2026-06-12", studyPeriod: "EIGHTH" });
+
+    expect(result.kind).toBe("unknown");
+    expect(repository.writes).toEqual([
+      expect.objectContaining({
+        failureCode: "discord_timeout",
+        nextAttemptAt: null,
+        status: "UNKNOWN"
       })
     ]);
   });

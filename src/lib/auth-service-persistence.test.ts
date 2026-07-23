@@ -24,6 +24,7 @@ describe("loginUserWithRiro persistence", () => {
         restrictionReason: "late",
         restrictedUntil: new Date("2026-06-20T00:00:00.000Z"),
         riroId: "riro-student",
+        shadowBanProfile: "HIGH",
         studentNumber: "old-24101"
       })
     ]);
@@ -39,6 +40,7 @@ describe("loginUserWithRiro persistence", () => {
       id: "user-existing",
       restrictionReason: "late",
       role: "STUDENT",
+      shadowBanProfile: "HIGH",
       studentNumber: "new-25101"
     });
     expect(prismaPersistenceMocks.getUsers()).toHaveLength(1);
@@ -97,5 +99,32 @@ describe("loginUserWithRiro persistence", () => {
       reason: "bad_response"
     });
     expect(prismaPersistenceMocks.sessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not reactivate an account marked as departed", async () => {
+    prismaPersistenceMocks.seedUsers([
+      userRow({
+        departedAt: new Date("2026-07-20T00:00:00.000Z"),
+        id: "user-departed",
+        riroId: "riro-student",
+        studentNumber: "new-25101"
+      })
+    ]);
+    riroPersistenceMocks.loginWithRiroSchool.mockResolvedValueOnce(
+      riroSuccess({ studentNumber: "new-25101" })
+    );
+
+    const result = await loginUserWithRiro({
+      id: "riro-student",
+      password: "valid-password"
+    });
+
+    expect(result).toEqual({
+      kind: "error",
+      message: "사용할 수 없는 계정입니다. 관리자에게 문의해주세요.",
+      reason: "bad_response"
+    });
+    expect(prismaPersistenceMocks.sessionCreate).not.toHaveBeenCalled();
+    expect(prismaPersistenceMocks.transactionClient.user.update).not.toHaveBeenCalled();
   });
 });

@@ -120,6 +120,7 @@ export function getLocalStudentAccountsFromEnv(): readonly LocalStudentAccount[]
   }
 
   const studentNumbers = splitEnvList(process.env.LOCAL_STUDENT_NUMBER);
+  const resolvedStudentNumbers = resolveLocalStudentNumbers({ ids, studentNumbers });
   return ids.flatMap((id, index) => {
     const password = passwords.length === 1 ? passwords[0] : passwords[index];
     if (password === undefined) {
@@ -129,22 +130,22 @@ export function getLocalStudentAccountsFromEnv(): readonly LocalStudentAccount[]
       {
         id,
         password,
-        studentNumber: studentNumberForLocalAccount({ id, index, studentNumbers, totalAccounts: ids.length })
+        studentNumber: resolvedStudentNumbers[index] ?? id
       }
     ];
   });
 }
 
-function studentNumberForLocalAccount(input: {
-  readonly id: string;
-  readonly index: number;
+export function resolveLocalStudentNumbers(input: {
+  readonly ids: readonly string[];
   readonly studentNumbers: readonly string[];
-  readonly totalAccounts: number;
-}): string {
-  if (input.studentNumbers.length === 0) {
-    return input.totalAccounts === 1 ? DEFAULT_LOCAL_STUDENT_NUMBER : input.id;
-  }
-  return input.studentNumbers[input.index] ?? input.id;
+}): readonly string[] {
+  return input.ids.map((id, index) => {
+    if (input.studentNumbers.length === 0) {
+      return input.ids.length === 1 ? DEFAULT_LOCAL_STUDENT_NUMBER : id;
+    }
+    return input.studentNumbers[index] ?? id;
+  });
 }
 
 function splitEnvList(value: string | undefined): readonly string[] {

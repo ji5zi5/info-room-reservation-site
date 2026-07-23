@@ -49,11 +49,14 @@ export async function findRestrictableTarget(actorId: string, targetUserId: stri
   return target;
 }
 
-export function stringifyRestrictionSnapshot(user: Pick<User, "bookingStatus" | "restrictedUntil" | "restrictionReason">): string {
+export function stringifyRestrictionSnapshot(
+  user: Pick<User, "bookingStatus" | "restrictedUntil" | "restrictionReason" | "shadowBanProfile">
+): string {
   return JSON.stringify({
     bookingStatus: user.bookingStatus,
     restrictedUntil: user.restrictedUntil,
-    restrictionReason: user.restrictionReason
+    restrictionReason: user.restrictionReason,
+    shadowBanProfile: user.shadowBanProfile
   });
 }
 

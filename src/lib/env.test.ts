@@ -5,6 +5,7 @@ import {
   isLocalAdminLoginEnabled,
   isLocalStudentLoginEnabled,
   isMockLoginEnabled,
+  isRetentionPurgeEnabled,
   parseServerEnv,
   shouldTrustForwardedIpHeaders
 } from "./env";
@@ -44,13 +45,14 @@ describe("server environment guards", () => {
   it("allows an explicit production local student fallback without the generic local toggle", () => {
     const productionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
-      CRON_SECRET: "cron-secret-with-enough-length",
+      CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
       ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
       LOCAL_STUDENT_LOGIN_ID: "local-student",
       LOCAL_STUDENT_LOGIN_PASSWORD: "production-student-secret",
+      MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
       NODE_ENV: "production",
       SESSION_SECRET: "session-secret-with-enough-length",
       TRUST_FORWARDED_IP_HEADERS: "true"
@@ -61,17 +63,40 @@ describe("server environment guards", () => {
     expect(isLocalAdminLoginEnabled(productionEnv)).toBe(false);
   });
 
+  it("rejects a production local student number that overlaps the admin allowlist", () => {
+    // Given
+    const productionEnv = {
+      ADMIN_STUDENT_NUMBERS: "91001",
+      CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
+      DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+      DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
+      DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+      ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
+      LOCAL_STUDENT_LOGIN_ID: "local-student",
+      LOCAL_STUDENT_LOGIN_PASSWORD: "production-student-secret",
+      LOCAL_STUDENT_NUMBER: "91001",
+      MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
+      NODE_ENV: "production",
+      SESSION_SECRET: "session-secret-with-enough-length",
+      TRUST_FORWARDED_IP_HEADERS: "true"
+    } as const;
+
+    // When / Then
+    expect(() => assertProductionEnvSafe(productionEnv)).toThrow("ADMIN_STUDENT_NUMBERS");
+  });
+
   it("rejects a weak explicit production local student password", () => {
     expect(() =>
       assertProductionEnvSafe({
         ADMIN_STUDENT_NUMBERS: "test-admin-student",
-        CRON_SECRET: "cron-secret-with-enough-length",
+        CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
         DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
         DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
         DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
         ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
         LOCAL_STUDENT_LOGIN_ID: "local_student_a",
         LOCAL_STUDENT_LOGIN_PASSWORD: "short",
+        MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
         NODE_ENV: "production",
         SESSION_SECRET: "session-secret-with-enough-length",
         TRUST_FORWARDED_IP_HEADERS: "true"
@@ -99,10 +124,11 @@ describe("server environment guards", () => {
   it("requires trusted forwarded IP headers in production", () => {
     const productionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
-      CRON_SECRET: "cron-secret-with-enough-length",
+      CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:5432/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+      MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
       NODE_ENV: "production",
       RIRO_MOCK_LOGIN: "false",
       SESSION_SECRET: "session-secret-with-enough-length"
@@ -120,10 +146,11 @@ describe("server environment guards", () => {
   it("requires all production deployment secrets at the runtime guard boundary", () => {
     const baseProductionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
-      CRON_SECRET: "cron-secret-with-enough-length",
+      CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+      MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
       NODE_ENV: "production",
       SESSION_SECRET: "session-secret-with-enough-length",
       TRUST_FORWARDED_IP_HEADERS: "true"
@@ -136,16 +163,22 @@ describe("server environment guards", () => {
     expect(() => assertProductionEnvSafe({ ...baseProductionEnv, ADMIN_STUDENT_NUMBERS: "" })).toThrow(
       "ADMIN_STUDENT_NUMBERS"
     );
-    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, CRON_SECRET: "" })).toThrow("CRON_SECRET");
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, CLOSED_PERIOD_CRON_SECRET: "" })).toThrow(
+      "CLOSED_PERIOD_CRON_SECRET"
+    );
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, MAINTENANCE_CRON_SECRET: "" })).toThrow(
+      "MAINTENANCE_CRON_SECRET"
+    );
   });
 
   it("rejects weak production shared secrets", () => {
     const baseProductionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
-      CRON_SECRET: "cron-secret-with-enough-length",
+      CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
       DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+      MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
       NODE_ENV: "production",
       SESSION_SECRET: "session-secret-with-enough-length",
       TRUST_FORWARDED_IP_HEADERS: "true"
@@ -154,7 +187,37 @@ describe("server environment guards", () => {
     expect(() => assertProductionEnvSafe({ ...baseProductionEnv, SESSION_SECRET: "short" })).toThrow(
       "SESSION_SECRET"
     );
-    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, CRON_SECRET: "short" })).toThrow("CRON_SECRET");
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, CLOSED_PERIOD_CRON_SECRET: "short" })).toThrow(
+      "CLOSED_PERIOD_CRON_SECRET"
+    );
+    expect(() => assertProductionEnvSafe({ ...baseProductionEnv, MAINTENANCE_CRON_SECRET: "short" })).toThrow(
+      "MAINTENANCE_CRON_SECRET"
+    );
+  });
+
+  it("requires separate scoped cron secrets and rejects the legacy shared secret", () => {
+    const productionEnv = {
+      ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
+      DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+      DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
+      DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+      MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
+      NODE_ENV: "production",
+      SESSION_SECRET: "session-secret-with-enough-length",
+      TRUST_FORWARDED_IP_HEADERS: "true"
+    } as const;
+
+    expect(() => assertProductionEnvSafe(productionEnv)).not.toThrow();
+    expect(() => assertProductionEnvSafe({ ...productionEnv, CLOSED_PERIOD_CRON_SECRET: "" })).toThrow(
+      "CLOSED_PERIOD_CRON_SECRET"
+    );
+    expect(() => assertProductionEnvSafe({ ...productionEnv, MAINTENANCE_CRON_SECRET: "" })).toThrow(
+      "MAINTENANCE_CRON_SECRET"
+    );
+    expect(() =>
+      assertProductionEnvSafe({ ...productionEnv, CRON_SECRET: "legacy-shared-secret-with-enough-length" })
+    ).toThrow("CRON_SECRET");
   });
 
   it("enables mock login only in non-production no-database mode", () => {
@@ -199,12 +262,13 @@ describe("server environment guards", () => {
     expect(() =>
       assertProductionEnvSafe({
         ADMIN_STUDENT_NUMBERS: "test-admin-student",
-        CRON_SECRET: "cron-secret-with-enough-length",
+        CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
         DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
         DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
         ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
         LOCAL_STUDENT_LOGIN_ID: "local_student_a,local_student_b",
         LOCAL_STUDENT_LOGIN_PASSWORD: "shared-secret",
+        MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
         NODE_ENV: "production",
         DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
         SESSION_SECRET: "session-secret-with-enough-length",
@@ -230,12 +294,13 @@ describe("server environment guards", () => {
     expect(() =>
       assertProductionEnvSafe({
         ADMIN_STUDENT_NUMBERS: "test-admin-student",
-        CRON_SECRET: "cron-secret-with-enough-length",
+        CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
         DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
         DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
         ENABLE_PRODUCTION_LOCAL_STUDENT: "true",
         LOCAL_STUDENT_LOGIN_ID: "local_student_a,local_student_b",
         LOCAL_STUDENT_LOGIN_PASSWORD: "short,another-strong-secret",
+        MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
         NODE_ENV: "production",
         DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
         SESSION_SECRET: "session-secret-with-enough-length",
@@ -268,5 +333,12 @@ describe("server environment guards", () => {
     expect(shouldTrustForwardedIpHeaders({})).toBe(false);
     expect(shouldTrustForwardedIpHeaders({ TRUST_FORWARDED_IP_HEADERS: "false" })).toBe(false);
     expect(shouldTrustForwardedIpHeaders({ TRUST_FORWARDED_IP_HEADERS: "true" })).toBe(true);
+  });
+
+  it("enables destructive retention only through its explicit flag", () => {
+    expect(isRetentionPurgeEnabled({})).toBe(false);
+    expect(isRetentionPurgeEnabled({ RETENTION_PURGE_ENABLED: "false" })).toBe(false);
+    expect(isRetentionPurgeEnabled({ RETENTION_PURGE_ENABLED: "true" })).toBe(true);
+    expect(() => parseServerEnv({ RETENTION_PURGE_ENABLED: "yes" })).toThrow("RETENTION_PURGE_ENABLED");
   });
 });

@@ -104,7 +104,8 @@ describe("mock reservation data", () => {
       ...student,
       bookingStatus: "SHADOW_BANNED",
       restrictionReason: "블랙리스트",
-      restrictedUntil: new Date("2026-07-01T00:00:00.000Z")
+      restrictedUntil: new Date("2026-07-01T00:00:00.000Z"),
+      shadowBanProfile: "HIGH"
     });
 
     const result = cancelMockReservation({

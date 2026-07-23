@@ -1,10 +1,11 @@
-import { errors, expect, test, type Locator, type Page } from "@playwright/test";
+import { errors, expect, test, type Page } from "@playwright/test";
 
 import { e2eNow, FIXED_FRIDAY_DATE, FIXED_THURSDAY_DATE, mockClientDate } from "./e2e-time";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const FIXED_WEDNESDAY_DATE = "2026-06-10";
 const NEXT_WEEK_MONDAY_DATE = "2026-06-15";
+const SCHOOL_WEEK_DATES = ["2026-06-08", "2026-06-09", FIXED_WEDNESDAY_DATE, FIXED_THURSDAY_DATE, FIXED_FRIDAY_DATE] as const;
 
 type StudyPeriod = "EIGHTH" | "FIRST";
 type WindowState = "closed" | "not_open_yet" | "open";
@@ -42,7 +43,7 @@ test("weekly reservation calendar keeps date tiles focused on selection", async 
   });
   await login(page, `calendar-${Date.now()}`);
 
-  await expect(page.getByRole("heading", { name: "이번 주 예약" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "이번 주" })).toBeVisible();
   await expect(page.getByText(/^사전예약 \d{2}\.\d{2}/u)).toHaveCount(0);
 
   const calendar = page.locator(".reservation-calendar");
@@ -61,10 +62,11 @@ test("weekly reservation calendar keeps date tiles focused on selection", async 
 
   await friday.click();
   await expect(page.getByRole("button", { name: "사전예약" })).toHaveAttribute("data-active", "true");
-  await expect(page.getByLabel("사전예약 날짜")).toHaveValue(FIXED_FRIDAY_DATE);
-  await expect(friday.getByText("선택")).toBeVisible();
+  await expect(page.locator(".topbar .muted").first()).toHaveText(FIXED_FRIDAY_DATE);
+  await expect(friday.locator(".calendar-day-marker")).toHaveCSS("background-color", "rgb(255, 255, 255)");
 
-  await page.getByRole("button", { name: "오늘 예약" }).click();
+  await expect(page.getByRole("button", { name: "오늘 예약" })).toHaveCount(0);
+  await page.locator(".tabbar button").first().click();
   await expect(page.getByRole("button", { name: "당일예약" })).toHaveAttribute("data-active", "true");
 });
 
@@ -83,36 +85,35 @@ test("weekly reservation calendar keeps full advance dates enterable for cancell
   await friday.click();
 
   await expect(page.getByRole("button", { name: "사전예약" })).toHaveAttribute("data-active", "true");
-  await expect(page.getByLabel("사전예약 날짜")).toHaveValue(FIXED_FRIDAY_DATE);
+  await expect(page.locator(".topbar .muted").first()).toHaveText(FIXED_FRIDAY_DATE);
   await expect(page.locator(".period-button").filter({ hasText: "마감" })).toHaveCount(2);
 });
 
-test("manual advance date input keeps the prior date when a previous date is typed", async ({ page }) => {
-  // Given: a logged-in student on Thursday with Friday as the only advance date.
-  const input = await openAdvanceDateInput(page, `calendar-input-previous-${Date.now()}`);
-  const invalidPeriodRequest = waitForPeriodRequestOutcome(page, FIXED_WEDNESDAY_DATE);
+test("weekly reservation calendar keeps date selection on the visible tiles only", async ({ page }) => {
+  await mockPeriods(page, {
+    [FIXED_FRIDAY_DATE]: [
+      period({ label: "8면학", studyPeriod: "EIGHTH" }),
+      period({ label: "1면학", studyPeriod: "FIRST" })
+    ],
+    [FIXED_WEDNESDAY_DATE]: [
+      period({ label: "8면학", studyPeriod: "EIGHTH" }),
+      period({ label: "1면학", studyPeriod: "FIRST" })
+    ],
+    [NEXT_WEEK_MONDAY_DATE]: [
+      period({ label: "8면학", studyPeriod: "EIGHTH" }),
+      period({ label: "1면학", studyPeriod: "FIRST" })
+    ]
+  });
+  const invalidPreviousDateRequest = waitForPeriodRequestOutcome(page, FIXED_WEDNESDAY_DATE);
+  const invalidNextWeekRequest = waitForPeriodRequestOutcome(page, NEXT_WEEK_MONDAY_DATE);
+  await login(page, `calendar-input-removed-${Date.now()}`);
 
-  // When: the student manually types a date before the advance window.
-  await input.fill(FIXED_WEDNESDAY_DATE);
+  await page.locator(".tabbar button").nth(1).click();
 
-  // Then: the valid Friday selection remains and no invalid period fetch is made.
-  await expect(input).toHaveValue(FIXED_FRIDAY_DATE);
+  await expect(page.locator('input[type="date"]')).toHaveCount(0);
   await expect(page.locator(".topbar .muted").first()).toHaveText(FIXED_FRIDAY_DATE);
-  expect(await invalidPeriodRequest).toBe("not-requested");
-});
-
-test("manual advance date input keeps the prior date when a next-week date is typed", async ({ page }) => {
-  // Given: a logged-in student on Thursday with Friday as the only advance date.
-  const input = await openAdvanceDateInput(page, `calendar-input-next-week-${Date.now()}`);
-  const invalidPeriodRequest = waitForPeriodRequestOutcome(page, NEXT_WEEK_MONDAY_DATE);
-
-  // When: the student manually types a date outside the current week.
-  await input.fill(NEXT_WEEK_MONDAY_DATE);
-
-  // Then: the valid Friday selection remains and no invalid period fetch is made.
-  await expect(input).toHaveValue(FIXED_FRIDAY_DATE);
-  await expect(page.locator(".topbar .muted").first()).toHaveText(FIXED_FRIDAY_DATE);
-  expect(await invalidPeriodRequest).toBe("not-requested");
+  expect(await invalidPreviousDateRequest).toBe("not-requested");
+  expect(await invalidNextWeekRequest).toBe("not-requested");
 });
 
 test("weekly reservation calendar keeps Friday advance closure state without policy copy", async ({ page }) => {
@@ -124,24 +125,10 @@ test("weekly reservation calendar keeps Friday advance closure state without pol
   });
   await login(page, `calendar-friday-${Date.now()}`, e2eNow(FIXED_FRIDAY_DATE));
 
-  await expect(page.getByRole("heading", { name: "이번 주 예약" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "이번 주" })).toBeVisible();
   await expect(page.getByText("금요일 이후 사전예약 불가")).toHaveCount(0);
   await expect(page.locator(".calendar-day[data-advance='true']")).toHaveCount(0);
 });
-
-async function openAdvanceDateInput(page: Page, loginId: string): Promise<Locator> {
-  await mockPeriods(page, {
-    [FIXED_FRIDAY_DATE]: [
-      period({ label: "8면학", studyPeriod: "EIGHTH" }),
-      period({ label: "1면학", studyPeriod: "FIRST" })
-    ]
-  });
-  await login(page, loginId);
-  await page.getByRole("button", { name: "사전예약" }).click();
-  const input = page.getByLabel("사전예약 날짜");
-  await expect(input).toHaveValue(FIXED_FRIDAY_DATE);
-  return input;
-}
 
 async function waitForPeriodRequestOutcome(page: Page, date: string): Promise<"not-requested" | "requested"> {
   try {
@@ -177,7 +164,24 @@ async function mockPeriods(
 ): Promise<void> {
   await page.route("**/api/periods**", async (route) => {
     const url = new URL(route.request().url());
+    const weekStart = url.searchParams.get("weekStart");
     const date = url.searchParams.get("date") ?? FIXED_THURSDAY_DATE;
+    if (weekStart) {
+      await route.fulfill({
+        body: JSON.stringify({
+          dates: SCHOOL_WEEK_DATES.map((weekDate) => ({
+            date: weekDate,
+            periods: (periodsByDate[weekDate] ?? [
+              period({ label: "8면학", studyPeriod: "EIGHTH" }),
+              period({ label: "1면학", studyPeriod: "FIRST" })
+            ]).map(toWeekPeriod)
+          }))
+        }),
+        contentType: "application/json",
+        status: 200
+      });
+      return;
+    }
     const periods = periodsByDate[date] ?? [
       period({ label: "8면학", studyPeriod: "EIGHTH" }),
       period({ label: "1면학", studyPeriod: "FIRST" })
@@ -188,6 +192,19 @@ async function mockPeriods(
       status: 200
     });
   });
+}
+
+function toWeekPeriod(mockPeriod: ReturnType<typeof period>): object {
+  return {
+    availability: mockPeriod.remaining,
+    capacity: mockPeriod.capacity,
+    closeTime: mockPeriod.closeTime,
+    enabled: mockPeriod.enabled,
+    myReservationId: mockPeriod.myReservationId,
+    openTime: mockPeriod.openTime,
+    reservedCount: mockPeriod.confirmedCount,
+    studyPeriod: mockPeriod.studyPeriod
+  };
 }
 
 async function mockAuth(page: Page, loginId: string): Promise<void> {

@@ -7,6 +7,7 @@ const auditedRouteFiles = [
   "src/app/api/admin/notification-settings/route.ts",
   "src/app/api/admin/notifications/closed-periods/send/route.ts",
   "src/app/api/admin/period-settings/route.ts",
+  "src/app/api/admin/reservations/admin-create-reservation.ts",
   "src/app/api/admin/reservations/[id]/cancel/route.ts",
   "src/app/api/admin/reservations/[id]/no-show/route.ts",
   "src/app/api/admin/users/[id]/restriction/route.ts",

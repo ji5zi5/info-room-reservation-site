@@ -3,31 +3,29 @@ import { Prisma, type Reservation as PrismaReservation } from "@prisma/client";
 import {
   type PeriodSetting,
   type Reservation,
+  ReservationIdentityConflictError,
   type ReservationStore,
   type TransactionalReservationStore,
   type UserBookingState
 } from "./reservation-service";
 import { prisma } from "./db";
-import { type DatabaseActor, systemDatabaseActor, withDatabaseContext } from "./db-context";
+import {
+  type DatabaseActor,
+  isSerializableTransactionConflict,
+  PRISMA_MUTATION_TRANSACTION_OPTIONS,
+  retrySerializableMutationTransaction,
+  systemDatabaseActor,
+  withDatabaseMutation
+} from "./db-context";
 import { parseStoredStudyPeriod } from "./period-settings";
 import { periodSettingReadDates, resolveEffectivePeriodSetting } from "./period-setting-values";
 import type { StudyPeriod } from "./study-periods";
 
 type PrismaTransaction = Prisma.TransactionClient;
 
-const MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS = 3;
-
-type PrismaInteractiveTransactionOptions = {
-  readonly isolationLevel: Prisma.TransactionIsolationLevel;
-  readonly maxWait: number;
-  readonly timeout: number;
-};
-
-export const PRISMA_RESERVATION_TRANSACTION_OPTIONS = {
-  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-  maxWait: 5_000,
-  timeout: 10_000
-} satisfies PrismaInteractiveTransactionOptions;
+export const PRISMA_RESERVATION_TRANSACTION_OPTIONS = PRISMA_MUTATION_TRANSACTION_OPTIONS;
+export const retrySerializableReservationTransaction = retrySerializableMutationTransaction;
+export { isSerializableTransactionConflict };
 
 export class PrismaReservationStore implements TransactionalReservationStore {
   private readonly actor: DatabaseActor;
@@ -36,15 +34,16 @@ export class PrismaReservationStore implements TransactionalReservationStore {
     this.actor = actor;
   }
 
-  public async transaction<T>(operation: (store: ReservationStore) => Promise<T>): Promise<T> {
-    return retrySerializableReservationTransaction(() =>
-      withDatabaseContext({
-        actor: this.actor,
-        client: prisma,
-        operation: async (transaction) => operation(new PrismaReservationStoreUnit(transaction)),
-        options: PRISMA_RESERVATION_TRANSACTION_OPTIONS
-      })
-    );
+  public async transaction<T>(
+    lockKeys: readonly string[],
+    operation: (store: ReservationStore) => Promise<T>
+  ): Promise<T> {
+    return withDatabaseMutation({
+      actor: this.actor,
+      client: prisma,
+      lockKeys,
+      operation: async (transaction) => operation(new PrismaReservationStoreUnit(transaction))
+    });
   }
 }
 
@@ -71,16 +70,33 @@ class PrismaReservationStoreUnit implements ReservationStore {
     readonly studyPeriod: StudyPeriod;
     readonly userId: string;
   }): Promise<Reservation> {
-    const created = await this.client.reservation.create({
-      data: {
-        date: input.date,
-        reason: input.reason,
-        status: "CONFIRMED",
-        studyPeriod: input.studyPeriod,
-        userId: input.userId
-      }
+    const existing = await this.client.reservation.findUnique({
+      where: reservationIdentity(input)
     });
-    return toReservation(created);
+    if (existing?.status === "CANCELLED") {
+      return this.reviveCancelledReservation(input);
+    }
+    if (existing) {
+      throw new ReservationIdentityConflictError();
+    }
+
+    try {
+      const created = await this.client.reservation.create({
+        data: {
+          date: input.date,
+          reason: input.reason,
+          status: "CONFIRMED",
+          studyPeriod: input.studyPeriod,
+          userId: input.userId
+        }
+      });
+      return toReservation(created);
+    } catch (error) {
+      if (!isReservationIdentityConflict(error)) {
+        throw error;
+      }
+      throw new ReservationIdentityConflictError();
+    }
   }
 
   public async findReservation(input: {
@@ -120,6 +136,47 @@ class PrismaReservationStoreUnit implements ReservationStore {
       restrictedUntil: user.restrictedUntil
     };
   }
+
+  private async reviveCancelledReservation(input: {
+    readonly date: string;
+    readonly reason: string;
+    readonly studyPeriod: StudyPeriod;
+    readonly userId: string;
+  }): Promise<Reservation> {
+    const revived = await this.client.reservation.updateMany({
+      data: {
+        reason: input.reason,
+        status: "CONFIRMED"
+      },
+      where: {
+        date: input.date,
+        status: "CANCELLED",
+        studyPeriod: input.studyPeriod,
+        userId: input.userId
+      }
+    });
+    if (revived.count !== 1) {
+      throw new ReservationIdentityConflictError();
+    }
+    const reservation = await this.client.reservation.findUniqueOrThrow({
+      where: reservationIdentity(input)
+    });
+    return toReservation(reservation);
+  }
+}
+
+function reservationIdentity(input: {
+  readonly date: string;
+  readonly studyPeriod: StudyPeriod;
+  readonly userId: string;
+}): { readonly userId_date_studyPeriod: { readonly date: string; readonly studyPeriod: StudyPeriod; readonly userId: string } } {
+  return {
+    userId_date_studyPeriod: {
+      date: input.date,
+      studyPeriod: input.studyPeriod,
+      userId: input.userId
+    }
+  };
 }
 
 function toReservation(reservation: PrismaReservation): Reservation {
@@ -168,20 +225,6 @@ class InvalidStoredValueError extends Error {
   }
 }
 
-export async function retrySerializableReservationTransaction<T>(operation: () => Promise<T>): Promise<T> {
-  let attempt = 1;
-  for (;;) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (attempt >= MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS || !isSerializableTransactionConflict(error)) {
-        throw error;
-      }
-      attempt += 1;
-    }
-  }
-}
-
-export function isSerializableTransactionConflict(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
+function isReservationIdentityConflict(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }

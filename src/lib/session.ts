@@ -8,6 +8,7 @@ import { prisma } from "./db";
 import { systemDatabaseActor, withDatabaseContext } from "./db-context";
 import { isNoDatabaseMockMode } from "./mock-dev-mode";
 import { hashServerSecretValue } from "./secret-hash";
+import { DEFAULT_SHADOW_BAN_PROFILE } from "./shadow-ban-profile";
 
 export const SESSION_COOKIE_NAME = "info_room_session";
 
@@ -22,6 +23,7 @@ export type SessionUser = {
   readonly restrictionReason: string | null;
   readonly restrictedUntil: string | null;
   readonly role: string;
+  readonly shadowBanProfile?: string;
   readonly studentNumber: string;
 };
 
@@ -38,6 +40,7 @@ const SessionUserSchema = z.object({
   restrictionReason: z.string().nullable().optional(),
   restrictedUntil: z.string().nullable().optional(),
   role: z.string(),
+  shadowBanProfile: z.string().optional(),
   studentNumber: z.string()
 });
 
@@ -112,6 +115,7 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
       restrictionReason: session.user.restrictionReason,
       restrictedUntil: session.user.restrictedUntil ? session.user.restrictedUntil.toISOString() : null,
       role: session.user.role,
+      shadowBanProfile: session.user.shadowBanProfile,
       studentNumber: session.user.studentNumber
     }
   };
@@ -199,7 +203,8 @@ function readMockSessionToken(token: string): CurrentSession | null {
       user: {
         ...parsedPayload.data.user,
         restrictionReason: parsedPayload.data.user.restrictionReason ?? null,
-        restrictedUntil: parsedPayload.data.user.restrictedUntil ?? null
+        restrictedUntil: parsedPayload.data.user.restrictedUntil ?? null,
+        shadowBanProfile: parsedPayload.data.user.shadowBanProfile ?? DEFAULT_SHADOW_BAN_PROFILE
       }
     };
   } catch {

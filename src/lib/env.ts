@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { isDiscordWebhookUrl } from "./discord-webhook-url";
+import { resolveLocalStudentNumbers } from "./local-login";
 
 type ServerEnvInput = Readonly<Record<string, string | undefined>>;
 
@@ -8,9 +9,10 @@ const BooleanFlagSchema = z.union([z.literal("true"), z.literal("false")]).optio
 const MIN_PRODUCTION_SECRET_LENGTH = 24;
 const REQUIRED_PRODUCTION_KEYS = [
   "ADMIN_STUDENT_NUMBERS",
-  "CRON_SECRET",
+  "CLOSED_PERIOD_CRON_SECRET",
   "DATABASE_URL",
   "DIRECT_URL",
+  "MAINTENANCE_CRON_SECRET",
   "SESSION_SECRET"
 ] as const;
 
@@ -18,6 +20,7 @@ const ServerEnvSchema = z.object({
   ADMIN_LOGIN_ID: z.string().optional(),
   ADMIN_LOGIN_PASSWORD: z.string().optional(),
   ADMIN_STUDENT_NUMBERS: z.string().optional(),
+  CLOSED_PERIOD_CRON_SECRET: z.string().optional(),
   CRON_SECRET: z.string().optional(),
   DATABASE_URL: z.string().optional(),
   DIRECT_URL: z.string().optional(),
@@ -28,7 +31,9 @@ const ServerEnvSchema = z.object({
   LOCAL_STUDENT_LOGIN_ID: z.string().optional(),
   LOCAL_STUDENT_LOGIN_PASSWORD: z.string().optional(),
   LOCAL_STUDENT_NUMBER: z.string().optional(),
+  MAINTENANCE_CRON_SECRET: z.string().optional(),
   NODE_ENV: z.string().optional(),
+  RETENTION_PURGE_ENABLED: BooleanFlagSchema,
   RIRO_MOCK_LOGIN: BooleanFlagSchema,
   SESSION_SECRET: z.string().optional(),
   TRUST_FORWARDED_IP_HEADERS: BooleanFlagSchema
@@ -38,6 +43,7 @@ export type ServerEnv = {
   readonly adminLoginId: string | null;
   readonly adminLoginPassword: string | null;
   readonly adminStudentNumbers: string | null;
+  readonly closedPeriodCronSecret: string | null;
   readonly cronSecret: string | null;
   readonly databaseUrl: string | null;
   readonly directUrl: string | null;
@@ -48,7 +54,9 @@ export type ServerEnv = {
   readonly localStudentLoginId: string | null;
   readonly localStudentLoginPassword: string | null;
   readonly localStudentNumber: string | null;
+  readonly maintenanceCronSecret: string | null;
   readonly nodeEnv: string;
+  readonly retentionPurgeEnabled: boolean;
   readonly riroMockLogin: boolean;
   readonly sessionSecret: string | null;
   readonly trustForwardedIpHeaders: boolean;
@@ -64,6 +72,7 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
     adminLoginId: normalizeOptional(parsed.data.ADMIN_LOGIN_ID),
     adminLoginPassword: normalizeOptional(raw.ADMIN_LOGIN_PASSWORD),
     adminStudentNumbers: normalizeOptional(parsed.data.ADMIN_STUDENT_NUMBERS),
+    closedPeriodCronSecret: normalizeOptional(parsed.data.CLOSED_PERIOD_CRON_SECRET),
     cronSecret: normalizeOptional(parsed.data.CRON_SECRET),
     databaseUrl: normalizeOptional(parsed.data.DATABASE_URL),
     directUrl: normalizeOptional(parsed.data.DIRECT_URL),
@@ -74,7 +83,9 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
     localStudentLoginId: normalizeOptional(parsed.data.LOCAL_STUDENT_LOGIN_ID),
     localStudentLoginPassword: normalizeOptional(raw.LOCAL_STUDENT_LOGIN_PASSWORD),
     localStudentNumber: normalizeOptional(parsed.data.LOCAL_STUDENT_NUMBER),
+    maintenanceCronSecret: normalizeOptional(parsed.data.MAINTENANCE_CRON_SECRET),
     nodeEnv: parsed.data.NODE_ENV ?? "development",
+    retentionPurgeEnabled: parsed.data.RETENTION_PURGE_ENABLED === "true",
     riroMockLogin: parsed.data.RIRO_MOCK_LOGIN === "true",
     sessionSecret: normalizeOptional(parsed.data.SESSION_SECRET),
     trustForwardedIpHeaders: parsed.data.TRUST_FORWARDED_IP_HEADERS === "true"
@@ -106,6 +117,15 @@ export function assertProductionEnvSafe(raw: ServerEnvInput = process.env): void
     if (env.cronSecret !== null && env.cronSecret.length < MIN_PRODUCTION_SECRET_LENGTH) {
       invalidKeys.push("CRON_SECRET");
     }
+    if (env.cronSecret !== null) {
+      invalidKeys.push("CRON_SECRET");
+    }
+    if (env.closedPeriodCronSecret !== null && env.closedPeriodCronSecret.length < MIN_PRODUCTION_SECRET_LENGTH) {
+      invalidKeys.push("CLOSED_PERIOD_CRON_SECRET");
+    }
+    if (env.maintenanceCronSecret !== null && env.maintenanceCronSecret.length < MIN_PRODUCTION_SECRET_LENGTH) {
+      invalidKeys.push("MAINTENANCE_CRON_SECRET");
+    }
     if (invalidKeys.length > 0) {
       throw new ServerEnvError(invalidKeys);
     }
@@ -134,6 +154,17 @@ export function assertProductionEnvSafe(raw: ServerEnvInput = process.env): void
     ].filter((key): key is string => key !== null);
     if (shapeErrors.length > 0) {
       throw new ServerEnvError(shapeErrors);
+    }
+    const adminStudentNumbers = new Set(splitEnvList(env.adminStudentNumbers));
+    const resolvedLocalStudentNumbers = resolveLocalStudentNumbers({
+      ids: localStudentLoginIds,
+      studentNumbers: localStudentNumbers
+    });
+    if (resolvedLocalStudentNumbers.some((studentNumber) => adminStudentNumbers.has(studentNumber))) {
+      throw new ServerEnvError([
+        "ADMIN_STUDENT_NUMBERS",
+        localStudentNumbers.length > 0 ? "LOCAL_STUDENT_NUMBER" : "LOCAL_STUDENT_LOGIN_ID"
+      ]);
     }
     if (env.enableLocalAdmin && env.adminLoginId !== null && localStudentLoginIds.includes(env.adminLoginId)) {
       throw new ServerEnvError(["ADMIN_LOGIN_ID", "LOCAL_STUDENT_LOGIN_ID"]);
@@ -167,6 +198,10 @@ export function shouldTrustForwardedIpHeaders(raw: ServerEnvInput = process.env)
   return parseServerEnv(raw).trustForwardedIpHeaders;
 }
 
+export function isRetentionPurgeEnabled(raw: ServerEnvInput = process.env): boolean {
+  return parseServerEnv(raw).retentionPurgeEnabled;
+}
+
 function normalizeOptional(value: string | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -186,9 +221,10 @@ function isAnyLocalStudentLoginEnabled(env: ServerEnv): boolean {
 function missingProductionKeys(env: ServerEnv): readonly string[] {
   const values = {
     ADMIN_STUDENT_NUMBERS: env.adminStudentNumbers,
-    CRON_SECRET: env.cronSecret,
+    CLOSED_PERIOD_CRON_SECRET: env.closedPeriodCronSecret,
     DATABASE_URL: env.databaseUrl,
     DIRECT_URL: env.directUrl,
+    MAINTENANCE_CRON_SECRET: env.maintenanceCronSecret,
     SESSION_SECRET: env.sessionSecret
   } satisfies Record<(typeof REQUIRED_PRODUCTION_KEYS)[number], string | null>;
   return REQUIRED_PRODUCTION_KEYS.filter((key) => values[key] === null);

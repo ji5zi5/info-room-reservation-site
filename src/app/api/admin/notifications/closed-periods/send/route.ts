@@ -55,11 +55,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       repository: prismaClosedPeriodNotificationRepository,
       sender: (payload) => sendDiscordWebhook({ payload, webhookUrl })
     });
-    const result = await service.sendClosedPeriod(
-      parsed.data.force === undefined
-        ? { date: parsed.data.date, studyPeriod: parsed.data.studyPeriod }
-        : { date: parsed.data.date, force: parsed.data.force, studyPeriod: parsed.data.studyPeriod }
-    );
+    const result = await service.sendClosedPeriod({
+      date: parsed.data.date,
+      ...(parsed.data.force === undefined ? {} : { force: parsed.data.force }),
+      manual: true,
+      studyPeriod: parsed.data.studyPeriod
+    });
     if (result.kind === "skipped") {
       return jsonError(409, result.reason, messageForSkipped(result.reason));
     }
@@ -98,10 +99,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 }
 
-function messageForSkipped(reason: "already_sent" | "not_closed" | "not_found"): string {
+function messageForSkipped(reason: "already_sent" | "needs_reconciliation" | "not_closed" | "not_found"): string {
   switch (reason) {
     case "already_sent":
       return "이미 전송된 마감 명단입니다.";
+    case "needs_reconciliation":
+      return "이전 전송 결과를 먼저 확인해야 합니다.";
     case "not_closed":
       return "아직 마감 시간이 지나지 않았습니다.";
     case "not_found":

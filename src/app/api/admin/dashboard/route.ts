@@ -22,9 +22,12 @@ export async function GET(request: Request): Promise<NextResponse> {
     }
     const date = parsed.data.date ?? toKstDate(new Date());
     if (isNoDatabaseMockMode()) {
-      return NextResponse.json({ periods: getMockAdminDashboard(date, new Date()) });
+      return NextResponse.json({
+        notificationBacklog: [],
+        periods: getMockAdminDashboard(date, new Date())
+      });
     }
-    return NextResponse.json({ periods: await getAdminDashboard(date, new Date()) });
+    return NextResponse.json(await getAdminDashboard(date, new Date()));
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);

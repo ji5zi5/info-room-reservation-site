@@ -31,14 +31,12 @@ export type ReservationHomeProfileState = {
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
 
 type ReservationHomeViewProps = {
-  readonly advanceDate: string;
   readonly advancePolicy: AdvanceReservationPolicy | null;
   readonly advanceUnavailable: boolean;
   readonly currentReservations: readonly StudentCurrentReservation[];
   readonly id: string;
   readonly lastRefreshedAt: string | null;
   readonly loading: boolean;
-  readonly onAdvanceDateChange: (value: string) => void;
   readonly onCancel: (reservationId: string) => void;
   readonly onClosePendingAction: () => void;
   readonly onCloseProfile: () => void;
@@ -51,7 +49,6 @@ type ReservationHomeViewProps = {
   readonly onProfileRetry: () => void;
   readonly onReserve: (studyPeriod: "EIGHTH" | "FIRST") => void;
   readonly onSelectCalendarDate: (date: string) => void;
-  readonly onSelectToday: () => void;
   readonly onSidebarToggle: () => void;
   readonly onTabChange: (tab: ReservationHomeTab) => void;
   readonly password: string;
@@ -59,6 +56,7 @@ type ReservationHomeViewProps = {
   readonly periods: readonly PeriodSummary[];
   readonly periodsRefreshing: boolean;
   readonly profileState: ReservationHomeProfileState;
+  readonly reservationSubmitting: boolean;
   readonly sidebarOpen: boolean;
   readonly tab: ReservationHomeTab;
   readonly targetDate: string;
@@ -67,14 +65,12 @@ type ReservationHomeViewProps = {
 };
 
 export function ReservationHomeView({
-  advanceDate,
   advancePolicy,
   advanceUnavailable,
   currentReservations,
   id,
   lastRefreshedAt,
   loading,
-  onAdvanceDateChange,
   onCancel,
   onClosePendingAction,
   onCloseProfile,
@@ -87,7 +83,6 @@ export function ReservationHomeView({
   onProfileRetry,
   onReserve,
   onSelectCalendarDate,
-  onSelectToday,
   onSidebarToggle,
   onTabChange,
   password,
@@ -95,6 +90,7 @@ export function ReservationHomeView({
   periods,
   periodsRefreshing,
   profileState,
+  reservationSubmitting,
   sidebarOpen,
   tab,
   targetDate,
@@ -153,27 +149,12 @@ export function ReservationHomeView({
                 사전예약
               </button>
             </div>
-            {advancePolicy && tab === "advance" && advancePolicy.kind === "available" && !advanceUnavailable ? (
-              <div className="reservation-date-rail">
-                <label className="field advance-date-field">
-                  <span>사전예약 날짜</span>
-                  <input
-                    max={advancePolicy.maxDate}
-                    min={advancePolicy.minDate}
-                    type="date"
-                    value={advanceDate}
-                    onChange={(event) => onAdvanceDateChange(event.currentTarget.value)}
-                  />
-                </label>
-              </div>
-            ) : null}
           </div>
           {advancePolicy && user ? (
             <ReservationCalendar
               advancePolicy={advancePolicy}
               selectedDate={targetDate}
               onSelectDate={onSelectCalendarDate}
-              onTodayClick={onSelectToday}
             />
           ) : null}
           <ReservationWarningPanel />
@@ -202,6 +183,17 @@ export function ReservationHomeView({
       <footer className="site-credit" aria-label="사이트 크레딧">
         © 2026 ISHS 32nd · 엄지오
       </footer>
+      {reservationSubmitting ? (
+        <div aria-label="예약 요청 처리 중" aria-live="polite" className="reservation-processing-backdrop" role="status">
+          <section className="reservation-processing-card">
+            <span className="reservation-processing-spinner" aria-hidden="true">
+              <LoaderCircle size={22} />
+            </span>
+            <strong>요청을 확인하고 있습니다.</strong>
+            <p>동시 요청이 많으면 잠시 지연될 수 있습니다.</p>
+          </section>
+        </div>
+      ) : null}
       <StudentProfilePanel
         errorMessage={profileState.errorMessage}
         loading={profileState.loading}

@@ -12,16 +12,13 @@ import { consumeAdminRedirectMessage, reservationRestrictionMessage } from "./re
 import { canReservePeriod } from "./reservation-home-reservation-rules";
 import { useReservationPeriodRefresh } from "./reservation-home-period-refresh";
 import { ReservationHomeView, type ReservationHomeProfileState, type ReservationHomeTab } from "./reservation-home-view";
+import { isCompactReservationView } from "./reservation-viewport";
 import type { ReservationSidebarUser } from "./reservation-sidebar";
+import { useReservationSubmit } from "./use-reservation-submit";
 
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
 
 const EMPTY_PROFILE_STATE: ReservationHomeProfileState = { errorMessage: null, loading: false, open: false, profile: null };
-const COMPACT_RESERVATION_VIEW_QUERY = "(max-width: 850px)";
-
-function isCompactReservationView(): boolean {
-  return typeof window !== "undefined" && window.matchMedia(COMPACT_RESERVATION_VIEW_QUERY).matches;
-}
 
 export function ReservationHomePage(): React.ReactElement {
   const [user, setUser] = useState<ReservationSidebarUser | null>(null);
@@ -101,6 +98,15 @@ export function ReservationHomePage(): React.ReactElement {
     }
   }
 
+  const { reservationSubmitting, reserve } = useReservationSubmit({
+    profileOpen: profileState.open,
+    refreshPeriods,
+    refreshProfile,
+    setLoading,
+    setToast,
+    targetDate
+  });
+
   async function login(): Promise<void> {
     setLoading(true);
     setToast(null);
@@ -159,12 +165,6 @@ export function ReservationHomePage(): React.ReactElement {
     });
   }
 
-  function changeAdvanceDate(date: string): void {
-    if (advancePolicy && isSelectableAdvanceDate(date, advancePolicy)) {
-      setAdvanceDate(date);
-    }
-  }
-
   function selectCalendarDate(date: string): void {
     if (!advancePolicy) {
       return;
@@ -177,10 +177,6 @@ export function ReservationHomePage(): React.ReactElement {
       setAdvanceDate(date);
       setTab("advance");
     }
-  }
-
-  function selectToday(): void {
-    setTab("today");
   }
 
   function confirmPendingAction(input: ReservationActionConfirmInput): void {
@@ -200,25 +196,6 @@ export function ReservationHomePage(): React.ReactElement {
       return;
     }
     void cancelReservation(action.reservationId);
-  }
-
-  async function reserve(studyPeriod: "EIGHTH" | "FIRST", reason: string): Promise<void> {
-    setLoading(true);
-    const response = await csrfFetch("/api/reservations", {
-      body: JSON.stringify({ date: targetDate, reason, studyPeriod }),
-      headers: { "content-type": "application/json" },
-      method: "POST"
-    });
-    const errorMessage = await readApiErrorMessage(response);
-    if (!response.ok) {
-      await refreshPeriods(targetDate);
-      setLoading(false);
-      setToast(errorMessage ?? "예약에 실패했습니다.");
-      return;
-    }
-    setLoading(false);
-    setToast("예약이 확정되었습니다.");
-    await Promise.all([refreshPeriods(targetDate), ...(profileState.open ? [refreshProfile()] : [])]);
   }
 
   async function cancelReservation(reservationId: string): Promise<void> {
@@ -245,7 +222,6 @@ export function ReservationHomePage(): React.ReactElement {
 
   return (
     <ReservationHomeView
-      advanceDate={advanceDate}
       advancePolicy={advancePolicy}
       advanceUnavailable={advanceUnavailable}
       currentReservations={currentReservations}
@@ -257,12 +233,12 @@ export function ReservationHomePage(): React.ReactElement {
       periods={periods}
       periodsRefreshing={periodsRefreshing}
       profileState={profileState}
+      reservationSubmitting={reservationSubmitting}
       sidebarOpen={sidebarOpen}
       tab={tab}
       targetDate={targetDate}
       toast={toast}
       user={user}
-      onAdvanceDateChange={changeAdvanceDate}
       onCancel={requestCancel}
       onClosePendingAction={() => setPendingAction(null)}
       onCloseProfile={() => setProfileState((current) => ({ ...current, open: false }))}
@@ -275,7 +251,6 @@ export function ReservationHomePage(): React.ReactElement {
       onProfileRetry={() => void refreshProfile()}
       onReserve={requestReserve}
       onSelectCalendarDate={selectCalendarDate}
-      onSelectToday={selectToday}
       onSidebarToggle={() => setSidebarOpen((open) => !open)}
       onTabChange={setTab}
     />

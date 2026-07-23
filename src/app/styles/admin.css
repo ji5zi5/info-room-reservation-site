@@ -177,6 +177,50 @@
   grid-column: 1 / -1;
 }
 
+.admin-notification-review {
+  border-top: var(--stroke-width) solid var(--fog);
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-6);
+}
+
+.admin-notification-review-list {
+  display: grid;
+}
+
+.admin-notification-review-row {
+  align-items: center;
+  border-bottom: var(--stroke-width) solid var(--fog);
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: var(--space-4) 0;
+}
+
+.admin-notification-review-summary {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.admin-notification-review-heading,
+.admin-notification-review-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-notification-review-summary .muted {
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.admin-notification-review-actions {
+  justify-content: flex-end;
+}
+
 .metric-grid {
   color: var(--graphite);
   display: grid;
@@ -245,6 +289,37 @@
   width: var(--icon-size-xs);
 }
 
+.notification-rate-control {
+  align-items: center;
+  background: var(--white);
+  border: var(--stroke-width) solid var(--fog);
+  border-radius: var(--radius);
+  color: var(--graphite);
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr) minmax(var(--control-height-xl), 0.32fr);
+  min-height: var(--control-height);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+.notification-rate-control span {
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notification-rate-control input {
+  background: var(--white);
+  border: var(--stroke-width) solid var(--silver);
+  border-radius: var(--radius);
+  color: var(--ink);
+  min-height: var(--control-height-md);
+  min-width: 0;
+  padding: 0 var(--space-3);
+}
+
 .notification-pill {
   align-items: center;
   background: var(--white);
@@ -264,6 +339,11 @@
 
 .notification-pill[data-status="FAILED"] {
   color: var(--ink);
+}
+
+.notification-pill[data-status="UNKNOWN"],
+.notification-pill[data-status="PENDING_REVIEW"] {
+  color: var(--blue);
 }
 
 .grow-field {
@@ -288,6 +368,51 @@
 .admin-dialog-actions .ghost-button,
 .admin-dialog-actions .danger-button {
   width: 100%;
+}
+
+.admin-create-reservation {
+  background: var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.admin-create-reservation-head {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.admin-create-reservation-head h3 {
+  font-size: var(--text-ui);
+  margin: 0;
+}
+
+.admin-create-reservation-head span {
+  color: var(--pewter);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.admin-create-reservation-grid {
+  align-items: end;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(var(--admin-restriction-days-width), 0.55fr) minmax(var(--admin-restriction-status-width), 0.55fr) minmax(0, 1fr) auto;
+}
+
+.admin-create-reservation-submit {
+  min-height: var(--control-height);
+  white-space: nowrap;
+}
+
+.admin-inline-message {
+  color: var(--graphite);
+  font-size: var(--text-sm);
+  margin: 0;
 }
 
 .admin-dashboard-topbar {
@@ -603,6 +728,10 @@
   color: var(--ink);
 }
 
+.shadow-ban-profile-presets {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .restriction-form .danger-button {
   color: var(--graphite);
   width: 100%;
@@ -686,6 +815,7 @@
   .admin-dashboard-grid,
   .admin-stat-grid,
   .admin-stat-strip,
+  .admin-create-reservation-grid,
   .metric-grid,
   .stat-summary-card,
   .user-line,
@@ -818,6 +948,21 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .admin-notification-review-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .admin-notification-review-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .admin-notification-review-actions .primary-button {
+    grid-column: 1 / -1;
+  }
+
   .admin-stat-strip span:last-child,
   .metric-grid span:last-child {
     grid-column: 1 / -1;
@@ -868,6 +1013,15 @@
     width: 100%;
   }
 
+  .admin-create-reservation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-create-reservation-submit {
+    justify-content: center;
+    width: 100%;
+  }
+
   .admin-dashboard-topbar .admin-action-row,
   .admin-dashboard-topbar .ghost-button {
     width: auto;
@@ -912,6 +1066,10 @@
   }
 
   .notification-toggle-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-rate-control {
     grid-template-columns: 1fr;
   }
 

@@ -2,8 +2,19 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { canMarkReservationNoShow } from "@/lib/admin-reservation-transition";
+import {
+  databaseActorFromSessionUser,
+  TransactionRetryExhaustedError,
+  userMutationLockKey,
+  withDatabaseMutation
+} from "@/lib/db-context";
 import { prisma } from "@/lib/db";
-import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
+import {
+  jsonError,
+  jsonMutatingRequestSafetyError,
+  jsonRateLimitError,
+  jsonTransactionRetryExhaustedError
+} from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
@@ -43,7 +54,19 @@ export async function POST(request: Request, context: { readonly params: Promise
     }
     const ipHash = hashRequestClientIp(request);
 
-    const result = await prisma.$transaction(async (transaction) => {
+    const targetReservation = await prisma.reservation.findUnique({
+      select: { userId: true },
+      where: { id: params.id }
+    });
+    if (!targetReservation) {
+      return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");
+    }
+
+    const result = await withDatabaseMutation({
+      actor: databaseActorFromSessionUser(admin),
+      client: prisma,
+      lockKeys: [userMutationLockKey(targetReservation.userId)],
+      operation: async (transaction) => {
       const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
       if (!reservation) {
         return { kind: "not_found" } as const;
@@ -59,10 +82,14 @@ export async function POST(request: Request, context: { readonly params: Promise
         return { kind: "admin_target" } as const;
       }
 
-      const updatedReservation = await transaction.reservation.update({
+      const transition = await transaction.reservation.updateMany({
         data: { status: "NO_SHOW" },
-        where: { id: reservation.id }
+        where: { id: reservation.id, status: "CONFIRMED" }
       });
+      if (transition.count !== 1) {
+        return { kind: "invalid_status" } as const;
+      }
+      const updatedReservation = { ...reservation, status: "NO_SHOW" } as const;
       const restriction = buildNoShowBan(parsed.data.reason);
       const user = await transaction.user.update({
         data: restriction,
@@ -122,6 +149,7 @@ export async function POST(request: Request, context: { readonly params: Promise
         }
       });
       return { kind: "ok", reservation: updatedReservation, user } as const;
+      }
     });
 
     if (result.kind === "not_found") {
@@ -140,6 +168,9 @@ export async function POST(request: Request, context: { readonly params: Promise
     }
     if (error instanceof ForbiddenSessionError) {
       return jsonError(403, "forbidden", error.message);
+    }
+    if (error instanceof TransactionRetryExhaustedError) {
+      return jsonTransactionRetryExhaustedError();
     }
     throw error;
   }

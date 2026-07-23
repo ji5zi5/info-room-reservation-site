@@ -2,12 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { defaultNotificationSettings } from "@/lib/notification-settings";
 
+type JobOutcome = {
+  readonly failureCode?: string;
+  readonly kind: "failed" | "succeeded";
+  readonly value: unknown;
+};
+
+type RunJobInput = { readonly operation: () => Promise<JobOutcome> };
+
 const routeMocks = vi.hoisted(() => ({
   createClosedPeriodNotificationService: vi.fn(),
+  getClosedPeriodNotificationBacklogSummary: vi.fn(),
   getDueClosedPeriodNotificationCandidates: vi.fn(),
   getMockNotificationSettings: vi.fn(),
   getPrismaNotificationSettings: vi.fn(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
+  runOperationalJob: vi.fn<(input: RunJobInput) => Promise<unknown>>(),
   sendClosedPeriod: vi.fn(),
   sendDiscordWebhook: vi.fn()
 }));
@@ -29,8 +39,17 @@ vi.mock("@/lib/prisma-notification-settings", () => ({
 }));
 
 vi.mock("@/lib/prisma-notification-repository", () => ({
+  getClosedPeriodNotificationBacklogSummary: routeMocks.getClosedPeriodNotificationBacklogSummary,
   getDueClosedPeriodNotificationCandidates: routeMocks.getDueClosedPeriodNotificationCandidates,
   prismaClosedPeriodNotificationRepository: {}
+}));
+
+vi.mock("@/lib/operational-job-runner", () => ({
+  runOperationalJob: routeMocks.runOperationalJob
+}));
+
+vi.mock("@/lib/prisma-operational-job-store", () => ({
+  prismaOperationalJobStore: {}
 }));
 
 vi.mock("@/lib/discord-notifications", () => ({
@@ -42,12 +61,20 @@ import { GET } from "./route";
 describe("closed-period notification cron", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.stubEnv("CRON_SECRET", "cron-secret");
+    vi.stubEnv("CLOSED_PERIOD_CRON_SECRET", "closed-period-secret");
+    vi.stubEnv("MAINTENANCE_CRON_SECRET", "maintenance-secret");
     vi.stubEnv("DISCORD_WEBHOOK_URL", "");
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
     routeMocks.getPrismaNotificationSettings.mockResolvedValue(defaultNotificationSettings());
     routeMocks.getMockNotificationSettings.mockReturnValue(defaultNotificationSettings());
     routeMocks.getDueClosedPeriodNotificationCandidates.mockResolvedValue([]);
+    routeMocks.getClosedPeriodNotificationBacklogSummary.mockResolvedValue({ count: 0, oldestAt: null });
+    routeMocks.runOperationalJob.mockImplementation(async (input) => {
+      const outcome = await input.operation();
+      return outcome.kind === "succeeded"
+        ? { kind: "succeeded", value: outcome.value }
+        : { failureCode: outcome.failureCode ?? "job_failed", kind: "failed", value: outcome.value };
+    });
     routeMocks.createClosedPeriodNotificationService.mockReturnValue({
       sendClosedPeriod: routeMocks.sendClosedPeriod
     });
@@ -85,10 +112,44 @@ describe("closed-period notification cron", () => {
       }
     });
   });
+
+  it("accepts only the closed-period scoped secret", async () => {
+    const response = await GET(
+      new Request("https://example.test/api/cron/closed-period-notifications", {
+        headers: { authorization: "Bearer maintenance-secret" }
+      })
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns a failing status when a Discord result is unknown", async () => {
+    vi.stubEnv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/token");
+    routeMocks.getDueClosedPeriodNotificationCandidates.mockResolvedValue([
+      { date: "2026-06-12", studyPeriod: "EIGHTH" }
+    ]);
+    routeMocks.getClosedPeriodNotificationBacklogSummary.mockResolvedValue({
+      count: 1,
+      oldestAt: new Date("2026-06-12T07:25:00.000Z")
+    });
+    routeMocks.sendClosedPeriod.mockResolvedValue({ kind: "unknown" });
+
+    const response = await GET(cronRequest());
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      backlog: { count: 1, oldestAt: "2026-06-12T07:25:00.000Z" },
+      failed: 0,
+      processed: 1,
+      sent: 0,
+      skipped: 0,
+      unknown: 1
+    });
+  });
 });
 
 function cronRequest(): Request {
   return new Request("https://example.test/api/cron/closed-period-notifications", {
-    headers: { authorization: "Bearer cron-secret" }
+    headers: { authorization: "Bearer closed-period-secret" }
   });
 }

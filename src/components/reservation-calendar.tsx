@@ -1,6 +1,5 @@
 "use client";
 
-import { CalendarCheck } from "lucide-react";
 import type { ReactElement } from "react";
 
 import type { AdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
@@ -10,13 +9,11 @@ type ReservationCalendarProps = {
   readonly advancePolicy: AdvanceReservationPolicy;
   readonly selectedDate: string;
   readonly onSelectDate: (date: string) => void;
-  readonly onTodayClick: () => void;
 };
 
 export function ReservationCalendar({
   advancePolicy,
   onSelectDate,
-  onTodayClick,
   selectedDate
 }: ReservationCalendarProps): ReactElement {
   const days = buildReservationCalendarDays(advancePolicy);
@@ -24,13 +21,9 @@ export function ReservationCalendar({
   return (
     <section aria-labelledby="reservation-calendar-title" className="reservation-calendar">
       <div className="calendar-head">
-        <div>
-          <h3 id="reservation-calendar-title">이번 주 예약</h3>
+        <div className="calendar-title-block">
+          <h3 id="reservation-calendar-title">이번 주</h3>
         </div>
-        <button className="ghost-button calendar-today-button" type="button" onClick={onTodayClick}>
-          <CalendarCheck aria-hidden="true" size={16} />
-          오늘 예약
-        </button>
       </div>
       <div className="calendar-grid">
         {days.map((day) => {
@@ -50,8 +43,8 @@ export function ReservationCalendar({
               onClick={() => onSelectDate(day.date)}
             >
               <span className="calendar-weekday">{day.dayLabel}</span>
-              <strong>{formatCalendarDate(day.date)}</strong>
-              {selected ? <span className="calendar-selection-label">선택</span> : null}
+              <strong className="calendar-date-number">{formatCalendarDate(day.date)}</strong>
+              <span className="calendar-day-marker" aria-hidden="true" />
             </button>
           );
         })}

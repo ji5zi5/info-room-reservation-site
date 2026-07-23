@@ -1,16 +1,20 @@
 import { assertRestrictableUser } from "./admin-users";
-import { mockReservationUsersById, type MockUser } from "./mock-reservation-state";
+import { toKstDate } from "./date";
+import { mockReservationUsersById, mockReservations, type MockUser } from "./mock-reservation-state";
+import { DEFAULT_SHADOW_BAN_PROFILE, parseShadowBanProfile, type ShadowBanProfile } from "./shadow-ban-profile";
 
 type MockRestrictionStatus = "BANNED" | "RESTRICTED" | "SHADOW_BANNED";
 
 export type MockUserRestrictionResult =
   | { readonly kind: "forbidden"; readonly reason: "admin_target" | "self_restriction" }
   | { readonly kind: "not_found" }
-  | { readonly kind: "ok"; readonly user: MockUser };
+  | { readonly cancelledFutureReservationCount: number; readonly kind: "ok"; readonly user: MockUser };
 
 export function applyMockUserRestriction(input: {
   readonly actorId: string;
   readonly bookingStatus: MockRestrictionStatus;
+  readonly now?: Date;
+  readonly shadowBanProfile?: ShadowBanProfile;
   readonly restrictedUntil: Date | null;
   readonly restrictionReason: string;
   readonly targetUserId: string;
@@ -24,10 +28,14 @@ export function applyMockUserRestriction(input: {
     ...guard.user,
     bookingStatus: input.bookingStatus,
     restrictedUntil: input.restrictedUntil,
-    restrictionReason: input.restrictionReason
+    restrictionReason: input.restrictionReason,
+    shadowBanProfile: input.bookingStatus === "SHADOW_BANNED" ? parseShadowBanProfile(input.shadowBanProfile) : DEFAULT_SHADOW_BAN_PROFILE
   } satisfies MockUser;
   mockReservationUsersById.set(input.targetUserId, user);
-  return { kind: "ok", user };
+  const cancelledFutureReservationCount = shouldCancelFutureReservations(input.bookingStatus)
+    ? cancelCurrentAndFutureMockReservations(input.targetUserId, input.now ?? new Date())
+    : 0;
+  return { cancelledFutureReservationCount, kind: "ok", user };
 }
 
 export function removeMockUserRestriction(input: {
@@ -43,10 +51,31 @@ export function removeMockUserRestriction(input: {
     ...guard.user,
     bookingStatus: "ACTIVE",
     restrictedUntil: null,
-    restrictionReason: null
+    restrictionReason: null,
+    shadowBanProfile: DEFAULT_SHADOW_BAN_PROFILE
   } satisfies MockUser;
   mockReservationUsersById.set(input.targetUserId, user);
-  return { kind: "ok", user };
+  return { cancelledFutureReservationCount: 0, kind: "ok", user };
+}
+
+function shouldCancelFutureReservations(status: MockRestrictionStatus): boolean {
+  return status === "BANNED";
+}
+
+function cancelCurrentAndFutureMockReservations(userId: string, now: Date): number {
+  const today = toKstDate(now);
+  let cancelledCount = 0;
+  for (const [index, reservation] of mockReservations.entries()) {
+    if (reservation.userId !== userId || reservation.status !== "CONFIRMED" || reservation.date < today) {
+      continue;
+    }
+    mockReservations[index] = {
+      ...reservation,
+      status: "CANCELLED"
+    };
+    cancelledCount += 1;
+  }
+  return cancelledCount;
 }
 
 function restrictableMockUser(

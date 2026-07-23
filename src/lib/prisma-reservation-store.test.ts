@@ -49,6 +49,27 @@ type ReservationCreateInput = {
     readonly userId: string;
   };
 };
+type ReservationFindUniqueInput = {
+  readonly where: {
+    readonly userId_date_studyPeriod: {
+      readonly date: string;
+      readonly studyPeriod: StudyPeriod;
+      readonly userId: string;
+    };
+  };
+};
+type ReservationUpdateManyInput = {
+  readonly data: {
+    readonly reason: string;
+    readonly status: "CONFIRMED";
+  };
+  readonly where: {
+    readonly date: string;
+    readonly status: "CANCELLED";
+    readonly studyPeriod: StudyPeriod;
+    readonly userId: string;
+  };
+};
 
 type UserBookingRow = { readonly bookingStatus: "ACTIVE" | "BANNED" | "RESTRICTED"; readonly restrictedUntil: Date | null };
 
@@ -80,6 +101,9 @@ type MockPrismaTransaction = {
     readonly count: (input: ReservationCountInput) => Promise<number>;
     readonly create: (input: ReservationCreateInput) => Promise<ReservationRow>;
     readonly findFirst: (input: ReservationFindInput) => Promise<null>;
+    readonly findUnique: (input: ReservationFindUniqueInput) => Promise<ReservationRow | null>;
+    readonly findUniqueOrThrow: (input: ReservationFindUniqueInput) => Promise<ReservationRow>;
+    readonly updateMany: (input: ReservationUpdateManyInput) => Promise<{ readonly count: number }>;
   };
   readonly user: {
     readonly findUnique: (input: UserFindUniqueInput) => Promise<UserBookingRow | null>;
@@ -115,7 +139,19 @@ const prismaMocks = vi.hoisted(() => {
     reservation: {
       count: vi.fn(async (_input: ReservationCountInput): Promise<number> => 0),
       create: vi.fn(async ({ data }: ReservationCreateInput): Promise<ReservationRow> => ({ id: "reservation-1", ...data })),
-      findFirst: vi.fn(async (_input: ReservationFindInput): Promise<null> => null)
+      findFirst: vi.fn(async (_input: ReservationFindInput): Promise<null> => null),
+      findUnique: vi.fn(async (_input: ReservationFindUniqueInput): Promise<ReservationRow | null> => null),
+      findUniqueOrThrow: vi.fn(
+        async ({ where }: ReservationFindUniqueInput): Promise<ReservationRow> => ({
+          date: where.userId_date_studyPeriod.date,
+          id: "reservation-1",
+          reason: "자습",
+          status: "CONFIRMED",
+          studyPeriod: where.userId_date_studyPeriod.studyPeriod,
+          userId: where.userId_date_studyPeriod.userId
+        })
+      ),
+      updateMany: vi.fn(async (_input: ReservationUpdateManyInput): Promise<{ readonly count: number }> => ({ count: 1 }))
     },
     user: {
       findUnique: vi.fn(
@@ -159,6 +195,9 @@ beforeEach(() => {
   prismaMocks.transactionClient.reservation.count.mockClear();
   prismaMocks.transactionClient.reservation.create.mockClear();
   prismaMocks.transactionClient.reservation.findFirst.mockClear();
+  prismaMocks.transactionClient.reservation.findUnique.mockClear();
+  prismaMocks.transactionClient.reservation.findUniqueOrThrow.mockClear();
+  prismaMocks.transactionClient.reservation.updateMany.mockClear();
   prismaMocks.transactionClient.user.findUnique.mockClear();
 });
 
@@ -171,19 +210,56 @@ describe("Prisma reservation store transaction safety", () => {
     });
   });
 
-  it("retries serializable transaction conflicts before returning the result", async () => {
-    let attempts = 0;
+  it("retries serializable conflicts after deterministic 10ms and 25ms backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      const result = retrySerializableReservationTransaction(async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw prismaConflictError("P2034");
+        }
+        return "confirmed";
+      });
 
-    const result = await retrySerializableReservationTransaction(async () => {
-      attempts += 1;
-      if (attempts < 3) {
+      expect(attempts).toBe(1);
+      await vi.advanceTimersByTimeAsync(9);
+      expect(attempts).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(attempts).toBe(2);
+      await vi.advanceTimersByTimeAsync(24);
+      expect(attempts).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(result).resolves.toBe("confirmed");
+      expect(attempts).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns a typed error after exactly three serializable conflicts", async () => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      const result = retrySerializableReservationTransaction(async () => {
+        attempts += 1;
         throw prismaConflictError("P2034");
-      }
-      return "confirmed";
-    });
+      });
 
-    expect(result).toBe("confirmed");
-    expect(attempts).toBe(3);
+      const capturedError = result.then(
+        () => null,
+        (error: unknown) => error
+      );
+      await vi.runAllTimersAsync();
+      await expect(capturedError).resolves.toMatchObject({
+        attempts: 3,
+        code: "TRANSACTION_RETRY_EXHAUSTED"
+      });
+      expect(attempts).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not retry non-transaction Prisma errors", async () => {
@@ -268,6 +344,87 @@ describe("Prisma reservation store period defaults", () => {
       })
     ).resolves.toEqual({ kind: "error", reason: "closed" });
     expect(prismaMocks.transactionClient.reservation.create).not.toHaveBeenCalled();
+  });
+
+  it("revives a cancelled reservation row when rebooking the same date and period", async () => {
+    prismaMocks.transactionClient.reservation.findUnique.mockResolvedValueOnce({
+      date: "2026-06-16",
+      id: "reservation-cancelled",
+      reason: "첫 예약",
+      status: "CANCELLED",
+      studyPeriod: "EIGHTH",
+      userId: "user-1"
+    });
+    prismaMocks.transactionClient.reservation.findUniqueOrThrow.mockResolvedValueOnce({
+      date: "2026-06-16",
+      id: "reservation-cancelled",
+      reason: "다시 예약",
+      status: "CONFIRMED",
+      studyPeriod: "EIGHTH",
+      userId: "user-1"
+    });
+
+    const result = await reserveStudyPeriod({
+      date: "2026-06-16",
+      now: new Date("2026-06-16T05:00:00.000Z"),
+      reason: "다시 예약",
+      store: prismaReservationStore,
+      studyPeriod: "EIGHTH",
+      userId: "user-1"
+    });
+
+    expect(result).toEqual({
+      kind: "confirmed",
+      reservation: {
+        date: "2026-06-16",
+        id: "reservation-cancelled",
+        reason: "다시 예약",
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId: "user-1"
+      }
+    });
+    expect(prismaMocks.transactionClient.reservation.updateMany).toHaveBeenCalledWith({
+      data: { reason: "다시 예약", status: "CONFIRMED" },
+      where: {
+        date: "2026-06-16",
+        status: "CANCELLED",
+        studyPeriod: "EIGHTH",
+        userId: "user-1"
+      }
+    });
+    expect(prismaMocks.transactionClient.reservation.create).not.toHaveBeenCalled();
+    expect(prismaMocks.transactionClient.reservation.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: {
+        userId_date_studyPeriod: {
+          date: "2026-06-16",
+          studyPeriod: "EIGHTH",
+          userId: "user-1"
+        }
+      }
+    });
+    const advisoryLocks = prismaMocks.rawCalls.filter((call) =>
+      call.strings.join("?").includes("pg_advisory_xact_lock")
+    );
+    expect(advisoryLocks.map((call) => call.values)).toEqual([
+      ["period:2026-06-16:EIGHTH"],
+      ["user:user-1"]
+    ]);
+  });
+
+  it("returns duplicate when the reservation identity loses a concurrent insert race", async () => {
+    prismaMocks.transactionClient.reservation.create.mockRejectedValueOnce(prismaConflictError("P2002"));
+
+    await expect(
+      reserveStudyPeriod({
+        date: "2026-06-16",
+        now: new Date("2026-06-16T05:00:00.000Z"),
+        reason: "자습",
+        store: prismaReservationStore,
+        studyPeriod: "EIGHTH",
+        userId: "user-1"
+      })
+    ).resolves.toEqual({ kind: "error", reason: "duplicate" });
   });
 });
 

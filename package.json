@@ -6,9 +6,11 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "vercel-build": "npm run predeploy:check && prisma generate && prisma migrate deploy && next build",
-    "lint": "tsc --noEmit",
-    "typecheck": "tsc --noEmit",
+    "lint": "npm run typecheck",
+    "typecheck": "node scripts/typecheck.mjs",
     "test": "vitest run",
+    "test:integration": "node scripts/run-integration-tests.mjs",
+    "verify:receipts": "node scripts/verify-readiness-receipts.mjs",
     "test:watch": "vitest",
     "smoke:external": "tsx scripts/external-smoke.ts",
     "db:generate": "prisma generate",
@@ -24,7 +26,7 @@
     "cheerio": "^1.1.2",
     "ky": "^1.14.0",
     "lucide-react": "^1.17.0",
-    "next": "^16.2.9",
+    "next": "^16.2.11",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "zod": "^4.1.13"
@@ -40,6 +42,7 @@
     "vitest": "^4.0.14"
   },
   "overrides": {
-    "postcss": "8.5.15"
+    "postcss": "8.5.15",
+    "sharp": "^0.35.3"
   }
 }

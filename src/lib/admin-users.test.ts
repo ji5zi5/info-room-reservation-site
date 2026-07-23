@@ -15,6 +15,7 @@ const activeUser = {
   restrictedUntil: null,
   restrictionReason: null,
   role: "STUDENT",
+  shadowBanProfile: "NORMAL",
   studentNumber: "26001"
 } satisfies AdminUserListRow;
 
@@ -26,6 +27,7 @@ const restrictedUser = {
   restrictedUntil: new Date("2026-06-20T00:00:00.000Z"),
   restrictionReason: "정보실 예약 노쇼",
   role: "STUDENT",
+  shadowBanProfile: "NORMAL",
   studentNumber: "26002"
 } satisfies AdminUserListRow;
 
@@ -37,6 +39,7 @@ const shadowBannedUser = {
   restrictedUntil: null,
   restrictionReason: "블랙리스트",
   role: "STUDENT",
+  shadowBanProfile: "HIGH",
   studentNumber: "26003"
 } satisfies AdminUserListRow;
 

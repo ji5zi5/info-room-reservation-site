@@ -4,8 +4,10 @@ import type { LoginResult } from "./auth-service";
 import type { RiroAuthResult } from "./riro-auth";
 
 type UserRow = {
+  readonly anonymizedAt: Date | null;
   readonly bookingStatus: string;
   readonly createdAt: Date;
+  readonly departedAt: Date | null;
   readonly generation: number;
   readonly id: string;
   readonly name: string;
@@ -13,6 +15,7 @@ type UserRow = {
   readonly restrictedUntil: Date | null;
   readonly riroId: string | null;
   readonly role: string;
+  readonly shadowBanProfile: string;
   readonly studentNumber: string;
   readonly updatedAt: Date;
 };
@@ -86,10 +89,13 @@ export const prismaPersistenceMocks = (() => {
     assertUnique(data, null);
     const user = {
       ...data,
+      anonymizedAt: null,
       createdAt: baseDate,
+      departedAt: null,
       id: `generated-user-${nextUserId}`,
       restrictionReason: null,
       restrictedUntil: null,
+      shadowBanProfile: "NORMAL",
       updatedAt: baseDate
     };
     nextUserId += 1;
@@ -178,8 +184,10 @@ export function resetAuthPersistenceMocks(): void {
 export function userRow(overrides: Partial<UserRow>): UserRow {
   const baseDate = new Date("2026-06-16T00:00:00.000Z");
   return {
+    anonymizedAt: null,
     bookingStatus: "ACTIVE",
     createdAt: baseDate,
+    departedAt: null,
     generation: 31,
     id: "user-default",
     name: "기존학생",
@@ -187,6 +195,7 @@ export function userRow(overrides: Partial<UserRow>): UserRow {
     restrictedUntil: null,
     riroId: "riro-default",
     role: "STUDENT",
+    shadowBanProfile: "NORMAL",
     studentNumber: "old-default",
     updatedAt: baseDate,
     ...overrides

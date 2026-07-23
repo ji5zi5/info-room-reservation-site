@@ -190,6 +190,18 @@ describe("admin notification settings route", () => {
     expect(routeMocks.notificationSettingUpsert).not.toHaveBeenCalled();
   });
 
+  it("rejects removed shadow-ban probability settings", async () => {
+    const response = await PATCH(
+      notificationSettingsRequest({
+        ...validSettings(),
+        shadowBanSuccessRate: 0.02
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(routeMocks.notificationSettingUpsert).not.toHaveBeenCalled();
+  });
+
   it("uses the mock store without writing audit rows in no-database mock mode", async () => {
     routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
 

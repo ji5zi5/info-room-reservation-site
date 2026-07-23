@@ -7,11 +7,6 @@ import {
 import type { NotificationSettings } from "./notification-settings";
 import type { Reservation } from "./reservation-service";
 
-export type ReservationCreatedNotificationUser = {
-  readonly name: string;
-  readonly studentNumber: string;
-};
-
 export type ReservationCreatedNotificationSender = (
   payload: DiscordWebhookPayload
 ) => Promise<DiscordWebhookSendResult>;
@@ -34,7 +29,6 @@ export async function sendReservationCreatedNotification(input: {
   readonly notificationSettings: NotificationSettings;
   readonly reservation: Reservation;
   readonly sender: ReservationCreatedNotificationSender;
-  readonly user: ReservationCreatedNotificationUser;
   readonly webhookUrl: string | undefined;
 }): Promise<ReservationCreatedNotificationResult> {
   if (!input.notificationSettings.reservationCreatedNotificationsEnabled) {
@@ -48,21 +42,17 @@ export async function sendReservationCreatedNotification(input: {
     const sendResult = await input.sender(
       buildReservationCreatedDiscordPayload({
         date: input.reservation.date,
-        reason: input.reservation.reason,
-        studentName: input.user.name,
-        studentNumber: input.user.studentNumber,
+        reservationId: input.reservation.id,
         studyPeriod: input.reservation.studyPeriod
       })
     );
     return { kind: "sent", messageIds: sendResult.messageIds };
   } catch (error) {
-    return { kind: "failed", message: errorMessage(error) };
+    return {
+      kind: "failed",
+      message: error instanceof Error
+        ? redactDiscordWebhookTokens(error.message)
+        : "Unknown Discord notification error"
+    };
   }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return redactDiscordWebhookTokens(error.message);
-  }
-  return "Unknown Discord notification error";
 }

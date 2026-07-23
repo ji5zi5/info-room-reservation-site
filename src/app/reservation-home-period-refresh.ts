@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PeriodSummary } from "@/components/reservation-period-card";
 import type { getAdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
+import { addDays } from "@/lib/date";
 import { buildReservationCalendarDays } from "@/lib/reservation-calendar";
-import { readPeriodSummaries } from "./client-api-response";
+import { readPeriodSummaries, readPeriodWeekPayload } from "./client-api-response";
+import { toPeriodSummariesByDate } from "./reservation-period-week";
 import type { ReservationSidebarUser } from "./reservation-sidebar";
 
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
@@ -17,6 +19,18 @@ type PeriodFetchResult =
     }
   | {
       readonly date: string;
+      readonly kind: "error";
+    };
+type PeriodWeekFetchResult =
+  | {
+      readonly etag: string | null;
+      readonly kind: "ok";
+      readonly periodsByDate: Readonly<Record<string, readonly PeriodSummary[]>>;
+    }
+  | {
+      readonly kind: "not_modified";
+    }
+  | {
       readonly kind: "error";
     };
 
@@ -53,6 +67,13 @@ export function useReservationPeriodRefresh({
   const [periodsRefreshing, setPeriodsRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const activePeriodRefreshesRef = useRef(0);
+  const latestPeriodRefreshRef = useRef(0);
+  const weekEtagRef = useRef<string | null>(null);
+  const targetDateRef = useRef(targetDate);
+  const advanceUnavailableRef = useRef(advanceUnavailable);
+  const weekStart = periodWeekStart(advancePolicy);
+  targetDateRef.current = targetDate;
+  advanceUnavailableRef.current = advanceUnavailable;
 
   const clearPeriods = useCallback((): void => {
     setPeriods([]);
@@ -70,28 +91,25 @@ export function useReservationPeriodRefresh({
     }
   }, []);
 
-  const refreshPeriodDates = useCallback(
-    async (dates: readonly string[], currentTargetDate?: string): Promise<readonly PeriodSummary[]> => {
-      const uniqueDates = [...new Set(dates.filter(Boolean))];
-      if (uniqueDates.length === 0) {
+  const refreshPeriods = useCallback(
+    async (date: string): Promise<readonly PeriodSummary[]> => {
+      if (!date) {
         return [];
       }
+      const requestId = latestPeriodRefreshRef.current + 1;
+      latestPeriodRefreshRef.current = requestId;
       beginPeriodRefresh();
       try {
-        const entries = await Promise.all(uniqueDates.map(fetchPeriodSummariesForDate));
-        const successfulEntries = entries.filter(
-          (entry): entry is Extract<PeriodFetchResult, { readonly kind: "ok" }> => entry.kind === "ok"
-        );
-        if (successfulEntries.length > 0) {
-          const nextByDate = Object.fromEntries(successfulEntries.map((entry) => [entry.date, entry.periods] as const));
-          setCalendarPeriodsByDate((current) => ({ ...current, ...nextByDate }));
-          if (currentTargetDate && Object.hasOwn(nextByDate, currentTargetDate)) {
-            setPeriods(nextByDate[currentTargetDate] ?? []);
-          }
-          setLastRefreshedAt(new Date().toISOString());
+        const result = await fetchPeriodSummariesForDate(date);
+        if (result.kind === "error" || requestId !== latestPeriodRefreshRef.current) {
+          return [];
         }
-        const targetEntry = entries.find((entry) => entry.date === currentTargetDate);
-        return targetEntry?.kind === "ok" ? targetEntry.periods : [];
+        setCalendarPeriodsByDate((current) => ({ ...current, [date]: result.periods }));
+        if (date === targetDateRef.current && !advanceUnavailableRef.current) {
+          setPeriods(result.periods);
+        }
+        setLastRefreshedAt(new Date().toISOString());
+        return result.periods;
       } finally {
         endPeriodRefresh();
       }
@@ -99,37 +117,96 @@ export function useReservationPeriodRefresh({
     [beginPeriodRefresh, endPeriodRefresh]
   );
 
-  const refreshPeriods = useCallback(
-    async (date: string): Promise<readonly PeriodSummary[]> => refreshPeriodDates([date], date),
-    [refreshPeriodDates]
-  );
+  const refreshPeriodWeek = useCallback(async (): Promise<void> => {
+    if (!weekStart) {
+      return;
+    }
+    const requestId = latestPeriodRefreshRef.current + 1;
+    latestPeriodRefreshRef.current = requestId;
+    beginPeriodRefresh();
+    try {
+      const result = await fetchPeriodSummariesForWeek(weekStart, weekEtagRef.current);
+      if (result.kind === "error" || requestId !== latestPeriodRefreshRef.current) {
+        return;
+      }
+      if (result.kind === "not_modified") {
+        setLastRefreshedAt(new Date().toISOString());
+        return;
+      }
+      weekEtagRef.current = result.etag;
+      setCalendarPeriodsByDate((current) => ({ ...current, ...result.periodsByDate }));
+      const targetPeriods = result.periodsByDate[targetDateRef.current];
+      if (targetPeriods && !advanceUnavailableRef.current) {
+        setPeriods(targetPeriods);
+      }
+      setLastRefreshedAt(new Date().toISOString());
+    } finally {
+      endPeriodRefresh();
+    }
+  }, [beginPeriodRefresh, endPeriodRefresh, weekStart]);
 
   useEffect(() => {
-    if (!user || !targetDate || user.role === "ADMIN") {
+    weekEtagRef.current = null;
+  }, [user?.id, weekStart]);
+
+  useEffect(() => {
+    if (!user || user.role === "ADMIN" || !weekStart) {
       setCalendarPeriodsByDate({});
       clearPeriods();
       return;
     }
-    if (advanceUnavailable) {
+    void refreshPeriodWeek();
+  }, [clearPeriods, refreshPeriodWeek, user?.id, user?.role, weekStart]);
+
+  useEffect(() => {
+    if (!user || user.role === "ADMIN" || !targetDate || advanceUnavailable) {
       clearPeriods();
       return;
     }
-    void refreshPeriodDates(visiblePeriodDates(advancePolicy, targetDate), targetDate);
-  }, [advancePolicy, advanceUnavailable, clearPeriods, refreshPeriodDates, targetDate, user?.id, user?.role]);
-
-  useEffect(() => {
-    if (!advancePolicy || !user || user.role === "ADMIN") {
+    const targetPeriods = calendarPeriodsByDate[targetDate];
+    if (targetPeriods) {
+      setPeriods(targetPeriods);
       return;
     }
-    const refreshVisibleDates = (): void => {
-      void refreshPeriodDates(visiblePeriodDates(advancePolicy, targetDate), advanceUnavailable ? undefined : targetDate);
-    };
-    const intervalId = window.setInterval(refreshVisibleDates, PERIOD_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(intervalId);
-  }, [advancePolicy, advanceUnavailable, refreshPeriodDates, targetDate, user?.id, user?.role]);
+    clearPeriods();
+    if (!weekStart || !isSchoolWeekDate(targetDate, weekStart)) {
+      void refreshPeriods(targetDate);
+    }
+  }, [
+    advanceUnavailable,
+    calendarPeriodsByDate,
+    clearPeriods,
+    refreshPeriods,
+    targetDate,
+    user?.id,
+    user?.role,
+    weekStart
+  ]);
+
+  const refreshCurrentSummary = useCallback((): void => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+    const currentTargetDate = targetDateRef.current;
+    if (weekStart && isSchoolWeekDate(currentTargetDate, weekStart)) {
+      void refreshPeriodWeek();
+      return;
+    }
+    if (currentTargetDate) {
+      void refreshPeriods(currentTargetDate);
+    }
+  }, [refreshPeriodWeek, refreshPeriods, weekStart]);
 
   useEffect(() => {
-    if (!advancePolicy || !user || user.role === "ADMIN") {
+    if (!weekStart || !user || user.role === "ADMIN") {
+      return;
+    }
+    const intervalId = window.setInterval(refreshCurrentSummary, PERIOD_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [refreshCurrentSummary, user?.id, user?.role, weekStart]);
+
+  useEffect(() => {
+    if (!weekStart || !user || user.role === "ADMIN") {
       return;
     }
     const refreshOnVisible = (): void => {
@@ -137,13 +214,13 @@ export function useReservationPeriodRefresh({
         return;
       }
       void refreshMe();
-      void refreshPeriodDates(visiblePeriodDates(advancePolicy, targetDate), advanceUnavailable ? undefined : targetDate);
+      refreshCurrentSummary();
     };
     document.addEventListener("visibilitychange", refreshOnVisible);
     return () => {
       document.removeEventListener("visibilitychange", refreshOnVisible);
     };
-  }, [advancePolicy, advanceUnavailable, refreshMe, refreshPeriodDates, targetDate, user?.id, user?.role]);
+  }, [refreshCurrentSummary, refreshMe, user?.id, user?.role, weekStart]);
 
   return {
     calendarPeriodsByDate,
@@ -155,9 +232,33 @@ export function useReservationPeriodRefresh({
   };
 }
 
+async function fetchPeriodSummariesForWeek(
+  weekStart: string,
+  etag: string | null
+): Promise<PeriodWeekFetchResult> {
+  try {
+    const url = `/api/periods?weekStart=${encodeURIComponent(weekStart)}`;
+    const response = await (etag ? fetch(url, { headers: { "If-None-Match": etag } }) : fetch(url));
+    if (response.status === 304) {
+      return { kind: "not_modified" };
+    }
+    const payload = await readPeriodWeekPayload(response);
+    if (!payload) {
+      return { kind: "error" };
+    }
+    return {
+      etag: response.headers.get("ETag"),
+      kind: "ok",
+      periodsByDate: toPeriodSummariesByDate(payload)
+    };
+  } catch {
+    return { kind: "error" };
+  }
+}
+
 async function fetchPeriodSummariesForDate(date: string): Promise<PeriodFetchResult> {
   try {
-    const response = await fetch(`/api/periods?date=${date}`);
+    const response = await fetch(`/api/periods?date=${encodeURIComponent(date)}`);
     if (!response.ok) {
       return { date, kind: "error" };
     }
@@ -167,12 +268,13 @@ async function fetchPeriodSummariesForDate(date: string): Promise<PeriodFetchRes
   }
 }
 
-function selectableCalendarDates(policy: AdvanceReservationPolicy): readonly string[] {
-  return buildReservationCalendarDays(policy)
-    .filter((day) => day.selectable)
-    .map((day) => day.date);
+function periodWeekStart(policy: AdvanceReservationPolicy | null): string | null {
+  if (!policy) {
+    return null;
+  }
+  return buildReservationCalendarDays(policy)[0]?.date ?? null;
 }
 
-function visiblePeriodDates(policy: AdvanceReservationPolicy | null, targetDate: string): readonly string[] {
-  return policy ? [targetDate, ...selectableCalendarDates(policy)] : [targetDate];
+function isSchoolWeekDate(date: string, weekStart: string): boolean {
+  return date >= weekStart && date <= addDays(weekStart, 4);
 }

@@ -16,7 +16,7 @@ export const testClosedPeriod = {
   enabled: true,
   openTime: "13:00",
   studyPeriod: "EIGHTH"
-} satisfies ClosedPeriodNotificationPeriod;
+} as const;
 
 export type TestDelivery = ClosedPeriodNotificationDeliveryRecord & {
   readonly date: string;
@@ -56,11 +56,30 @@ export function createMemoryNotificationRepository(input: {
       delivery = {
         date: request.date,
         kind: "CLOSED_LIST",
+        nextAttemptAt: null,
         status: "SENDING",
         studyPeriod: request.studyPeriod,
         updatedAt: new Date("2026-06-12T07:25:00.000Z")
       };
       return delivery;
+    },
+    async claimDeliveryForReconciliation(request) {
+      if (
+        delivery === null ||
+        !["FAILED", "PENDING_REVIEW", "UNKNOWN"].includes(delivery.status)
+      ) {
+        return null;
+      }
+      const previousStatus = delivery.status as "FAILED" | "PENDING_REVIEW" | "UNKNOWN";
+      delivery = {
+        date: request.date,
+        kind: "CLOSED_LIST",
+        nextAttemptAt: null,
+        status: "SENDING",
+        studyPeriod: request.studyPeriod,
+        updatedAt: new Date("2026-06-12T07:25:00.000Z")
+      };
+      return { delivery, previousStatus };
     },
     async getDelivery() {
       return delivery;
@@ -74,6 +93,33 @@ export function createMemoryNotificationRepository(input: {
     replaceDelivery(nextDelivery) {
       delivery = nextDelivery;
     },
+    async resolveDelivery(request) {
+      const currentDelivery = delivery;
+      if (
+        currentDelivery === null ||
+        !["FAILED", "PENDING_REVIEW", "UNKNOWN"].includes(currentDelivery.status) ||
+        (request.action === "confirm_sent" && currentDelivery.status !== "UNKNOWN")
+      ) {
+        return null;
+      }
+      const previousStatus = currentDelivery.status as "FAILED" | "PENDING_REVIEW" | "UNKNOWN";
+      const resolvedDelivery = {
+        ...currentDelivery,
+        ...(request.action === "confirm_sent"
+          ? { failureCode: null, lastError: null }
+          : currentDelivery.failureCode === undefined
+            ? {}
+            : { failureCode: currentDelivery.failureCode }),
+        ...(request.action === "confirm_sent" || currentDelivery.lastError === undefined
+          ? {}
+          : { lastError: currentDelivery.lastError }),
+        nextAttemptAt: null,
+        status: request.action === "confirm_sent" ? "SENT" : "ABANDONED",
+        updatedAt: new Date("2026-06-12T07:25:01.000Z")
+      } satisfies TestDelivery;
+      delivery = resolvedDelivery;
+      return { delivery: resolvedDelivery, previousStatus };
+    },
     async saveDelivery(write) {
       if (
         delivery?.status !== "SENDING" ||
@@ -85,9 +131,11 @@ export function createMemoryNotificationRepository(input: {
       writes.push(write);
       const finalDelivery = {
         date: write.date,
+        failureCode: write.failureCode,
         kind: "CLOSED_LIST",
         lastError: write.lastError,
         messageIds: write.messageIds,
+        nextAttemptAt: write.nextAttemptAt,
         status: write.status,
         studyPeriod: write.studyPeriod,
         updatedAt: new Date("2026-06-12T07:25:01.000Z")

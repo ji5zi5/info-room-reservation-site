@@ -1,18 +1,36 @@
 import { Prisma, type NotificationDelivery, type PeriodSetting } from "@prisma/client";
 
 import { prisma } from "./db";
-import { CLOSED_LIST_NOTIFICATION_KIND, selectClosedPeriodNotificationCandidates, staleSendingDeliveryCutoff, type ClosedPeriodCandidate, type ClosedPeriodDeliverySnapshot, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
-import type { ClosedPeriodNotificationDeliveryRecord, ClosedPeriodNotificationDeliveryWrite, ClosedPeriodNotificationPeriod, ClosedPeriodNotificationRepository } from "./closed-period-notification-service";
-import { toKstDate } from "./date";
-import { buildDefaultPeriodSetting, periodSettingReadDates, resolveEffectivePeriodSetting, type PeriodSettingDefaults } from "./period-settings";
+import { CLOSED_LIST_NOTIFICATION_KIND, isClosedPeriodForNotification, selectClosedPeriodNotificationCandidates, staleSendingDeliveryCutoff, type ClosedPeriodCandidate, type ClosedPeriodDeliverySnapshot, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
+import type {
+  ClosedPeriodNotificationDeliveryRecord,
+  ClosedPeriodNotificationDeliveryWrite,
+  ClosedPeriodNotificationPeriod,
+  ClosedPeriodNotificationReconciliationStatus,
+  ClosedPeriodNotificationReconciliationTransition,
+  ClosedPeriodNotificationRepository
+} from "./closed-period-notification-service";
+import { addDays, toKstDate } from "./date";
+import { periodSettingReadDates, resolveEffectivePeriodSetting, type PeriodSettingDefaults } from "./period-settings";
+import { GLOBAL_PERIOD_SETTINGS_DATE } from "./period-setting-values";
 import { STUDY_PERIODS, parseStudyPeriod, type StudyPeriod } from "./study-periods";
 
-type NotificationReservation = {
-  readonly reason: string | null;
-  readonly user: { readonly name: string; readonly studentNumber: string };
-};
+const FORCE_CLAIMABLE_STATUSES = ["FAILED", "PENDING"] as const;
+const NON_FORCE_CLAIMABLE_STATUSES = ["FAILED", "PENDING"] as const;
+const CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS = 7;
+const UNRESOLVED_DELIVERY_STATUSES = ["FAILED", "PENDING_REVIEW", "UNKNOWN"] as const;
+const RECONCILIATION_DELIVERY_STATUSES = ["FAILED", "PENDING_REVIEW", "UNKNOWN"] as const;
 
-const FORCE_CLAIMABLE_STATUSES = ["FAILED", "SENT"] as const, NON_FORCE_CLAIMABLE_STATUSES = ["FAILED"] as const;
+export type ClosedPeriodNotificationBacklogItem = {
+  readonly attempts: number;
+  readonly date: string;
+  readonly failureCode: string | null;
+  readonly lastError: string | null;
+  readonly nextAttemptAt: Date | null;
+  readonly status: ClosedPeriodNotificationReconciliationStatus;
+  readonly studyPeriod: StudyPeriod;
+  readonly updatedAt: Date;
+};
 
 export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationRepository = {
   async getDelivery(input) {
@@ -26,16 +44,17 @@ export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationR
         studyPeriod: input.studyPeriod
       }
     });
-    const reservations = await prisma.reservation.findMany({
-      include: { user: true },
-      orderBy: { createdAt: "asc" },
+    const confirmedCount = await prisma.reservation.count({
       where: {
         date: input.date,
         status: "CONFIRMED",
         studyPeriod: input.studyPeriod
       }
     });
-    return toNotificationPeriod(resolveEffectivePeriodSetting(input.date, input.studyPeriod, settings), reservations);
+    return toNotificationPeriod(
+      resolveEffectivePeriodSetting(input.date, input.studyPeriod, settings),
+      confirmedCount
+    );
   },
 
   async claimDelivery(input) {
@@ -69,11 +88,87 @@ export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationR
     }
   },
 
+  async claimDeliveryForReconciliation(input) {
+    const existingDelivery = await findDeliveryRecord(input);
+    if (!existingDelivery || !isReconciliationStatus(existingDelivery.status) || !existingDelivery.updatedAt) {
+      return null;
+    }
+    const result = await prisma.notificationDelivery.updateMany({
+      data: {
+        attempts: { increment: 1 },
+        failureCode: null,
+        lastError: null,
+        messageIds: "[]",
+        nextAttemptAt: null,
+        sentAt: null,
+        status: "SENDING"
+      },
+      where: {
+        date: input.date,
+        kind: CLOSED_LIST_NOTIFICATION_KIND,
+        status: existingDelivery.status,
+        studyPeriod: input.studyPeriod,
+        updatedAt: existingDelivery.updatedAt
+      }
+    });
+    if (result.count !== 1) {
+      return null;
+    }
+    const delivery = await findDeliveryRecord(input);
+    return delivery
+      ? { delivery, previousStatus: existingDelivery.status }
+      : null;
+  },
+
+  async resolveDelivery(input) {
+    const existingDelivery = await findDeliveryRecord(input);
+    if (
+      !existingDelivery ||
+      !isReconciliationStatus(existingDelivery.status) ||
+      !existingDelivery.updatedAt ||
+      (input.action === "confirm_sent" && existingDelivery.status !== "UNKNOWN")
+    ) {
+      return null;
+    }
+    const result = await prisma.notificationDelivery.updateMany({
+      data:
+        input.action === "confirm_sent"
+          ? {
+              failureCode: null,
+              lastError: null,
+              nextAttemptAt: null,
+              sentAt: input.now,
+              status: "SENT"
+            }
+          : {
+              nextAttemptAt: null,
+              sentAt: null,
+              status: "ABANDONED"
+            },
+      where: {
+        date: input.date,
+        kind: CLOSED_LIST_NOTIFICATION_KIND,
+        status: existingDelivery.status,
+        studyPeriod: input.studyPeriod,
+        updatedAt: existingDelivery.updatedAt
+      }
+    });
+    if (result.count !== 1) {
+      return null;
+    }
+    const delivery = await findDeliveryRecord(input);
+    return delivery
+      ? { delivery, previousStatus: existingDelivery.status }
+      : null;
+  },
+
   async saveDelivery(write) {
     const result = await prisma.notificationDelivery.updateMany({
       data: {
+        failureCode: write.failureCode,
         lastError: write.lastError,
         messageIds: JSON.stringify(write.messageIds),
+        nextAttemptAt: write.nextAttemptAt,
         sentAt: write.status === "SENT" ? new Date() : null,
         status: write.status
       },
@@ -95,40 +190,160 @@ export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationR
 
 export async function getDueClosedPeriodNotificationCandidates(now: Date): Promise<readonly ClosedPeriodCandidate[]> {
   const today = toKstDate(now);
+  const lookbackStart = addDays(today, -(CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS - 1));
   const staleSendingBefore = staleSendingDeliveryCutoff(now);
-  const [todaySettings, actionableDeliveries, activeTodayDeliveries] = await Promise.all([
-    prisma.periodSetting.findMany({ where: { date: { in: [...periodSettingReadDates(today)] } } }),
-    prisma.notificationDelivery.findMany({
-      where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND, OR: [{ status: "FAILED" }, { status: "SENDING", updatedAt: { lte: staleSendingBefore } }] }
+  const [settings, deliveries] = await Promise.all([
+    prisma.periodSetting.findMany({
+      where: {
+        OR: [
+          { date: GLOBAL_PERIOD_SETTINGS_DATE },
+          { date: { gte: lookbackStart, lte: today } }
+        ]
+      }
     }),
     prisma.notificationDelivery.findMany({
-      where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND, OR: [{ status: "SENT" }, { status: "SENDING", updatedAt: { gt: staleSendingBefore } }] }
+      where: { date: { gte: lookbackStart, lte: today }, kind: CLOSED_LIST_NOTIFICATION_KIND }
     })
   ]);
-  const todayCandidates = STUDY_PERIODS.map((studyPeriod) =>
-    resolveEffectivePeriodSetting(today, studyPeriod, todaySettings)
-  ).map(toCandidate);
-  const byPeriod = new Map<string, ClosedPeriodCandidate>();
-  for (const candidate of todayCandidates) {
-    byPeriod.set(candidateKey(candidate.date, candidate.studyPeriod), candidate);
-  }
-  for (const delivery of actionableDeliveries) {
-    const studyPeriod = parseStudyPeriod(delivery.studyPeriod);
-    const key = candidateKey(delivery.date, studyPeriod);
-    byPeriod.set(key, byPeriod.get(key) ?? buildDefaultPeriodSetting(delivery.date, studyPeriod));
-  }
-  return selectClosedPeriodNotificationCandidates({
-    deliveries: [...actionableDeliveries, ...activeTodayDeliveries].map(toDeliverySnapshot),
-    now,
-    settings: Array.from(byPeriod.values())
+
+  const candidates = buildLookbackCandidates({ lookbackStart, now, settings, today });
+  await materializeMissingDeliveries({ candidates, deliveries, today });
+  await prisma.notificationDelivery.updateMany({
+    data: {
+      lastError: "Discord 전송 결과 확인이 필요합니다.",
+      status: "UNKNOWN"
+    },
+    where: {
+      date: { gte: lookbackStart, lte: today },
+      kind: CLOSED_LIST_NOTIFICATION_KIND,
+      status: "SENDING",
+      updatedAt: { lte: staleSendingBefore }
+    }
   });
+  const currentDeliveries = await prisma.notificationDelivery.findMany({
+    where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND }
+  });
+  return selectClosedPeriodNotificationCandidates({
+    deliveries: currentDeliveries.map(toDeliverySnapshot),
+    now,
+    settings: candidates.filter((candidate) => candidate.date === today)
+  });
+}
+
+export async function getClosedPeriodNotificationBacklogSummary(now: Date): Promise<{
+  readonly count: number;
+  readonly oldestAt: Date | null;
+}> {
+  const today = toKstDate(now);
+  const lookbackStart = addDays(today, -(CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS - 1));
+  const deliveries = await prisma.notificationDelivery.findMany({
+    orderBy: { createdAt: "asc" },
+    take: CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS * STUDY_PERIODS.length,
+    where: {
+      date: { gte: lookbackStart, lte: today },
+      kind: CLOSED_LIST_NOTIFICATION_KIND,
+      status: { in: [...UNRESOLVED_DELIVERY_STATUSES] }
+    }
+  });
+  return {
+    count: deliveries.length,
+    oldestAt: deliveries.reduce<Date | null>(
+      (oldest, delivery) => !oldest || delivery.createdAt < oldest ? delivery.createdAt : oldest,
+      null
+    )
+  };
+}
+
+export async function getClosedPeriodNotificationReconciliationBacklog(
+  now: Date
+): Promise<readonly ClosedPeriodNotificationBacklogItem[]> {
+  const today = toKstDate(now);
+  const lookbackStart = addDays(today, -(CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS - 1));
+  const deliveries = await prisma.notificationDelivery.findMany({
+    orderBy: [{ date: "asc" }, { studyPeriod: "asc" }],
+    take: CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS * STUDY_PERIODS.length,
+    where: {
+      date: { gte: lookbackStart, lte: today },
+      kind: CLOSED_LIST_NOTIFICATION_KIND,
+      status: { in: [...UNRESOLVED_DELIVERY_STATUSES] }
+    }
+  });
+  return deliveries
+    .filter(
+      (
+        delivery
+      ): delivery is typeof delivery & {
+        readonly status: ClosedPeriodNotificationReconciliationStatus;
+      } => isReconciliationStatus(parseDeliveryStatus(delivery.status))
+    )
+    .map((delivery) => ({
+      attempts: delivery.attempts,
+      date: delivery.date,
+      failureCode: delivery.failureCode,
+      lastError: delivery.lastError,
+      nextAttemptAt: delivery.nextAttemptAt,
+      status: parseDeliveryStatus(delivery.status) as ClosedPeriodNotificationReconciliationStatus,
+      studyPeriod: parseStudyPeriod(delivery.studyPeriod),
+      updatedAt: delivery.updatedAt
+    }))
+    .sort(compareBacklogItems);
+}
+
+function buildLookbackCandidates(input: {
+  readonly lookbackStart: string;
+  readonly now: Date;
+  readonly settings: readonly PeriodSetting[];
+  readonly today: string;
+}): readonly ClosedPeriodCandidate[] {
+  const candidates: ClosedPeriodCandidate[] = [];
+  for (let date = input.lookbackStart; date <= input.today; date = addDays(date, 1)) {
+    for (const studyPeriod of STUDY_PERIODS) {
+      const setting = resolveEffectivePeriodSetting(date, studyPeriod, input.settings);
+      const candidate = toCandidate(setting);
+      if (candidate.enabled && isClosedPeriodForNotification(candidate, input.now)) {
+        candidates.push(candidate);
+      }
+    }
+  }
+  return candidates;
+}
+
+async function materializeMissingDeliveries(input: {
+  readonly candidates: readonly ClosedPeriodCandidate[];
+  readonly deliveries: readonly NotificationDelivery[];
+  readonly today: string;
+}): Promise<void> {
+  const existingKeys = new Set(input.deliveries.map((delivery) => candidateKey(delivery.date, parseStudyPeriod(delivery.studyPeriod))));
+  for (const candidate of input.candidates) {
+    if (existingKeys.has(candidateKey(candidate.date, candidate.studyPeriod))) {
+      continue;
+    }
+    try {
+      await prisma.notificationDelivery.create({
+        data: {
+          attempts: 0,
+          date: candidate.date,
+          kind: CLOSED_LIST_NOTIFICATION_KIND,
+          lastError: null,
+          messageIds: "[]",
+          sentAt: null,
+          status: candidate.date === input.today ? "PENDING" : "PENDING_REVIEW",
+          studyPeriod: candidate.studyPeriod
+        }
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+    }
+  }
 }
 
 const candidateKey = (date: string, studyPeriod: StudyPeriod): string => `${date}:${studyPeriod}`;
 
 async function claimExistingDelivery(
   input: { readonly date: string; readonly staleSendingBefore: Date; readonly studyPeriod: StudyPeriod },
-  claimableStatuses: readonly ("FAILED" | "SENT")[]
+  claimableStatuses: readonly ClosedPeriodNotificationStatus[]
 ): Promise<ClosedPeriodNotificationDeliveryRecord | null> {
   const result = await prisma.notificationDelivery.updateMany({
     data: {
@@ -141,10 +356,7 @@ async function claimExistingDelivery(
     where: {
       date: input.date,
       kind: CLOSED_LIST_NOTIFICATION_KIND,
-      OR: [
-        { status: { in: [...claimableStatuses] } },
-        { status: "SENDING", updatedAt: { lte: input.staleSendingBefore } }
-      ],
+      status: { in: [...claimableStatuses] },
       studyPeriod: input.studyPeriod
     }
   });
@@ -170,9 +382,11 @@ async function findDeliveryRecord(input: { readonly date: string; readonly study
 export function toDeliveryRecord(delivery: NotificationDelivery): ClosedPeriodNotificationDeliveryRecord {
   return {
     date: delivery.date,
+    failureCode: delivery.failureCode,
     kind: delivery.kind,
     lastError: delivery.lastError,
     messageIds: parseMessageIds(delivery.messageIds),
+    nextAttemptAt: delivery.nextAttemptAt,
     status: parseDeliveryStatus(delivery.status),
     studyPeriod: parseStudyPeriod(delivery.studyPeriod),
     updatedAt: delivery.updatedAt
@@ -181,17 +395,12 @@ export function toDeliveryRecord(delivery: NotificationDelivery): ClosedPeriodNo
 
 function toNotificationPeriod(
   setting: PeriodSetting | PeriodSettingDefaults,
-  reservations: readonly NotificationReservation[]
+  confirmedCount: number
 ): ClosedPeriodNotificationPeriod {
   return {
-    applicants: reservations.map((reservation) => ({
-      name: reservation.user.name,
-      reason: reservation.reason,
-      studentNumber: reservation.user.studentNumber
-    })),
     capacity: setting.capacity,
     closeTime: setting.closeTime,
-    confirmedCount: reservations.length,
+    confirmedCount,
     date: setting.date,
     enabled: setting.enabled,
     openTime: setting.openTime,
@@ -214,6 +423,7 @@ function toDeliverySnapshot(delivery: NotificationDelivery): ClosedPeriodDeliver
   return {
     date: delivery.date,
     kind: delivery.kind,
+    nextAttemptAt: delivery.nextAttemptAt,
     status: parseDeliveryStatus(delivery.status),
     studyPeriod: parseStudyPeriod(delivery.studyPeriod),
     updatedAt: delivery.updatedAt
@@ -223,12 +433,31 @@ function toDeliverySnapshot(delivery: NotificationDelivery): ClosedPeriodDeliver
 function parseDeliveryStatus(value: string): ClosedPeriodNotificationStatus {
   switch (value) {
     case "FAILED":
+    case "ABANDONED":
+    case "PENDING":
+    case "PENDING_REVIEW":
     case "SENDING":
     case "SENT":
+    case "UNKNOWN":
       return value;
     default:
       return "FAILED";
   }
+}
+
+function isReconciliationStatus(value: ClosedPeriodNotificationStatus): value is ClosedPeriodNotificationReconciliationStatus {
+  return RECONCILIATION_DELIVERY_STATUSES.includes(value as ClosedPeriodNotificationReconciliationStatus);
+}
+
+function compareBacklogItems(
+  left: ClosedPeriodNotificationBacklogItem,
+  right: ClosedPeriodNotificationBacklogItem
+): number {
+  const dateCompare = left.date.localeCompare(right.date);
+  if (dateCompare !== 0) {
+    return dateCompare;
+  }
+  return STUDY_PERIODS.indexOf(left.studyPeriod) - STUDY_PERIODS.indexOf(right.studyPeriod);
 }
 
 function parseMessageIds(value: string): readonly string[] {

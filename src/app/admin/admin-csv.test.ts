@@ -17,6 +17,51 @@ describe("admin CSV helpers", () => {
     expect(csv).toContain('2026-06-12,8면학,CONFIRMED,김학생,24101,"프린트, 자료"');
   });
 
+  it("neutralizes spreadsheet formulas and control-prefixed values in every admin CSV", () => {
+    // Given / When
+    const repeatedOffender = statistics.repeatedOffenders.at(0);
+    if (repeatedOffender === undefined) {
+      throw new Error("Expected a repeated-offender fixture");
+    }
+    const reservationCsv = buildReservationCsv([
+      reservation({ name: "=1+1", reason: "@SUM(A1:A2)", studentNumber: "+91001" })
+    ]);
+    const statisticsCsv = buildStatisticsCsv({
+      ...statistics,
+      repeatedOffenders: [
+        {
+          ...repeatedOffender,
+          name: "＝1+1",
+          studentNumber: "-91001"
+        }
+      ]
+    });
+    const auditCsv = buildAuditActionsCsv([
+      {
+        action: "USER_RESTRICTION_APPLY",
+        actor: { id: "admin", name: "관리자", studentNumber: "teacher" },
+        actorId: "admin",
+        after: null,
+        before: null,
+        category: "RESTRICTION",
+        createdAt: "2026-06-12T04:30:00.000Z",
+        id: "action-formula",
+        reason: "\t=HYPERLINK(\"https://example.test\")",
+        reservationId: null,
+        targetUser: null,
+        targetUserId: null
+      }
+    ]);
+
+    // Then
+    expect(reservationCsv).toContain("\"'=1+1\"");
+    expect(reservationCsv).toContain("\"'+91001\"");
+    expect(reservationCsv).toContain("\"'@SUM(A1:A2)\"");
+    expect(statisticsCsv).toContain("\"'＝1+1\"");
+    expect(statisticsCsv).toContain("\"'-91001\"");
+    expect(auditCsv).toContain("\"'\t=HYPERLINK(\"\"https://example.test\"\")\"");
+  });
+
   it("exports statistics totals, periods, daily rows, and repeated offenders", () => {
     const csv = buildStatisticsCsv(statistics);
 

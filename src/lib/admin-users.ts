@@ -10,6 +10,7 @@ export type AdminUserListRow = {
   readonly restrictedUntil: Date | null;
   readonly restrictionReason: string | null;
   readonly role: string;
+  readonly shadowBanProfile: string;
   readonly studentNumber: string;
 };
 

@@ -3,10 +3,15 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isReservableDate } from "@/lib/advance-reservation-policy";
-import { databaseActorFromSessionUser } from "@/lib/db-context";
+import { databaseActorFromSessionUser, TransactionRetryExhaustedError } from "@/lib/db-context";
 import { reserveStudyPeriod } from "@/lib/reservation-service";
 import { createPrismaReservationStoreForActor } from "@/lib/prisma-reservation-store";
-import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
+import {
+  jsonError,
+  jsonMutatingRequestSafetyError,
+  jsonRateLimitError,
+  jsonTransactionRetryExhaustedError
+} from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { reserveMockStudyPeriod } from "@/lib/mock-reservation-data";
 import { getPrismaNotificationSettings } from "@/lib/prisma-notification-settings";
@@ -69,22 +74,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       return buildReservationResponse(result);
     }
 
+    const store = createPrismaReservationStoreForActor(databaseActorFromSessionUser(user));
     const result = await reserveStudyPeriod({
       date: parsed.data.date,
       now,
       reason: parsed.data.reason,
-      store: createPrismaReservationStoreForActor(databaseActorFromSessionUser(user)),
+      store,
       studyPeriod: parsed.data.studyPeriod,
       userId: user.id
     });
     if (result.kind === "confirmed") {
-      await sendReservationCreatedNotificationBestEffort({
-        reservation: result.reservation,
-        user: {
-          name: user.name,
-          studentNumber: user.studentNumber
-        }
-      });
+      await sendReservationCreatedNotificationBestEffort({ reservation: result.reservation });
     }
 
     return buildReservationResponse(result);
@@ -95,30 +95,51 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return jsonError(409, "duplicate", "이미 예약한 시간대입니다.");
     }
+    if (error instanceof TransactionRetryExhaustedError) {
+      return jsonTransactionRetryExhaustedError();
+    }
     throw error;
   }
 }
 
 async function sendReservationCreatedNotificationBestEffort(input: {
   readonly reservation: import("@/lib/reservation-service").Reservation;
-  readonly user: {
-    readonly name: string;
-    readonly studentNumber: string;
-  };
 }): Promise<void> {
   try {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     const notificationSettings = await getPrismaNotificationSettings();
-    await sendReservationCreatedNotification({
+    const notificationResult = await sendReservationCreatedNotification({
       notificationSettings,
       reservation: input.reservation,
       sender: (payload) => sendDiscordWebhook({ payload, webhookUrl: webhookUrl ?? "" }),
-      user: input.user,
       webhookUrl
     });
+    if (notificationResult.kind === "failed") {
+      reportReservationCreatedNotificationFailure(input.reservation, "delivery_failed");
+    } else if (
+      notificationResult.kind === "skipped" &&
+      notificationResult.reason === "webhook_missing"
+    ) {
+      reportReservationCreatedNotificationFailure(input.reservation, "webhook_missing");
+    }
   } catch {
-    // Discord notifications are best-effort and must not change reservation results.
+    reportReservationCreatedNotificationFailure(input.reservation, "unexpected_error");
   }
+}
+
+function reportReservationCreatedNotificationFailure(
+  reservation: import("@/lib/reservation-service").Reservation,
+  outcome: "delivery_failed" | "unexpected_error" | "webhook_missing"
+): void {
+  console.error(
+    JSON.stringify({
+      date: reservation.date,
+      event: "reservation_created_notification_failed",
+      outcome,
+      reservationId: reservation.id,
+      studyPeriod: reservation.studyPeriod
+    })
+  );
 }
 
 type ReservationErrorReason =
@@ -139,6 +160,7 @@ function statusForReservationError(reason: ReservationErrorReason): number {
       return 409;
     case "admin_not_reservable":
     case "restricted":
+    case "shadow_banned":
       return 403;
     case "closed":
     case "disabled":
@@ -148,8 +170,6 @@ function statusForReservationError(reason: ReservationErrorReason): number {
       return 409;
     case "not_found":
       return 404;
-    case "shadow_banned":
-      return 500; // Fallback, shouldn't be reached due to intercept
   }
 }
 
@@ -174,25 +194,18 @@ function messageForReservationError(reason: ReservationErrorReason): string {
     case "restricted":
       return "예약 이용이 제한되었습니다.";
     case "shadow_banned":
-      return "서버 내부 오류가 발생했습니다."; // Fallback
+      return "예약을 처리할 수 없습니다.";
   }
 }
 
-function buildReservationResponse(result: import("@/lib/reservation-service").ReservationResult): NextResponse {
+async function buildReservationResponse(result: import("@/lib/reservation-service").ReservationResult): Promise<NextResponse> {
   if (result.kind === "confirmed") {
     return NextResponse.json({ reservation: result.reservation }, { status: 201 });
   }
 
   if (result.reason === "shadow_banned") {
-    const fakeErrors = [
-      { status: 429, error: "rate_limited" as const, message: "일시적인 요청 과부하입니다. 잠시 후 다시 시도해주세요." },
-      { status: 500, error: "server_error" as const, message: "서버 내부 오류가 발생했습니다." },
-      { status: 502, error: "server_error" as const, message: "예약 서버와의 통신에 실패했습니다." }
-    ];
-    const randomError = fakeErrors[Math.floor(Math.random() * fakeErrors.length)]!;
-    return jsonError(randomError.status, randomError.error, randomError.message);
+    return jsonError(403, "reservation_unavailable", messageForReservationError(result.reason));
   }
 
   return jsonError(statusForReservationError(result.reason), result.reason, messageForReservationError(result.reason));
 }
-

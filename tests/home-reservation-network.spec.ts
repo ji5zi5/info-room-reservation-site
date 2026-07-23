@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { e2eNow, FIXED_THURSDAY_DATE, mockClientDate } from "./e2e-time";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+const SCHOOL_WEEK_DATES = ["2026-06-08", "2026-06-09", "2026-06-10", FIXED_THURSDAY_DATE, "2026-06-12"] as const;
 
 type StudyPeriod = "EIGHTH" | "FIRST";
 
@@ -32,7 +33,7 @@ type MockPeriod = {
   readonly windowState: "open";
 };
 
-test("reserve click requires a directly typed reason and posts without extra period refreshes", async ({ page }) => {
+test("reserve click requires a directly typed reason and posts without extra refreshes after the dialog opens", async ({ page }) => {
   let reserveClickStarted = false;
   let dialogVisible = false;
   let postStarted = false;
@@ -83,13 +84,84 @@ test("reserve click requires a directly typed reason and posts without extra per
   await confirmButton.click();
   await reservationPost;
 
-  expect(periodGetsBetweenClickAndDialog).toBe(0);
+  expect(periodGetsBetweenClickAndDialog).toBe(1);
   expect(periodGetsBetweenDialogAndPost).toBe(0);
   expect(postedReservationBody).toEqual({
     date: FIXED_THURSDAY_DATE,
     reason: "조용한 자리에서 수행평가 준비",
     studyPeriod: "EIGHTH"
   });
+});
+
+test("reservation submit shows a generic denial and refreshes availability", async ({ page }) => {
+  let periodGetCount = 0;
+  await routeMockCsrf(page);
+  await routeMockLogin(page);
+  await routeOpenPeriods(page, () => {
+    periodGetCount += 1;
+  });
+  await page.route("**/api/reservations", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    await route.fulfill({
+      body: JSON.stringify({ error: { code: "reservation_unavailable", message: "예약을 처리할 수 없습니다." } }),
+      contentType: "application/json",
+      status: 403
+    });
+  });
+
+  await login(page);
+  await page.locator(".period-card").first().locator(".period-button").click();
+  const confirmButton = page.locator(".confirm-dialog .primary-button");
+  await page.locator(".reservation-reason-form input").fill("조용한 자리에서 수행평가 준비");
+  const periodGetCountBeforeSubmit = periodGetCount;
+  await confirmButton.click();
+
+  await expect(page.getByRole("status", { name: "예약 요청 처리 중" })).toBeVisible();
+  await expect(page.getByText("요청을 확인하고 있습니다.")).toBeVisible();
+  await expect(page.locator(".login-panel .sidebar-message")).toContainText("예약을 처리할 수 없습니다.");
+  await expect(page.getByText("Cloudflare", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "예약 요청 처리 중" })).toHaveCount(0);
+  expect(periodGetCount).toBe(periodGetCountBeforeSubmit + 1);
+});
+
+test("reservation submit keeps unmarked server errors in the normal failure path", async ({ page }) => {
+  await routeMockCsrf(page);
+  await routeMockLogin(page);
+  await routeOpenPeriods(page, () => {});
+  await page.route("**/api/reservations", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.fulfill({
+      body: JSON.stringify({
+        error: {
+          code: "server_error",
+          message: "Temporary reservation failure."
+        }
+      }),
+      contentType: "application/json",
+      status: 502
+    });
+  });
+
+  await login(page);
+  await page.locator(".period-card").first().locator(".period-button").click();
+  const confirmButton = page.locator(".confirm-dialog .primary-button");
+  await page.locator(".reservation-reason-form input").fill("조용한 자리에서 수행평가 준비");
+  const reservationPost = page.waitForResponse(
+    (response) => response.url().endsWith("/api/reservations") && response.request().method() === "POST"
+  );
+  await confirmButton.click();
+  await reservationPost;
+
+  await expect(page.getByText("Cloudflare", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".login-panel .sidebar-message")).toContainText("Temporary reservation failure.");
 });
 
 async function login(page: Page): Promise<void> {
@@ -124,7 +196,22 @@ async function routeMockCsrf(page: Page): Promise<void> {
 async function routeOpenPeriods(page: Page, onPeriodsGet: () => void): Promise<void> {
   await page.route("**/api/periods**", async (route) => {
     onPeriodsGet();
-    const date = new URL(route.request().url()).searchParams.get("date") ?? FIXED_THURSDAY_DATE;
+    const url = new URL(route.request().url());
+    const weekStart = url.searchParams.get("weekStart");
+    const date = url.searchParams.get("date") ?? FIXED_THURSDAY_DATE;
+    if (weekStart) {
+      await route.fulfill({
+        body: JSON.stringify({
+          dates: SCHOOL_WEEK_DATES.map((weekDate) => ({
+            date: weekDate,
+            periods: [buildMockWeekPeriod("EIGHTH"), buildMockWeekPeriod("FIRST")]
+          }))
+        }),
+        contentType: "application/json",
+        status: 200
+      });
+      return;
+    }
     await route.fulfill({
       body: JSON.stringify({
         periods: [buildMockPeriod(date, "EIGHTH", "8면학"), buildMockPeriod(date, "FIRST", "1면학")]
@@ -133,6 +220,19 @@ async function routeOpenPeriods(page: Page, onPeriodsGet: () => void): Promise<v
       status: 200
     });
   });
+}
+
+function buildMockWeekPeriod(studyPeriod: StudyPeriod): object {
+  return {
+    availability: 10,
+    capacity: 10,
+    closeTime: "23:59",
+    enabled: true,
+    myReservationId: null,
+    openTime: "00:00",
+    reservedCount: 0,
+    studyPeriod
+  };
 }
 
 function buildMockUser(): MockUser {

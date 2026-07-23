@@ -66,6 +66,7 @@ export async function GET(_request: Request, context: { readonly params: Promise
         restrictedUntil: user.restrictedUntil,
         restrictionReason: user.restrictionReason,
         role: user.role,
+        shadowBanProfile: user.shadowBanProfile,
         studentNumber: user.studentNumber,
         updatedAt: user.updatedAt
       },

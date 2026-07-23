@@ -62,6 +62,7 @@ test("admin student detail uses direct restriction reason and current reservatio
   await expect.poll(() => tracker.restrictionPayload).toEqual({
     days: null,
     reason: "직접 입력 사유",
+    shadowBanProfile: "NORMAL",
     status: "BANNED"
   });
 });

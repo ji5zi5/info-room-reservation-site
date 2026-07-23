@@ -24,6 +24,7 @@ const shadowBannedStudent: SessionUser = {
   restrictionReason: "블랙리스트",
   restrictedUntil: "2026-07-01T00:00:00.000Z",
   role: "STUDENT",
+  shadowBanProfile: "HIGH",
   studentNumber: "31001"
 };
 
@@ -43,15 +44,22 @@ describe("me route", () => {
 
     // Then
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     const payload: unknown = await response.json();
-    expect(payload).toMatchObject({
+    expect(payload).toEqual({
       user: {
         bookingStatus: "ACTIVE",
+        generation: 31,
+        id: "student-shadow",
+        name: "Student Shadow",
         restrictionReason: null,
-        restrictedUntil: null
+        restrictedUntil: null,
+        role: "STUDENT",
+        studentNumber: "31001"
       }
     });
     expect(JSON.stringify(payload)).not.toContain("SHADOW_BANNED");
+    expect(JSON.stringify(payload)).not.toContain("shadowBanProfile");
     expect(JSON.stringify(payload)).not.toContain("블랙리스트");
   });
 });

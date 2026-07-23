@@ -1,8 +1,14 @@
 import { z } from "zod";
 
 import type { PeriodSummary } from "@/components/reservation-period-card";
+import {
+  StudentPeriodSummarySchema,
+  StudentPeriodWeekPayloadSchema,
+  type StudentPeriodWeekPayload
+} from "@/lib/student-period-summary";
 import type { StudentNotification } from "@/lib/student-notifications";
 import type { StudentProfilePayload } from "@/lib/student-profile";
+import { PublicSessionUserSchema } from "@/lib/student-facing-session";
 import type { ReservationSidebarUser } from "./reservation-sidebar";
 
 type LoginPayload = {
@@ -29,38 +35,6 @@ const ErrorPayloadSchema = z.object({
       message: z.string()
     })
     .optional()
-});
-
-const ReservationSidebarUserSchema = z.object({
-  bookingStatus: z.string(),
-  generation: z.number(),
-  id: z.string(),
-  name: z.string(),
-  restrictionReason: z.string().nullable().default(null),
-  restrictedUntil: z.string().nullable(),
-  role: z.string(),
-  studentNumber: z.string()
-});
-
-const PeriodApplicantSchema = z.object({
-  name: z.string(),
-  reservationId: z.string(),
-  studentNumber: z.string()
-});
-
-const PeriodSummarySchema = z.object({
-  applicants: z.array(PeriodApplicantSchema),
-  capacity: z.number(),
-  closeTime: z.string(),
-  confirmedCount: z.number(),
-  date: z.string(),
-  enabled: z.boolean(),
-  label: z.string(),
-  myReservationId: z.string().nullable(),
-  openTime: z.string(),
-  remaining: z.number(),
-  studyPeriod: z.union([z.literal("EIGHTH"), z.literal("FIRST")]),
-  windowState: z.union([z.literal("closed"), z.literal("not_open_yet"), z.literal("open")])
 });
 
 const BookingStatusSchema = z.enum(["ACTIVE", "RESTRICTED", "BANNED", "SHADOW_BANNED"]);
@@ -115,16 +89,16 @@ const StudentNotificationsPayloadSchema = z.object({
 });
 
 const CurrentUserPayloadSchema = z.object({
-  user: ReservationSidebarUserSchema.nullable()
+  user: PublicSessionUserSchema.nullable()
 });
 
 const LoginPayloadSchema = z.object({
   error: ErrorPayloadSchema.shape.error,
-  user: ReservationSidebarUserSchema.optional()
+  user: PublicSessionUserSchema.optional()
 });
 
 const PeriodsPayloadSchema = z.object({
-  periods: z.array(PeriodSummarySchema)
+  periods: z.array(StudentPeriodSummarySchema)
 });
 
 export async function readApiErrorMessage(response: Response): Promise<string | null> {
@@ -170,6 +144,15 @@ export async function readPeriodSummaries(response: Response): Promise<readonly 
     return [];
   }
   return parsed.data.periods;
+}
+
+export async function readPeriodWeekPayload(response: Response): Promise<StudentPeriodWeekPayload | null> {
+  if (!response.ok) {
+    return null;
+  }
+  const payload = await readOptionalJson(response);
+  const parsed = StudentPeriodWeekPayloadSchema.safeParse(payload);
+  return parsed.success ? parsed.data : null;
 }
 
 export async function readStudentProfilePayload(response: Response): Promise<StudentProfilePayloadReadResult> {

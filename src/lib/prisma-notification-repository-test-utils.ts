@@ -15,6 +15,7 @@ type PeriodSettingWhere = {
 type NotificationDeliveryWhere = {
   readonly date?: StringFilter;
   readonly kind?: string;
+  readonly nextAttemptAt?: DateFilter;
   readonly OR?: readonly NotificationDeliveryWhere[];
   readonly status?: StringFilter;
   readonly studyPeriod?: StudyPeriod;
@@ -22,8 +23,10 @@ type NotificationDeliveryWhere = {
 };
 type NotificationDeliveryUpdateData = {
   readonly attempts?: { readonly increment: number };
+  readonly failureCode?: string | null;
   readonly lastError?: string | null;
   readonly messageIds?: string;
+  readonly nextAttemptAt?: Date | null;
   readonly sentAt?: Date | null;
   readonly status?: ClosedPeriodNotificationStatus;
 };
@@ -41,9 +44,11 @@ export type NotificationDeliveryRow = {
   readonly createdAt: Date;
   date: string;
   readonly id: string;
+  failureCode: string | null;
   kind: string;
   lastError: string | null;
   messageIds: string;
+  nextAttemptAt: Date | null;
   sentAt: Date | null;
   status: ClosedPeriodNotificationStatus;
   studyPeriod: StudyPeriod;
@@ -62,6 +67,7 @@ const prismaMocks = vi.hoisted(() => {
     periodSettingsStore.filter((setting) => matchesPeriodSettingWhere(setting, input.where))
   );
   const reservationFindMany = vi.fn(async () => reservationRows);
+  const reservationCount = vi.fn(async () => reservationRows.length);
   const notificationDeliveryFindMany = vi.fn(async (input: { readonly where?: NotificationDeliveryWhere }) =>
     notificationDeliveriesStore.filter((delivery) => matchesNotificationDeliveryWhere(delivery, input.where))
   );
@@ -72,14 +78,21 @@ const prismaMocks = vi.hoisted(() => {
       delivery.studyPeriod === input.where.date_studyPeriod_kind.studyPeriod
     ) ?? null
   );
-  const notificationDeliveryCreate = vi.fn(async (input: { readonly data: Omit<NotificationDeliveryRow, "createdAt" | "id" | "updatedAt"> }) => {
+  const notificationDeliveryCreate = vi.fn(async (input: {
+    readonly data: Omit<NotificationDeliveryRow, "createdAt" | "failureCode" | "id" | "nextAttemptAt" | "updatedAt"> & {
+      readonly failureCode?: string | null;
+      readonly nextAttemptAt?: Date | null;
+    };
+  }) => {
     if (notificationDeliveriesStore.some((delivery) => delivery.date === input.data.date && delivery.kind === input.data.kind && delivery.studyPeriod === input.data.studyPeriod)) {
       throw prismaKnownError("P2002");
     }
     const row = {
       ...input.data,
       createdAt: new Date("2026-06-12T07:25:00.000Z"),
+      failureCode: input.data.failureCode ?? null,
       id: `delivery-${notificationDeliveriesStore.length + 1}`,
+      nextAttemptAt: input.data.nextAttemptAt ?? null,
       updatedAt: new Date("2026-06-12T07:25:00.000Z")
     };
     notificationDeliveriesStore.push(row);
@@ -103,6 +116,7 @@ const prismaMocks = vi.hoisted(() => {
     periodSettingFindUnique,
     periodSettingsStore,
     reservationFindMany,
+    reservationCount,
     reservationRows,
     reset: () => {
       periodSettingsStore.length = 0;
@@ -111,6 +125,7 @@ const prismaMocks = vi.hoisted(() => {
       periodSettingFindMany.mockClear();
       periodSettingFindUnique.mockClear();
       reservationFindMany.mockClear();
+      reservationCount.mockClear();
       notificationDeliveryFindMany.mockClear();
       notificationDeliveryFindUnique.mockClear();
       notificationDeliveryCreate.mockClear();
@@ -134,6 +149,7 @@ vi.mock("./db", () => ({
       findUnique: prismaMocks.periodSettingFindUnique
     },
     reservation: {
+      count: prismaMocks.reservationCount,
       findMany: prismaMocks.reservationFindMany
     }
   }
@@ -168,9 +184,11 @@ export function delivery(input: {
     createdAt: input.updatedAt,
     date: input.date,
     id: `delivery-${input.date}-${input.studyPeriod}`,
+    failureCode: input.status === "FAILED" ? "previous_failure" : null,
     kind: CLOSED_LIST_NOTIFICATION_KIND,
     lastError: input.status === "FAILED" ? "previous failure" : null,
     messageIds: input.status === "SENT" ? "[\"sent-message\"]" : "[]",
+    nextAttemptAt: input.status === "FAILED" ? new Date("2026-06-12T07:23:00.000Z") : null,
     sentAt: input.status === "SENT" ? input.updatedAt : null,
     status: input.status,
     studyPeriod: input.studyPeriod,
@@ -202,6 +220,7 @@ function matchesNotificationDeliveryWhere(row: NotificationDeliveryRow, where: N
   return (
     matchesStringFilter(row.date, where.date) &&
     matchesStringFilter(row.kind, where.kind) &&
+    matchesDateFilter(row.nextAttemptAt, where.nextAttemptAt) &&
     matchesStringFilter(row.status, where.status) &&
     matchesStudyPeriodFilter(row.studyPeriod, where.studyPeriod) &&
     matchesDateFilter(row.updatedAt, where.updatedAt)
@@ -218,9 +237,12 @@ function matchesStringFilter(value: string, filter: StringFilter | undefined): b
   return !((filter.in && !filter.in.includes(value)) || (filter.lte && value > filter.lte) || (filter.gt && value <= filter.gt) || (filter.gte && value < filter.gte));
 }
 
-function matchesDateFilter(value: Date, filter: DateFilter | undefined): boolean {
+function matchesDateFilter(value: Date | null, filter: DateFilter | undefined): boolean {
   if (!filter) {
     return true;
+  }
+  if (value === null) {
+    return false;
   }
   if (filter instanceof Date) {
     return value.getTime() === filter.getTime();
@@ -237,11 +259,17 @@ function applyNotificationDeliveryUpdate(row: NotificationDeliveryRow, data: Not
     return;
   }
   row.attempts += data.attempts?.increment ?? 0;
+  if ("failureCode" in data) {
+    row.failureCode = data.failureCode ?? null;
+  }
   if ("lastError" in data) {
     row.lastError = data.lastError ?? null;
   }
   if (data.messageIds !== undefined) {
     row.messageIds = data.messageIds;
+  }
+  if ("nextAttemptAt" in data) {
+    row.nextAttemptAt = data.nextAttemptAt ?? null;
   }
   if ("sentAt" in data) {
     row.sentAt = data.sentAt ?? null;

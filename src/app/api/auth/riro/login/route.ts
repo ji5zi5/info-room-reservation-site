@@ -52,6 +52,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const response = NextResponse.json({ user: maskStudentFacingSessionUser(result.user) });
+    response.headers.set("Cache-Control", "no-store");
     setSessionCookie(response, result.token);
     return response;
   } catch (error) {

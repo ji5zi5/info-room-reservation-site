@@ -21,6 +21,7 @@ const activeUser = {
   restrictedUntil: null,
   restrictionReason: null,
   role: "STUDENT",
+  shadowBanProfile: "NORMAL",
   studentNumber: "31001"
 } satisfies AdminUser;
 
@@ -30,6 +31,7 @@ const shadowUser = {
   id: "shadow-user",
   name: "블랙학생",
   restrictionReason: "블랙리스트",
+  shadowBanProfile: "HIGH",
   studentNumber: "31002"
 } satisfies AdminUser;
 

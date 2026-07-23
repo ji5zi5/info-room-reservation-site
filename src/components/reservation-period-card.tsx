@@ -1,27 +1,9 @@
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 import type { ReactElement } from "react";
-import { useId, useState } from "react";
 
-export type PeriodApplicant = {
-  readonly name: string;
-  readonly reservationId: string;
-  readonly studentNumber: string;
-};
+import type { StudentPeriodSummary } from "@/lib/student-period-summary";
 
-export type PeriodSummary = {
-  readonly applicants: readonly PeriodApplicant[];
-  readonly capacity: number;
-  readonly closeTime: string;
-  readonly confirmedCount: number;
-  readonly date: string;
-  readonly enabled: boolean;
-  readonly label: string;
-  readonly myReservationId: string | null;
-  readonly openTime: string;
-  readonly remaining: number;
-  readonly studyPeriod: "EIGHTH" | "FIRST";
-  readonly windowState: "closed" | "not_open_yet" | "open";
-};
+export type PeriodSummary = StudentPeriodSummary;
 
 type ReservationPeriodCardProps = {
   readonly loading: boolean;
@@ -68,7 +50,6 @@ export function ReservationPeriodCard({
       <div className="meter">
         <span style={{ width: `${Math.round((period.confirmedCount / period.capacity) * 100)}%` }} />
       </div>
-      <ApplicantList applicants={period.applicants} period={period} />
       <div className="period-actions">
         <button
           className="period-button"
@@ -90,46 +71,5 @@ export function ReservationPeriodCard({
         ) : null}
       </div>
     </article>
-  );
-}
-
-function ApplicantList({
-  applicants,
-  period
-}: {
-  readonly applicants: readonly PeriodApplicant[];
-  readonly period: PeriodSummary;
-}): ReactElement {
-  const [applicantsOpen, setApplicantsOpen] = useState(false);
-  const generatedId = useId();
-  const contentId = `applicants-${period.date}-${period.studyPeriod}-${generatedId}`;
-
-  return (
-    <div className="applicant-list" data-open={applicantsOpen}>
-      <button
-        aria-controls={contentId}
-        aria-expanded={applicantsOpen}
-        className="applicant-toggle"
-        type="button"
-        onClick={() => setApplicantsOpen((open) => !open)}
-      >
-        <span>{applicantsOpen ? "신청자 접기" : `신청자 ${applicants.length}명 보기`}</span>
-        <ChevronDown aria-hidden="true" size={18} />
-      </button>
-      <div aria-hidden={!applicantsOpen} className="applicant-content" id={contentId}>
-        {applicants.length > 0 ? (
-          <ul>
-            {applicants.map((applicant) => (
-              <li key={applicant.reservationId}>
-                <strong>{applicant.name}</strong>
-                <span>{applicant.studentNumber}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted">아직 신청자 없음</p>
-        )}
-      </div>
-    </div>
   );
 }

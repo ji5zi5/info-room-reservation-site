@@ -47,7 +47,7 @@ describe("closed period notification service concurrency", () => {
     expect(repository.writes).toEqual([]);
   });
 
-  it("reclaims a stale in-progress delivery before sending", async () => {
+  it("leaves a stale in-progress delivery for explicit reconciliation", async () => {
     const repository = createMemoryNotificationRepository({
       delivery: sendingDelivery("2026-06-12T07:15:00.000Z"),
       period: testClosedPeriod
@@ -64,17 +64,9 @@ describe("closed period notification service concurrency", () => {
 
     const result = await service.sendClosedPeriod({ date: "2026-06-12", studyPeriod: "EIGHTH" });
 
-    expect(result.kind).toBe("sent");
-    expect(senderCallCount).toBe(1);
-    expect(repository.writes).toEqual([
-      expect.objectContaining({
-        date: "2026-06-12",
-        lastError: null,
-        messageIds: ["stale-retry-message"],
-        status: "SENT",
-        studyPeriod: "EIGHTH"
-      })
-    ]);
+    expect(result).toEqual({ kind: "skipped", reason: "needs_reconciliation" });
+    expect(senderCallCount).toBe(0);
+    expect(repository.writes).toEqual([]);
   });
 
   it("retries a failed delivery by claiming it before sending", async () => {
@@ -107,7 +99,37 @@ describe("closed period notification service concurrency", () => {
     ]);
   });
 
-  it("retries a sent delivery when force is true", async () => {
+  it("requires explicit reconciliation for a manual retry of a failed delivery", async () => {
+    const repository = createMemoryNotificationRepository({
+      delivery: {
+        date: "2026-06-12",
+        kind: "CLOSED_LIST",
+        status: "FAILED",
+        studyPeriod: "EIGHTH"
+      },
+      period: testClosedPeriod
+    });
+    let senderCallCount = 0;
+    const service = createClosedPeriodNotificationService({
+      now: new Date("2026-06-12T07:25:00.000Z"),
+      repository,
+      sender: async () => {
+        senderCallCount += 1;
+        return { messageIds: ["manual-retry-message"] };
+      }
+    });
+
+    const result = await service.sendClosedPeriod({
+      date: "2026-06-12",
+      manual: true,
+      studyPeriod: "EIGHTH"
+    });
+
+    expect(result).toEqual({ kind: "skipped", reason: "needs_reconciliation" });
+    expect(senderCallCount).toBe(0);
+  });
+
+  it("does not resend a terminal sent delivery when force is true", async () => {
     const repository = createMemoryNotificationRepository({
       delivery: { date: "2026-06-12", kind: "CLOSED_LIST", status: "SENT", studyPeriod: "EIGHTH" },
       period: testClosedPeriod
@@ -124,24 +146,21 @@ describe("closed period notification service concurrency", () => {
 
     const result = await service.sendClosedPeriod({ date: "2026-06-12", force: true, studyPeriod: "EIGHTH" });
 
-    expect(result.kind).toBe("sent");
-    expect(senderCallCount).toBe(1);
-    expect(repository.writes).toEqual([
-      expect.objectContaining({
-        date: "2026-06-12",
-        lastError: null,
-        messageIds: ["forced-message"],
-        status: "SENT",
-        studyPeriod: "EIGHTH"
-      })
-    ]);
+    expect(result).toEqual({ kind: "skipped", reason: "already_sent" });
+    expect(senderCallCount).toBe(0);
+    expect(repository.writes).toEqual([]);
   });
 
   it("does not overwrite a newer delivery when an old stale claim finishes late", async () => {
     const staleClaimTime = new Date("2026-06-12T07:25:00.000Z");
     const newerFinalTime = new Date("2026-06-12T07:26:00.000Z");
     const repository = createMemoryNotificationRepository({
-      delivery: sendingDelivery("2026-06-12T07:15:00.000Z"),
+      delivery: {
+        date: "2026-06-12",
+        kind: "CLOSED_LIST",
+        status: "FAILED",
+        studyPeriod: "EIGHTH"
+      },
       period: testClosedPeriod
     });
     const service = createClosedPeriodNotificationService({

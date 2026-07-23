@@ -43,6 +43,8 @@ describe("admin audit action helpers", () => {
   });
 
   it("classifies known admin action strings", () => {
+    expect(classifyAdminAuditAction("ADMIN_RESERVATION_CREATE")).toBe("RESERVATION");
+    expect(classifyAdminAuditAction("SHADOW_BAN_CHAOS_CANCEL")).toBe("RESERVATION");
     expect(classifyAdminAuditAction("USER_RESTRICTION_REMOVE")).toBe("RESTRICTION");
     expect(classifyAdminAuditAction("STUDENT_RESERVATION_CANCEL_RESTRICTION")).toBe("RESERVATION");
     expect(classifyAdminAuditAction("USER_SESSIONS_REVOKE")).toBe("SESSION");
@@ -51,6 +53,14 @@ describe("admin audit action helpers", () => {
     expect(classifyAdminAuditAction("CLOSED_LIST_NOTIFICATION_SEND")).toBe("NOTIFICATION");
     expect(classifyAdminAuditAction("NOTIFICATION_SETTINGS_PATCH")).toBe("NOTIFICATION");
     expect(classifyAdminAuditAction("SOMETHING_NEW")).toBe("OTHER");
+  });
+
+  it("labels manual admin reservation creation", () => {
+    expect(getAdminAuditActionLabel("ADMIN_RESERVATION_CREATE")).toBe("관리자 예약 추가");
+  });
+
+  it("labels shadow-ban chaos cancellations", () => {
+    expect(getAdminAuditActionLabel("SHADOW_BAN_CHAOS_CANCEL")).toBe("블랙리스트 자동 취소");
   });
 
   it("maps known admin action strings to Korean labels", () => {

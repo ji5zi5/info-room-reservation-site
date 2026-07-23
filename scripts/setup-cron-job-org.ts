@@ -5,17 +5,20 @@ import ky, { HTTPError } from "ky";
 import { z } from "zod";
 
 import {
-  CLOSED_PERIOD_CRON_TITLE,
   buildClosedPeriodCronJob,
+  buildMaintenanceCronJob,
   normalizeCronBaseUrl,
   type CronJobOrgPayload
 } from "../src/lib/cron-job-org-config";
 
 const EnvSchema = z.object({
+  CLOSED_PERIOD_CRON_JOB_ORG_JOB_ID: z.coerce.number().int().positive().optional(),
+  CLOSED_PERIOD_CRON_SECRET: z.string().min(24),
   CRON_JOB_ORG_API_KEY: z.string().min(1),
   CRON_JOB_ORG_JOB_ID: z.coerce.number().int().positive().optional(),
-  CRON_SECRET: z.string().min(1),
-  EXTERNAL_CRON_BASE_URL: z.string().url()
+  EXTERNAL_CRON_BASE_URL: z.string().url(),
+  MAINTENANCE_CRON_JOB_ORG_JOB_ID: z.coerce.number().int().positive().optional(),
+  MAINTENANCE_CRON_SECRET: z.string().min(24)
 });
 
 const JobSummarySchema = z.object({
@@ -44,21 +47,23 @@ type CronJobOrgClient = {
 async function main(): Promise<void> {
   loadLocalEnv();
   const env = EnvSchema.parse(process.env);
-  const payload = buildClosedPeriodCronJob({
-    baseUrl: env.EXTERNAL_CRON_BASE_URL,
-    cronSecret: env.CRON_SECRET
-  });
   const client = createCronJobOrgClient(env.CRON_JOB_ORG_API_KEY);
-  const existingJobId = env.CRON_JOB_ORG_JOB_ID ?? (await findMatchingJob(client, payload));
-
-  if (existingJobId) {
-    await client.updateJob(existingJobId, payload);
-    console.log(`Updated cron-job.org job ${existingJobId}: ${payload.url}`);
-    return;
-  }
-
-  const createdJobId = await client.createJob(payload);
-  console.log(`Created cron-job.org job ${createdJobId}: ${payload.url}`);
+  await upsertJob(
+    client,
+    buildClosedPeriodCronJob({
+      baseUrl: env.EXTERNAL_CRON_BASE_URL,
+      cronSecret: env.CLOSED_PERIOD_CRON_SECRET
+    }),
+    env.CLOSED_PERIOD_CRON_JOB_ORG_JOB_ID ?? env.CRON_JOB_ORG_JOB_ID
+  );
+  await upsertJob(
+    client,
+    buildMaintenanceCronJob({
+      baseUrl: env.EXTERNAL_CRON_BASE_URL,
+      cronSecret: env.MAINTENANCE_CRON_SECRET
+    }),
+    env.MAINTENANCE_CRON_JOB_ORG_JOB_ID
+  );
 }
 
 function loadLocalEnv(): void {
@@ -123,8 +128,23 @@ async function findMatchingJob(client: CronJobOrgClient, payload: CronJobOrgPayl
   const jobs = await client.listJobs();
   const normalizedTargetBaseUrl = normalizeCronBaseUrl(payload.url);
   return jobs.find(
-    (job) => job.title === CLOSED_PERIOD_CRON_TITLE && normalizeCronBaseUrl(job.url) === normalizedTargetBaseUrl
+    (job) => job.title === payload.title && normalizeCronBaseUrl(job.url) === normalizedTargetBaseUrl
   )?.jobId;
+}
+
+async function upsertJob(
+  client: CronJobOrgClient,
+  payload: CronJobOrgPayload,
+  configuredJobId: number | undefined
+): Promise<void> {
+  const existingJobId = configuredJobId ?? (await findMatchingJob(client, payload));
+  if (existingJobId) {
+    await client.updateJob(existingJobId, payload);
+    console.log(`Updated cron-job.org job ${existingJobId}: ${payload.url}`);
+    return;
+  }
+  const createdJobId = await client.createJob(payload);
+  console.log(`Created cron-job.org job ${createdJobId}: ${payload.url}`);
 }
 
 async function runCli(): Promise<void> {
@@ -141,7 +161,6 @@ async function runCli(): Promise<void> {
     }
     if (error instanceof HTTPError) {
       console.error(`cron-job.org API failed with HTTP ${error.response.status}`);
-      console.error(await error.response.text());
       process.exitCode = 1;
       return;
     }

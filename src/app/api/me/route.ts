@@ -5,5 +5,7 @@ import { maskStudentFacingSessionUser } from "@/lib/student-facing-session";
 
 export async function GET(): Promise<NextResponse> {
   const user = await getCurrentUser();
-  return NextResponse.json({ user: maskStudentFacingSessionUser(user) });
+  const response = NextResponse.json({ user: maskStudentFacingSessionUser(user) });
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }

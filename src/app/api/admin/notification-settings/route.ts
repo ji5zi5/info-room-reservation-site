@@ -18,11 +18,11 @@ import { requireAdmin, requireAdminSession, ForbiddenSessionError, UnauthorizedS
 const NotificationSettingsSchema = z.object({
   closedPeriodNotificationsEnabled: z.boolean(),
   reservationCreatedNotificationsEnabled: z.boolean()
-});
+}).strict();
 
 const NotificationSettingsPatchSchema = z.object({
   notificationSettings: NotificationSettingsSchema
-});
+}).strict();
 
 export async function GET(): Promise<NextResponse> {
   try {
@@ -40,7 +40,10 @@ export async function GET(): Promise<NextResponse> {
     });
     return NextResponse.json({ notificationSettings });
   } catch (error) {
-    return adminBoundaryError(error);
+    if (error instanceof UnauthorizedSessionError || error instanceof ForbiddenSessionError) {
+      return adminBoundaryError(error);
+    }
+    throw error;
   }
 }
 
@@ -114,16 +117,16 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 
     return NextResponse.json({ notificationSettings });
   } catch (error) {
-    return adminBoundaryError(error);
+    if (error instanceof UnauthorizedSessionError || error instanceof ForbiddenSessionError) {
+      return adminBoundaryError(error);
+    }
+    throw error;
   }
 }
 
-function adminBoundaryError(error: unknown): NextResponse {
+function adminBoundaryError(error: UnauthorizedSessionError | ForbiddenSessionError): NextResponse {
   if (error instanceof UnauthorizedSessionError) {
     return jsonError(401, "unauthorized", error.message);
   }
-  if (error instanceof ForbiddenSessionError) {
-    return jsonError(403, "forbidden", error.message);
-  }
-  throw error;
+  return jsonError(403, "forbidden", error.message);
 }

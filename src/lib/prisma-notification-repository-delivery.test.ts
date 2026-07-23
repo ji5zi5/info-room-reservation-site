@@ -14,8 +14,10 @@ describe("Prisma closed-period notification delivery claims", () => {
     const write = {
       claimUpdatedAt: new Date("2026-06-12T07:21:00.000Z"),
       date: "2026-06-12",
+      failureCode: null,
       lastError: null,
       messageIds: ["123"],
+      nextAttemptAt: null,
       status: "SENT",
       studyPeriod: "EIGHTH"
     } satisfies ClosedPeriodNotificationDeliveryWrite;
@@ -55,7 +57,7 @@ describe("Prisma closed-period notification delivery claims", () => {
     expect(claim).toBeNull();
   });
 
-  it("claims failed and stale sending deliveries but not sent deliveries unless forced", async () => {
+  it("claims failed deliveries but leaves stale sending and sent deliveries unresolved", async () => {
     prismaMocks.notificationDeliveriesStore.push(
       delivery({
         date: "2026-06-10",
@@ -90,7 +92,7 @@ describe("Prisma closed-period notification delivery claims", () => {
         staleSendingBefore: new Date("2026-06-12T07:15:00.000Z"),
         studyPeriod: "FIRST"
       })
-    ).resolves.toMatchObject({ date: "2026-06-11", status: "SENDING" });
+    ).resolves.toBeNull();
     await expect(
       prismaClosedPeriodNotificationRepository.claimDelivery({
         date: "2026-06-12",
@@ -105,7 +107,7 @@ describe("Prisma closed-period notification delivery claims", () => {
         staleSendingBefore: new Date("2026-06-12T07:15:00.000Z"),
         studyPeriod: "EIGHTH"
       })
-    ).resolves.toMatchObject({ date: "2026-06-12", status: "SENDING" });
+    ).resolves.toBeNull();
   });
 
   it("saves a delivery when the sending-row compare-and-swap matches", async () => {
@@ -117,8 +119,10 @@ describe("Prisma closed-period notification delivery claims", () => {
     const deliveryRecord = await prismaClosedPeriodNotificationRepository.saveDelivery({
       claimUpdatedAt: claimTime,
       date: "2026-06-12",
+      failureCode: null,
       lastError: null,
       messageIds: ["123"],
+      nextAttemptAt: null,
       status: "SENT",
       studyPeriod: "EIGHTH"
     });
@@ -130,5 +134,86 @@ describe("Prisma closed-period notification delivery claims", () => {
       studyPeriod: "EIGHTH"
     });
     expect(prismaMocks.notificationDeliveryFindUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it("claims an unresolved delivery exactly once for explicit reconciliation", async () => {
+    prismaMocks.notificationDeliveriesStore.push(
+      delivery({
+        date: "2026-06-12",
+        status: "UNKNOWN",
+        studyPeriod: "EIGHTH",
+        updatedAt: new Date("2026-06-12T07:20:00.000Z")
+      })
+    );
+
+    await expect(
+      prismaClosedPeriodNotificationRepository.claimDeliveryForReconciliation({
+        date: "2026-06-12",
+        studyPeriod: "EIGHTH"
+      })
+    ).resolves.toMatchObject({
+      delivery: { status: "SENDING" },
+      previousStatus: "UNKNOWN"
+    });
+    await expect(
+      prismaClosedPeriodNotificationRepository.claimDeliveryForReconciliation({
+        date: "2026-06-12",
+        studyPeriod: "EIGHTH"
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("confirms only an unknown delivery as sent", async () => {
+    prismaMocks.notificationDeliveriesStore.push(
+      delivery({
+        date: "2026-06-12",
+        status: "UNKNOWN",
+        studyPeriod: "EIGHTH",
+        updatedAt: new Date("2026-06-12T07:20:00.000Z")
+      })
+    );
+
+    await expect(
+      prismaClosedPeriodNotificationRepository.resolveDelivery({
+        action: "confirm_sent",
+        date: "2026-06-12",
+        now: new Date("2026-06-12T07:25:00.000Z"),
+        studyPeriod: "EIGHTH"
+      })
+    ).resolves.toMatchObject({
+      delivery: { status: "SENT" },
+      previousStatus: "UNKNOWN"
+    });
+    await expect(
+      prismaClosedPeriodNotificationRepository.resolveDelivery({
+        action: "confirm_sent",
+        date: "2026-06-12",
+        now: new Date("2026-06-12T07:25:01.000Z"),
+        studyPeriod: "EIGHTH"
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("abandons a prior delivery that requires operator review", async () => {
+    prismaMocks.notificationDeliveriesStore.push(
+      delivery({
+        date: "2026-06-11",
+        status: "PENDING_REVIEW",
+        studyPeriod: "FIRST",
+        updatedAt: new Date("2026-06-12T07:20:00.000Z")
+      })
+    );
+
+    await expect(
+      prismaClosedPeriodNotificationRepository.resolveDelivery({
+        action: "abandon",
+        date: "2026-06-11",
+        now: new Date("2026-06-12T07:25:00.000Z"),
+        studyPeriod: "FIRST"
+      })
+    ).resolves.toMatchObject({
+      delivery: { status: "ABANDONED" },
+      previousStatus: "PENDING_REVIEW"
+    });
   });
 });

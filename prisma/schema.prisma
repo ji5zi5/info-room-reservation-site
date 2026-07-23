@@ -16,8 +16,11 @@ model User {
   generation        Int
   role              String        @default("STUDENT")
   bookingStatus     String        @default("ACTIVE")
+  shadowBanProfile  String        @default("NORMAL")
   restrictionReason String?
   restrictedUntil   DateTime?
+  departedAt        DateTime?
+  anonymizedAt      DateTime?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
   reservations      Reservation[]
@@ -28,6 +31,8 @@ model User {
   sanctionsRevoked  UserSanction[] @relation("SanctionRevoker")
   adminActionsAuthored AdminAction[] @relation("AdminActionActor")
   adminActionsTargeted AdminAction[] @relation("AdminActionTarget")
+
+  @@index([departedAt, anonymizedAt])
 }
 
 model Session {
@@ -71,9 +76,11 @@ model NotificationDelivery {
   studyPeriod String
   kind        String
   status      String
+  failureCode String?
   messageIds  String   @default("[]")
   attempts    Int      @default(0)
   lastError   String?
+  nextAttemptAt DateTime?
   sentAt      DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -82,12 +89,46 @@ model NotificationDelivery {
   @@index([date, status])
 }
 
+model OperationalJob {
+  job                 String   @id
+  status              String
+  startedAt           DateTime
+  finishedAt          DateTime?
+  lastSuccessAt       DateTime?
+  lastAttemptAt       DateTime
+  result              String?
+  durationMs          Int?
+  failureCode         String?
+  oldestBacklogAt     DateTime?
+  backlogCount        Int      @default(0)
+  consecutiveFailures Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([status, lastAttemptAt])
+}
+
 model NotificationSetting {
   id                                      String   @id
   closedPeriodNotificationsEnabled       Boolean  @default(true)
   reservationCreatedNotificationsEnabled Boolean  @default(false)
   createdAt                               DateTime @default(now())
   updatedAt                               DateTime @updatedAt
+}
+
+model RetentionPolicy {
+  id                       String   @id
+  enabled                  Boolean  @default(false)
+  policyVersion            String   @default("unapproved")
+  reservationReasonDays    Int?
+  adminDetailDays          Int?
+  sanctionReasonDays       Int?
+  auditDetailDays          Int?
+  departedUserIdentityDays Int?
+  approvedBy               String?
+  approvedAt               DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 }
 
 model RateLimitBucket {

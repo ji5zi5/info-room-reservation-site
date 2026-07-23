@@ -14,25 +14,19 @@ const reservation = {
   userId: "student-1"
 } satisfies Reservation;
 
-const user = {
-  name: "엄지오",
-  studentNumber: "31001"
-};
-
 describe("reservation-created Discord notifications", () => {
-  it("builds a payload without mentions or internal reservation ids", () => {
-    const payload = buildReservationCreatedDiscordPayload({
+  it("builds a payload without student identity or free-text reason", () => {
+    const payloadInput = {
       date: reservation.date,
-      reason: reservation.reason,
-      studentName: user.name,
-      studentNumber: user.studentNumber,
+      reservationId: reservation.id,
       studyPeriod: reservation.studyPeriod
-    });
+    } as const;
+    const payload = buildReservationCreatedDiscordPayload(payloadInput);
+    const serialized = JSON.stringify(payload);
 
     expect(payload.allowed_mentions).toEqual({ parse: [] });
-    expect(JSON.stringify(payload)).toContain(user.studentNumber);
-    expect(JSON.stringify(payload)).toContain("과제");
-    expect(JSON.stringify(payload)).not.toContain(reservation.id);
+    expect(serialized).toContain(reservation.id);
+    expect(serialized).not.toContain("과제");
   });
 
   it("skips when reservation-created notifications are disabled", async () => {
@@ -43,7 +37,6 @@ describe("reservation-created Discord notifications", () => {
         notificationSettings: defaultNotificationSettings(),
         reservation,
         sender,
-        user,
         webhookUrl: "https://discord.com/api/webhooks/1/token"
       })
     ).resolves.toEqual({ kind: "skipped", reason: "disabled" });
@@ -63,7 +56,6 @@ describe("reservation-created Discord notifications", () => {
         },
         reservation,
         sender,
-        user,
         webhookUrl: "https://discord.com/api/webhooks/1/token"
       })
     ).resolves.toEqual({

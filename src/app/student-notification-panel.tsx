@@ -100,7 +100,11 @@ function useStudentNotificationState(user: ReservationSidebarUser | null): Stude
     }
 
     void refreshNotifications();
-    const intervalId = window.setInterval(() => void refreshNotifications(), STUDENT_NOTIFICATION_REFRESH_INTERVAL_MS);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshNotifications();
+      }
+    }, STUDENT_NOTIFICATION_REFRESH_INTERVAL_MS);
     const refreshOnVisible = (): void => {
       if (document.visibilityState === "visible") {
         void refreshNotifications();

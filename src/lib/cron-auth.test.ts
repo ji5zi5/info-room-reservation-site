@@ -10,7 +10,7 @@ describe("cron authorization", () => {
     expect(isAuthorizedCronRequest(null, "cron-secret")).toBe(false);
   });
 
-  it("rejects when CRON_SECRET is missing", () => {
+  it("rejects when the endpoint-specific cron secret is missing", () => {
     expect(isAuthorizedCronRequest("Bearer anything", undefined)).toBe(false);
   });
 });

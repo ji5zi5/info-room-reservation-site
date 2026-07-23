@@ -27,20 +27,59 @@ export async function mockClientDate(page: Page, fixedIso = e2eNow()): Promise<v
 }
 
 export async function mockOpenPeriodsForDates(page: Page, ...dates: readonly string[]): Promise<void> {
-  for (const date of dates) {
-    await page.route(`**/api/periods?date=${date}`, async (route) => {
+  await page.route("**/api/periods**", async (route) => {
+    const url = new URL(route.request().url());
+    const weekStart = url.searchParams.get("weekStart");
+    if (weekStart) {
       await route.fulfill({
         body: JSON.stringify({
-          periods: [
-            buildMockPeriod(date, "EIGHTH", "8면학"),
-            buildMockPeriod(date, "FIRST", "1면학")
-          ]
+          dates: schoolWeekDates(weekStart).map((date) => ({
+            date,
+            periods: [buildMockWeekPeriod("EIGHTH"), buildMockWeekPeriod("FIRST")]
+          }))
         }),
         contentType: "application/json",
         status: 200
       });
+      return;
+    }
+    const date = url.searchParams.get("date");
+    if (!date || !dates.includes(date)) {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      body: JSON.stringify({
+        date,
+        periods: [
+          buildMockPeriod(date, "EIGHTH", "8면학"),
+          buildMockPeriod(date, "FIRST", "1면학")
+        ]
+      }),
+      contentType: "application/json",
+      status: 200
     });
-  }
+  });
+}
+
+function schoolWeekDates(weekStart: string): readonly string[] {
+  const start = new Date(`${weekStart}T00:00:00.000Z`).valueOf();
+  return Array.from({ length: 5 }, (_, index) =>
+    new Date(start + index * 86_400_000).toISOString().slice(0, 10)
+  );
+}
+
+function buildMockWeekPeriod(studyPeriod: "EIGHTH" | "FIRST"): object {
+  return {
+    availability: 10,
+    capacity: 10,
+    closeTime: "23:59",
+    enabled: true,
+    myReservationId: null,
+    openTime: "00:00",
+    reservedCount: 0,
+    studyPeriod
+  };
 }
 
 function buildMockPeriod(date: string, studyPeriod: "EIGHTH" | "FIRST", label: string): object {

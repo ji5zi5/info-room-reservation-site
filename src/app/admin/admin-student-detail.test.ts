@@ -9,6 +9,7 @@ import type { AdminUserDetail } from "./admin-types";
 const restrictionDraft = {
   days: "7",
   reason: "",
+  shadowBanProfile: "NORMAL",
   status: "RESTRICTED"
 } satisfies UserRestrictionDraft;
 
@@ -30,6 +31,7 @@ const detail = {
     restrictedUntil: null,
     restrictionReason: null,
     role: "STUDENT",
+    shadowBanProfile: "NORMAL",
     studentNumber: "25001",
     updatedAt: "2026-06-16T00:00:00.000Z"
   }

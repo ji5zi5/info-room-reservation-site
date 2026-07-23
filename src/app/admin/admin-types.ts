@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AdminReservationSchema, AdminUserSchema } from "@/lib/admin-api-dto";
 import {
   ADMIN_RESERVATION_PERIOD_FILTERS,
   ADMIN_RESERVATION_STATUS_FILTERS,
@@ -11,6 +12,20 @@ import { ADMIN_USER_STATUS_FILTERS, type AdminUserStatusFilter } from "@/lib/adm
 
 const StudyPeriodSchema = z.union([z.literal("EIGHTH"), z.literal("FIRST")]);
 const PeriodWindowStateSchema = z.union([z.literal("not_open_yet"), z.literal("open"), z.literal("closed")]);
+const ClosedPeriodNotificationStatusSchema = z.union([
+  z.literal("ABANDONED"),
+  z.literal("FAILED"),
+  z.literal("PENDING"),
+  z.literal("PENDING_REVIEW"),
+  z.literal("SENDING"),
+  z.literal("SENT"),
+  z.literal("UNKNOWN")
+]);
+const ReconciliationStatusSchema = z.union([
+  z.literal("FAILED"),
+  z.literal("PENDING_REVIEW"),
+  z.literal("UNKNOWN")
+]);
 
 export const AdminPeriodSettingSchema = z.object({
   capacity: z.number(),
@@ -33,12 +48,27 @@ export const AdminNotificationSettingsSchema = z.object({
 
 const AdminDashboardNotificationSchema = z.object({
   attempts: z.number(),
+  failureCode: z.string().nullable().optional(),
   lastError: z.string().nullable(),
   messageIds: z.array(z.string()),
+  nextAttemptAt: z.string().nullable().optional(),
   sentAt: z.string().nullable(),
-  status: z.union([z.literal("FAILED"), z.literal("SENDING"), z.literal("SENT")]),
+  status: ClosedPeriodNotificationStatusSchema,
   updatedAt: z.string()
 });
+
+export const AdminNotificationBacklogItemSchema = z
+  .object({
+    attempts: z.number(),
+    date: z.string(),
+    failureCode: z.string().nullable(),
+    lastError: z.string().nullable(),
+    nextAttemptAt: z.string().nullable(),
+    status: ReconciliationStatusSchema,
+    studyPeriod: StudyPeriodSchema,
+    updatedAt: z.string()
+  })
+  .strict();
 
 export const AdminDashboardPeriodSchema = AdminPeriodSettingSchema.extend({
   applicants: z.array(
@@ -52,38 +82,18 @@ export const AdminDashboardPeriodSchema = AdminPeriodSettingSchema.extend({
   notification: AdminDashboardNotificationSchema.nullable()
 });
 
-export const AdminReservationSchema = z.object({
-  createdAt: z.string(),
-  date: z.string(),
-  id: z.string(),
-  reason: z.string().nullable(),
-  status: z.string(),
-  studyPeriod: z.string(),
-  user: z.object({
-    bookingStatus: z.string(),
-    id: z.string(),
-    name: z.string(),
-    role: z.string(),
-    studentNumber: z.string()
-  })
-});
-
-export const AdminUserSchema = z.object({
-  bookingStatus: z.string(),
-  generation: z.number(),
-  id: z.string(),
-  name: z.string(),
-  restrictedUntil: z.string().nullable(),
-  restrictionReason: z.string().nullable(),
-  role: z.string(),
-  studentNumber: z.string()
-});
+export { AdminReservationSchema, AdminUserSchema } from "@/lib/admin-api-dto";
 
 export const AdminSettingsPayloadSchema = z.object({ periods: z.array(AdminPeriodSettingSchema) });
 export const AdminNotificationSettingsPayloadSchema = z.object({
   notificationSettings: AdminNotificationSettingsSchema
 });
-export const AdminDashboardPayloadSchema = z.object({ periods: z.array(AdminDashboardPeriodSchema) });
+export const AdminDashboardPayloadSchema = z
+  .object({
+    notificationBacklog: z.array(AdminNotificationBacklogItemSchema),
+    periods: z.array(AdminDashboardPeriodSchema)
+  })
+  .strict();
 export const AdminReservationsPayloadSchema = z.object({ reservations: z.array(AdminReservationSchema) });
 export const AdminUsersPayloadSchema = z.object({ users: z.array(AdminUserSchema) });
 
@@ -241,8 +251,11 @@ export const AdminUserDetailSchema = z.object({
 });
 
 export type AdminDashboardPeriod = z.infer<typeof AdminDashboardPeriodSchema>;
+export type AdminDashboardPayload = z.infer<typeof AdminDashboardPayloadSchema>;
+export type AdminNotificationBacklogItem = z.infer<typeof AdminNotificationBacklogItemSchema>;
+export type AdminNotificationReconciliationAction = "abandon" | "confirm_sent" | "retry";
 export type AdminAuditAction = z.infer<typeof AdminAuditActionSchema>;
-export type AdminNotificationSettings = z.infer<typeof AdminNotificationSettingsSchema>;
+export type AdminNotificationSettings = z.input<typeof AdminNotificationSettingsSchema>;
 export type AdminPeriodSetting = z.infer<typeof AdminPeriodSettingSchema>;
 export type AdminReservation = z.infer<typeof AdminReservationSchema>;
 export type AdminStatistics = z.infer<typeof AdminStatisticsSchema>;

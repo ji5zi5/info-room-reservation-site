@@ -85,7 +85,7 @@ test("non-admin users are redirected away from admin page", async ({ page }) => 
   await expect(page.getByText("관리자 권한이 필요합니다.")).toBeVisible();
 });
 
-test("reserved periods show a cancel action and refresh applicants after cancel", async ({ page }) => {
+test("reserved periods show a cancel action and refresh after cancel", async ({ page }) => {
   const date = todayKst();
   await login(page, "admin");
   const originalPeriods = await fetchPeriodSettings(page, date);
@@ -105,8 +105,9 @@ test("reserved periods show a cancel action and refresh applicants after cancel"
   try {
     const loginId = `cancel-${Date.now()}`;
     await login(page, loginId);
-    await expect(page.getByText("신청 후 미참석 시 정보실 예약이 영구 제한됩니다.")).toBeVisible();
-    await expect(page.getByText("예약 취소 시 3일간 예약이 제한됩니다.")).toBeVisible();
+    const reservationRules = page.getByRole("region", { name: "예약 규칙" });
+    await expect(reservationRules).toContainText("미참석 시 영구 제한");
+    await expect(reservationRules).toContainText("취소 시 3일 제한");
     const eighthCard = page.locator(".period-card").filter({ hasText: "8면학" }).first();
     await eighthCard.getByRole("button", { name: "8면학 예약" }).click();
     await expect(page.getByRole("dialog", { name: "8면학 예약할까요?" })).toBeVisible();
@@ -119,9 +120,6 @@ test("reserved periods show a cancel action and refresh applicants after cancel"
     await expect(eighthCard.getByRole("button", { name: "예약됨" })).toBeVisible();
     await expect(eighthCard.getByRole("button", { name: "예약 취소" })).toBeVisible();
     await expect(page.getByText(`${date} · 8면학 · 확정`)).toBeVisible();
-
-    await eighthCard.getByRole("button", { name: /신청자 \d+명 보기/u }).click();
-    await expect(eighthCard.getByText(loginId.replace(/\D/gu, "").slice(-5))).toBeVisible();
 
     await eighthCard.getByRole("button", { name: "예약 취소" }).click();
     await expect(page.getByRole("dialog", { name: "예약을 취소할까요?" })).toBeVisible();

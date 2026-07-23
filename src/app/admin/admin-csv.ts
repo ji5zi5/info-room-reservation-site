@@ -1,5 +1,7 @@
 import type { AdminAuditAction, AdminReservation, AdminStatistics } from "./admin-types";
 
+const SPREADSHEET_FORMULA_PREFIX = /^[=+\-@\t\r\n＝＋－＠]/u;
+
 export function buildReservationCsv(reservations: readonly AdminReservation[]): string {
   const rows = reservations.map((reservation) => [
     reservation.date,
@@ -107,10 +109,12 @@ function periodLabel(studyPeriod: string): string {
 }
 
 function escapeCsvCell(value: string): string {
-  if (!/[",\n]/u.test(value)) {
+  const formulaPrefix = SPREADSHEET_FORMULA_PREFIX.test(value);
+  if (!formulaPrefix && !/[",\t\r\n]/u.test(value)) {
     return value;
   }
-  return `"${value.replace(/"/gu, '""')}"`;
+  const safeValue = formulaPrefix ? `'${value}` : value;
+  return `"${safeValue.replace(/"/gu, '""')}"`;
 }
 
 function numberCell(value: number): string {

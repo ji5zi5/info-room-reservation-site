@@ -120,7 +120,7 @@ test("left panel collapses and expands", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "정보실 예약" })).toBeVisible();
 });
 
-test("period cards show confirmed applicants", async ({ page }) => {
+test("period cards do not disclose confirmed applicant identity", async ({ page }) => {
   const date = todayKst();
   const studentNumber = String(Math.floor(10_000 + Math.random() * 90_000));
   let reservationId: string | undefined;
@@ -159,16 +159,8 @@ test("period cards show confirmed applicants", async ({ page }) => {
     }
 
     await expect(page.getByText("예약이 확정되었습니다.")).toBeVisible();
-    const applicantToggle = eighthCard.getByRole("button", { name: /신청자 \d+명 보기/u });
-    await expect(applicantToggle).toBeVisible();
-    await expect(eighthCard.getByText(studentNumber)).toBeHidden();
-
-    await applicantToggle.click();
-    await expect(eighthCard.getByRole("button", { name: "신청자 접기" })).toBeVisible();
-    await expect(eighthCard.getByText(studentNumber)).toBeVisible();
-
-    await eighthCard.getByRole("button", { name: "신청자 접기" }).click();
-    await expect(eighthCard.getByText(studentNumber)).toBeHidden();
+    await expect(eighthCard.getByRole("button", { name: /신청자/u })).toHaveCount(0);
+    await expect(eighthCard.getByText(studentNumber)).toHaveCount(0);
   } finally {
     if (reservationId) {
       await csrfRequest(page, `/api/reservations/${reservationId}`, { method: "DELETE" });
@@ -179,21 +171,22 @@ test("period cards show confirmed applicants", async ({ page }) => {
   }
 });
 
-test("applicant toggle preserves period order and tab dimensions", async ({ page }) => {
+test("switching reservation modes preserves period order and tab dimensions", async ({ page }) => {
   await login(page, "mock-applicant-order");
 
   const todayTab = page.getByRole("button", { name: "당일예약" });
   const advanceTab = page.getByRole("button", { name: "사전예약" });
-  const todayBefore = await visibleBox(todayTab, "today tab before applicant toggle");
-  const advanceBefore = await visibleBox(advanceTab, "advance tab before applicant toggle");
+  const todayBefore = await visibleBox(todayTab, "today tab before mode switch");
+  const advanceBefore = await visibleBox(advanceTab, "advance tab before mode switch");
   const periodBadges = page.locator(".period-badge");
   await expect(periodBadges.nth(0)).toHaveText("8면학");
   await expect(periodBadges.nth(1)).toHaveText("1면학");
 
-  await page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: /신청자 .* 보기/u }).click();
+  await advanceTab.click();
+  await todayTab.click();
 
-  const todayAfter = await visibleBox(todayTab, "today tab after applicant toggle");
-  const advanceAfter = await visibleBox(advanceTab, "advance tab after applicant toggle");
+  const todayAfter = await visibleBox(todayTab, "today tab after mode switch");
+  const advanceAfter = await visibleBox(advanceTab, "advance tab after mode switch");
   expect(Math.round(todayAfter.width)).toBe(Math.round(todayBefore.width));
   expect(Math.round(todayAfter.height)).toBe(Math.round(todayBefore.height));
   expect(Math.round(advanceAfter.width)).toBe(Math.round(advanceBefore.width));

@@ -154,7 +154,8 @@ describe("reservation service", () => {
       })
     } satisfies ReservationStore;
     const store = {
-      transaction: async <T>(operation: (store: ReservationStore) => Promise<T>) => operation(innerStore)
+      transaction: async <T>(_lockKeys: readonly string[], operation: (store: ReservationStore) => Promise<T>) =>
+        operation(innerStore)
     } satisfies TransactionalReservationStore;
 
     await expect(

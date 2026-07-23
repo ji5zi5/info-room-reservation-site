@@ -1,4 +1,4 @@
-import type { CsrfTokenRecord, CsrfTokenStore } from "./csrf";
+import { MAX_CSRF_TOKENS_PER_SESSION, type CsrfTokenRecord, type CsrfTokenStore } from "./csrf";
 import { isNoDatabaseMockMode } from "./mock-dev-mode";
 import { prismaCsrfTokenStore } from "./prisma-csrf-store";
 
@@ -11,6 +11,12 @@ const mockCsrfTokenRecords = getMockCsrfTokenRecords();
 const noDatabaseMockCsrfTokenStore: CsrfTokenStore = {
   async create(record: CsrfTokenRecord): Promise<void> {
     mockCsrfTokenRecords.set(record.tokenHash, copyCsrfTokenRecord(record));
+    const sessionTokenHashes = [...mockCsrfTokenRecords.entries()]
+      .filter(([, candidate]) => candidate.sessionId === record.sessionId)
+      .map(([tokenHash]) => tokenHash);
+    for (const tokenHash of sessionTokenHashes.slice(0, -MAX_CSRF_TOKENS_PER_SESSION)) {
+      mockCsrfTokenRecords.delete(tokenHash);
+    }
   },
 
   async findByHash(tokenHash: string): Promise<CsrfTokenRecord | null> {

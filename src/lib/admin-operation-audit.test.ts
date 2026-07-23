@@ -92,7 +92,7 @@ describe("admin operation audit builders", () => {
     expect(JSON.parse(failed.after)).toMatchObject({ kind: "failed", lastError: "webhook down", status: "FAILED" });
   });
 
-  it("builds notification settings patch admin actions with before and after booleans", () => {
+  it("builds notification settings patch admin actions with before and after snapshots", () => {
     const action = buildNotificationSettingsPatchAdminAction({
       actorId: "admin-1",
       after: {

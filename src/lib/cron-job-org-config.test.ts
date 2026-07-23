@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildClosedPeriodCronJob, normalizeCronBaseUrl } from "./cron-job-org-config";
+import {
+  buildClosedPeriodCronJob,
+  buildMaintenanceCronJob,
+  normalizeCronBaseUrl
+} from "./cron-job-org-config";
 
 describe("cron-job.org config", () => {
   it("builds a one-minute closed-period notification job with the cron secret header", () => {
@@ -38,5 +42,29 @@ describe("cron-job.org config", () => {
 
   it("normalizes a production base URL without leaking path segments into the cron target", () => {
     expect(normalizeCronBaseUrl("https://example.com/admin?tab=settings")).toBe("https://example.com");
+  });
+
+  it("builds a distinct daily maintenance job with its own secret", () => {
+    const job = buildMaintenanceCronJob({
+      baseUrl: "https://info-room-reservation-site.vercel.app/",
+      cronSecret: "maintenance-secret"
+    });
+
+    expect(job).toMatchObject({
+      enabled: true,
+      schedule: {
+        hours: [4],
+        mdays: [-1],
+        minutes: [0],
+        months: [-1],
+        timezone: "Asia/Seoul",
+        wdays: [-1]
+      },
+      title: "Info Room maintenance",
+      url: "https://info-room-reservation-site.vercel.app/api/cron/maintenance"
+    });
+    expect(job.extendedData.headers).toEqual({
+      Authorization: "Bearer maintenance-secret"
+    });
   });
 });

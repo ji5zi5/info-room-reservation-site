@@ -1,5 +1,9 @@
 import { STUDY_PERIODS, type StudyPeriod } from "./study-periods";
 import type { NotificationSettings } from "./notification-settings";
+import type {
+  ClosedPeriodNotificationReconciliationAction,
+  ReconcileClosedPeriodResult
+} from "./closed-period-notification-service";
 
 export type PeriodSettingsAuditRow = {
   readonly capacity: number;
@@ -10,7 +14,11 @@ export type PeriodSettingsAuditRow = {
 };
 
 export type AdminOperationActionData = {
-  readonly action: "CLOSED_LIST_NOTIFICATION_SEND" | "NOTIFICATION_SETTINGS_PATCH" | "PERIOD_SETTINGS_PATCH";
+  readonly action:
+    | "CLOSED_LIST_NOTIFICATION_RECONCILE"
+    | "CLOSED_LIST_NOTIFICATION_SEND"
+    | "NOTIFICATION_SETTINGS_PATCH"
+    | "PERIOD_SETTINGS_PATCH";
   readonly actorId: string;
   readonly after: string;
   readonly before: string | null;
@@ -22,10 +30,12 @@ type ClosedListNotificationAuditResult = {
   readonly delivery: {
     readonly lastError?: string | null;
     readonly messageIds?: readonly string[];
-    readonly status: "FAILED" | "SENT";
+    readonly status: "FAILED" | "SENT" | "UNKNOWN";
   };
-  readonly kind: "failed" | "sent";
+  readonly kind: "failed" | "sent" | "unknown";
 };
+
+type SuccessfulClosedListReconciliation = Exclude<ReconcileClosedPeriodResult, { readonly kind: "conflict" }>;
 
 type NotificationSettingsAuditSnapshot = {
   readonly closedPeriodNotificationsEnabled: boolean;
@@ -75,6 +85,34 @@ export function buildClosedListNotificationAdminAction(input: {
   };
 }
 
+export function buildClosedListNotificationReconciliationAdminAction(input: {
+  readonly actorId: string;
+  readonly date: string;
+  readonly ipHash: string;
+  readonly operation: ClosedPeriodNotificationReconciliationAction;
+  readonly result: SuccessfulClosedListReconciliation;
+  readonly studyPeriod: StudyPeriod;
+}): AdminOperationActionData {
+  return {
+    action: "CLOSED_LIST_NOTIFICATION_RECONCILE",
+    actorId: input.actorId,
+    after: JSON.stringify({
+      date: input.date,
+      kind: input.result.kind,
+      operation: input.operation,
+      status: input.result.delivery.status,
+      studyPeriod: input.studyPeriod
+    }),
+    before: JSON.stringify({
+      date: input.date,
+      status: input.result.previousStatus,
+      studyPeriod: input.studyPeriod
+    }),
+    ipHash: input.ipHash,
+    reason: reconciliationReason(input.operation)
+  };
+}
+
 export function buildNotificationSettingsPatchAdminAction(input: {
   readonly actorId: string;
   readonly after: NotificationSettings;
@@ -109,4 +147,15 @@ export function summarizeNotificationSettingsForAudit(
 function periodRank(studyPeriod: string): number {
   const index = STUDY_PERIODS.findIndex((period) => period === studyPeriod);
   return index === -1 ? STUDY_PERIODS.length : index;
+}
+
+function reconciliationReason(operation: ClosedPeriodNotificationReconciliationAction): string {
+  switch (operation) {
+    case "abandon":
+      return "마감 명단 알림 확인 종료";
+    case "confirm_sent":
+      return "마감 명단 전송 완료 확인";
+    case "retry":
+      return "마감 명단 명시 재시도";
+  }
 }

@@ -30,8 +30,12 @@ type PeriodSettingUpsert = (input: {
   };
 }) => Promise<PeriodSettingRow>;
 
-type ReservationGroupByRow = { readonly _count: { readonly _all: number }; readonly studyPeriod: StudyPeriod };
-type ReservationGroupBy = () => Promise<readonly ReservationGroupByRow[]>;
+type ReservationGroupByRow = {
+  readonly _count: { readonly _all: number };
+  readonly date?: string;
+  readonly studyPeriod: StudyPeriod;
+};
+type ReservationGroupBy = (input?: unknown) => Promise<readonly ReservationGroupByRow[]>;
 type ReservationApplicantRow = {
   readonly id: string;
   readonly studyPeriod: StudyPeriod;
@@ -39,7 +43,27 @@ type ReservationApplicantRow = {
   readonly userId: string;
 };
 
-type ReservationFindMany = () => Promise<readonly ReservationApplicantRow[]>;
+type ReservationOwnerRow = Omit<ReservationApplicantRow, "user"> & { readonly date?: string };
+type ReservationFindMany = (input: unknown) => Promise<readonly (ReservationApplicantRow | ReservationOwnerRow)[]>;
+
+type PeriodWeekReader = (
+  weekStart: string,
+  options: { readonly currentUserId: string }
+) => Promise<{
+  readonly dates: readonly {
+    readonly date: string;
+    readonly periods: readonly {
+      readonly availability: number;
+      readonly capacity: number;
+      readonly closeTime: string;
+      readonly enabled: boolean;
+      readonly myReservationId: string | null;
+      readonly openTime: string;
+      readonly reservedCount: number;
+      readonly studyPeriod: StudyPeriod;
+    }[];
+  }[];
+}>;
 
 type Deferred<T> = {
   readonly promise: Promise<T>;
@@ -139,6 +163,162 @@ describe("period setting defaults", () => {
 });
 
 describe("period summaries", () => {
+  it("reads a canonical five-day student week in exactly three privacy-safe queries", async () => {
+    prismaMocks.periodSettingsStore.push(
+      {
+        capacity: 6,
+        closeTime: "16:20",
+        date: GLOBAL_PERIOD_SETTINGS_DATE,
+        enabled: true,
+        openTime: "13:00",
+        studyPeriod: "EIGHTH"
+      },
+      {
+        capacity: 3,
+        closeTime: "15:50",
+        date: "2026-07-21",
+        enabled: false,
+        openTime: "12:40",
+        studyPeriod: "FIRST"
+      }
+    );
+    prismaMocks.reservationGroupBy.mockResolvedValueOnce([
+      { _count: { _all: 2 }, date: "2026-07-20", studyPeriod: "FIRST" },
+      { _count: { _all: 4 }, date: "2026-07-21", studyPeriod: "EIGHTH" }
+    ]);
+    prismaMocks.reservationFindMany.mockResolvedValueOnce([
+      { date: "2026-07-21", id: "mine-eighth", studyPeriod: "EIGHTH", userId: "me" }
+    ]);
+    const periodSettingsModule = await import("./period-settings");
+    const getPeriodWeekSummaries = (
+      periodSettingsModule as typeof periodSettingsModule & {
+        readonly getPeriodWeekSummaries?: PeriodWeekReader;
+      }
+    ).getPeriodWeekSummaries;
+
+    expect(getPeriodWeekSummaries).toBeTypeOf("function");
+    if (!getPeriodWeekSummaries) {
+      return;
+    }
+
+    const week = await getPeriodWeekSummaries("2026-07-20", { currentUserId: "me" });
+
+    expect(prismaMocks.periodSettingFindMany).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.reservationGroupBy).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.reservationFindMany).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.periodSettingFindMany).toHaveBeenCalledWith({
+      where: {
+        date: {
+          in: [
+            GLOBAL_PERIOD_SETTINGS_DATE,
+            "2026-07-20",
+            "2026-07-21",
+            "2026-07-22",
+            "2026-07-23",
+            "2026-07-24"
+          ]
+        }
+      }
+    });
+    expect(prismaMocks.reservationGroupBy).toHaveBeenCalledWith({
+      _count: { _all: true },
+      by: ["date", "studyPeriod"],
+      where: {
+        date: { in: ["2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24"] },
+        status: "CONFIRMED"
+      }
+    });
+    expect(prismaMocks.reservationFindMany).toHaveBeenCalledWith({
+      orderBy: { createdAt: "asc" },
+      select: { date: true, id: true, studyPeriod: true },
+      where: {
+        date: { in: ["2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24"] },
+        status: "CONFIRMED",
+        userId: "me"
+      }
+    });
+    expect(week.dates.map(({ date }) => date)).toEqual([
+      "2026-07-20",
+      "2026-07-21",
+      "2026-07-22",
+      "2026-07-23",
+      "2026-07-24"
+    ]);
+    expect(week.dates.every(({ periods }) => periods.map(({ studyPeriod }) => studyPeriod).join(",") === "EIGHTH,FIRST"))
+      .toBe(true);
+    expect(week.dates.flatMap(({ periods }) => periods).every((period) => Object.keys(period).join(",") ===
+      "studyPeriod,openTime,closeTime,capacity,reservedCount,enabled,availability,myReservationId"))
+      .toBe(true);
+    expect(week.dates[0]?.periods).toEqual([
+      {
+        availability: 6,
+        capacity: 6,
+        closeTime: "16:20",
+        enabled: true,
+        myReservationId: null,
+        openTime: "13:00",
+        reservedCount: 0,
+        studyPeriod: "EIGHTH"
+      },
+      {
+        availability: 8,
+        capacity: 10,
+        closeTime: "16:20",
+        enabled: true,
+        myReservationId: null,
+        openTime: "13:00",
+        reservedCount: 2,
+        studyPeriod: "FIRST"
+      }
+    ]);
+    expect(week.dates[1]?.periods).toEqual([
+      {
+        availability: 2,
+        capacity: 6,
+        closeTime: "16:20",
+        enabled: true,
+        myReservationId: "mine-eighth",
+        openTime: "13:00",
+        reservedCount: 4,
+        studyPeriod: "EIGHTH"
+      },
+      {
+        availability: 3,
+        capacity: 3,
+        closeTime: "15:50",
+        enabled: false,
+        myReservationId: null,
+        openTime: "12:40",
+        reservedCount: 0,
+        studyPeriod: "FIRST"
+      }
+    ]);
+  });
+
+  it("queries only the current user's reservation identity when applicants are not requested", async () => {
+    prismaMocks.reservationFindMany.mockResolvedValueOnce([
+      { id: "mine-eighth", studyPeriod: "EIGHTH", userId: "me" }
+    ]);
+
+    try {
+      const periods = await getPeriodSummaries("2026-06-14", {
+        currentUserId: "me",
+        now: new Date("2026-06-14T00:30:00.000Z")
+      });
+
+      expect(prismaMocks.reservationFindMany).toHaveBeenCalledWith({
+        orderBy: { createdAt: "asc" },
+        select: { id: true, studyPeriod: true, userId: true },
+        where: { date: "2026-06-14", status: "CONFIRMED", userId: "me" }
+      });
+      expect(periods.map((period) => period.myReservationId)).toEqual(["mine-eighth", null]);
+      expect(periods.every((period) => period.applicants.length === 0)).toBe(true);
+    } finally {
+      prismaMocks.reservationFindMany.mockReset();
+      prismaMocks.reservationFindMany.mockResolvedValue([]);
+    }
+  });
+
   it("starts settings counts and applicant reads before awaiting period summary DB results", async () => {
     const settingsDeferred = createDeferred<readonly PeriodSettingRow[]>();
     const countsDeferred = createDeferred<readonly ReservationGroupByRow[]>();

@@ -28,6 +28,13 @@ export async function persistAuthenticatedUserResult(
   try {
     return { kind: "success", user: await persistAuthenticatedUser(input) };
   } catch (error) {
+    if (error instanceof DepartedAccountError) {
+      return {
+        kind: "error",
+        message: "사용할 수 없는 계정입니다. 관리자에게 문의해주세요.",
+        reason: "bad_response"
+      };
+    }
     if (error instanceof AccountIdentityConflictError) {
       return {
         kind: "error",
@@ -47,11 +54,13 @@ async function persistAuthenticatedUser(input: AuthenticatedUserInput): Promise<
     operation: async (transaction) => {
     const riroUser = await transaction.user.findUnique({ where: { riroId: input.loginId } });
     if (riroUser) {
+      assertNotDeparted(riroUser);
       if (riroUser.studentNumber !== input.profile.studentNumber) {
         const studentNumberUser = await transaction.user.findUnique({
           where: { studentNumber: input.profile.studentNumber }
         });
         if (studentNumberUser && studentNumberUser.id !== riroUser.id) {
+          assertNotDeparted(studentNumberUser);
           if (studentNumberUser.riroId) {
             throw new AccountIdentityConflictError(input.loginId, input.profile.studentNumber);
           }
@@ -68,6 +77,7 @@ async function persistAuthenticatedUser(input: AuthenticatedUserInput): Promise<
       where: { studentNumber: input.profile.studentNumber }
     });
     if (studentNumberUser) {
+      assertNotDeparted(studentNumberUser);
       return transaction.user.update({ data: userData, where: { id: studentNumberUser.id } });
     }
     return transaction.user.create({ data: { bookingStatus: "ACTIVE", ...userData } });
@@ -94,6 +104,16 @@ function authenticatedUserData(input: AuthenticatedUserInput): {
 
 function relinkedStudentNumber(user: Pick<User, "id" | "studentNumber">): string {
   return `relinked:${user.studentNumber}:${user.id}`;
+}
+
+function assertNotDeparted(user: Pick<User, "departedAt">): void {
+  if (user.departedAt) {
+    throw new DepartedAccountError();
+  }
+}
+
+class DepartedAccountError extends Error {
+  public override readonly name = "DepartedAccountError";
 }
 
 class AccountIdentityConflictError extends Error {

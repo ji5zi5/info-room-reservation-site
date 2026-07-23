@@ -9,6 +9,7 @@ import type { CurrentSession, SessionUser } from "@/lib/session";
 
 type ReservationFindUnique = (input: unknown) => Promise<Reservation | null>;
 type ReservationUpdate = (input: unknown) => Promise<Reservation>;
+type ReservationUpdateMany = (input: unknown) => Promise<{ readonly count: number }>;
 type UserUpdate = (input: unknown) => Promise<unknown>;
 type AdminActionCreate = (input: unknown) => Promise<{ readonly id: string }>;
 type WriteMutation = (input: unknown) => Promise<unknown>;
@@ -17,7 +18,11 @@ type TransactionClient = {
   readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
   readonly adminAction: { readonly create: AdminActionCreate };
   readonly auditLog: { readonly create: WriteMutation };
-  readonly reservation: { readonly findUnique: ReservationFindUnique; readonly update: ReservationUpdate };
+  readonly reservation: {
+    readonly findUnique: ReservationFindUnique;
+    readonly update: ReservationUpdate;
+    readonly updateMany: ReservationUpdateMany;
+  };
   readonly user: { readonly update: UserUpdate };
   readonly userSanction: { readonly create: WriteMutation; readonly updateMany: WriteMutation };
 };
@@ -54,6 +59,7 @@ const routeMocks = vi.hoisted(() => {
     rawCalls,
     reservationFindUnique: vi.fn<ReservationFindUnique>(),
     reservationUpdate: vi.fn<ReservationUpdate>(),
+    reservationUpdateMany: vi.fn<ReservationUpdateMany>(),
     setSessionCookie: vi.fn<SetSessionCookie>(),
     transaction: vi.fn<PrismaTransaction>(),
     userSanctionCreate: vi.fn<WriteMutation>(),
@@ -107,6 +113,7 @@ const shadowBannedStudent: SessionUser = {
   restrictionReason: "블랙리스트",
   restrictedUntil: "2026-07-01T00:00:00.000Z",
   role: "STUDENT",
+  shadowBanProfile: "HIGH",
   studentNumber: "31001"
 };
 
@@ -134,6 +141,7 @@ describe("student reservation cancellation shadow-ban handling", () => {
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
     routeMocks.reservationFindUnique.mockResolvedValue(confirmedReservation);
     routeMocks.reservationUpdate.mockResolvedValue(cancelledReservation);
+    routeMocks.reservationUpdateMany.mockResolvedValue({ count: 1 });
     routeMocks.userUpdate.mockResolvedValue({
       ...shadowBannedStudent,
       bookingStatus: "RESTRICTED",
@@ -161,10 +169,11 @@ describe("student reservation cancellation shadow-ban handling", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ reservation: { id: confirmedReservation.id, status: "CANCELLED" } });
-    expect(routeMocks.reservationUpdate).toHaveBeenCalledWith({
+    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledWith({
       data: { status: "CANCELLED" },
-      where: { id: confirmedReservation.id }
+      where: { id: confirmedReservation.id, status: "CONFIRMED" }
     });
+    expect(routeMocks.reservationUpdate).not.toHaveBeenCalled();
     expect(routeMocks.userUpdate).not.toHaveBeenCalled();
     expect(routeMocks.adminActionCreate).not.toHaveBeenCalled();
     expect(routeMocks.userSanctionCreate).not.toHaveBeenCalled();
@@ -195,6 +204,34 @@ describe("student reservation cancellation shadow-ban handling", () => {
     expect(routeMocks.userSanctionUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("allows only one cancellation transition and one sanction for stale concurrent reads", async () => {
+    routeMocks.requireSession.mockResolvedValue({
+      id: "session-active",
+      user: { ...shadowBannedStudent, bookingStatus: "ACTIVE", restrictionReason: null, restrictedUntil: null }
+    });
+    routeMocks.reservationUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    const { DELETE } = await loadCancelRoute();
+
+    const first = await DELETE(deleteRequest(), routeContext(confirmedReservation.id));
+    const second = await DELETE(deleteRequest(), routeContext(confirmedReservation.id));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledTimes(2);
+    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledWith({
+      data: { status: "CANCELLED" },
+      where: { id: confirmedReservation.id, status: "CONFIRMED" }
+    });
+    expect(routeMocks.userUpdate).toHaveBeenCalledTimes(1);
+    expect(routeMocks.adminActionCreate).toHaveBeenCalledTimes(1);
+    expect(routeMocks.userSanctionCreate).toHaveBeenCalledTimes(1);
+    expect(routeMocks.auditLogCreate).toHaveBeenCalledTimes(1);
+    const lockValues = routeMocks.rawCalls
+      .filter((call) => call.strings.join("?").includes("pg_advisory_xact_lock"))
+      .map((call) => call.values);
+    expect(lockValues).toEqual([[`user:${shadowBannedStudent.id}`], [`user:${shadowBannedStudent.id}`]]);
+  });
+
   it("masks mock shadow-ban cancellation responses and the refreshed mock session cookie", async () => {
     routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
     routeMocks.cancelMockReservation.mockReturnValue({
@@ -220,6 +257,7 @@ describe("student reservation cancellation shadow-ban handling", () => {
       }
     });
     expect(text).not.toContain("SHADOW_BANNED");
+    expect(text).not.toContain("shadowBanProfile");
     expect(text).not.toContain("블랙리스트");
     expect(text).not.toContain("2026-07-01");
     const decodedCookie = decodeMockSessionCookie(response);
@@ -227,6 +265,7 @@ describe("student reservation cancellation shadow-ban handling", () => {
     expect(decodedCookie).toContain('"restrictionReason":null');
     expect(decodedCookie).toContain('"restrictedUntil":null');
     expect(decodedCookie).not.toContain("SHADOW_BANNED");
+    expect(decodedCookie).not.toContain("shadowBanProfile");
     expect(decodedCookie).not.toContain("블랙리스트");
     expect(decodedCookie).not.toContain("2026-07-01");
   });
@@ -240,7 +279,11 @@ function transactionClient(): TransactionClient {
     },
     adminAction: { create: routeMocks.adminActionCreate },
     auditLog: { create: routeMocks.auditLogCreate },
-    reservation: { findUnique: routeMocks.reservationFindUnique, update: routeMocks.reservationUpdate },
+    reservation: {
+      findUnique: routeMocks.reservationFindUnique,
+      update: routeMocks.reservationUpdate,
+      updateMany: routeMocks.reservationUpdateMany
+    },
     user: { update: routeMocks.userUpdate },
     userSanction: { create: routeMocks.userSanctionCreate, updateMany: routeMocks.userSanctionUpdateMany }
   };

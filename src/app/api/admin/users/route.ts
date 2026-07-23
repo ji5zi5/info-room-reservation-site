@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import type { Prisma } from "@prisma/client";
 
+import { ADMIN_USER_LIST_SELECT, toAdminUserDto } from "@/lib/admin-api-dto";
 import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 import { prisma } from "@/lib/db";
 import { jsonError } from "@/lib/http";
@@ -15,9 +16,6 @@ export async function GET(request: Request): Promise<NextResponse> {
     const url = new URL(request.url);
     const bookingStatus = parseAdminUserStatusFilter(url.searchParams.get("bookingStatus"));
     const query = url.searchParams.get("query") ?? "";
-    if (isNoDatabaseMockMode()) {
-      return NextResponse.json({ users: getMockAdminUsers({ bookingStatus, query }) });
-    }
     const trimmedQuery = query.trim();
     const where = {
       ...(bookingStatus === "ALL" ? {} : { bookingStatus }),
@@ -30,12 +28,17 @@ export async function GET(request: Request): Promise<NextResponse> {
           }
         : {})
     } satisfies Prisma.UserWhereInput;
-    const users = await prisma.user.findMany({
-      orderBy: [{ bookingStatus: "desc" }, { studentNumber: "asc" }],
-      take: 100,
-      where
-    });
-    return NextResponse.json({ users });
+    const users = isNoDatabaseMockMode()
+      ? getMockAdminUsers({ bookingStatus, query })
+      : await prisma.user.findMany({
+          orderBy: [{ bookingStatus: "desc" }, { studentNumber: "asc" }],
+          select: ADMIN_USER_LIST_SELECT,
+          take: 100,
+          where
+        });
+    const response = NextResponse.json({ users: users.map(toAdminUserDto) });
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);

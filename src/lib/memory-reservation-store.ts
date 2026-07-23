@@ -13,16 +13,18 @@ type MemoryReservationStoreInput = {
   readonly date: string;
   readonly openTime: string;
   readonly restrictedUsers?: readonly string[];
+  readonly shadowBannedUsers?: readonly string[];
   readonly userCount: number;
 };
 
 export function createMemoryReservationStore(input: MemoryReservationStoreInput): TransactionalReservationStore {
   const restrictedUsers = new Set(input.restrictedUsers ?? []);
+  const shadowBannedUsers = new Set(input.shadowBannedUsers ?? []);
   const users = new Map<string, UserBookingState>();
   for (let index = 1; index <= input.userCount; index += 1) {
     const userId = `user-${index}`;
     users.set(userId, {
-      bookingStatus: restrictedUsers.has(userId) ? "RESTRICTED" : "ACTIVE",
+      bookingStatus: shadowBannedUsers.has(userId) ? "SHADOW_BANNED" : restrictedUsers.has(userId) ? "RESTRICTED" : "ACTIVE",
       restrictedUntil: null
     });
   }
@@ -65,7 +67,10 @@ class MemoryReservationStore implements ReservationStore, TransactionalReservati
     this.users = input.users;
   }
 
-  public async transaction<T>(operation: (store: ReservationStore) => Promise<T>): Promise<T> {
+  public async transaction<T>(
+    _lockKeys: readonly string[],
+    operation: (store: ReservationStore) => Promise<T>
+  ): Promise<T> {
     const release = await this.acquire();
     try {
       return await operation(this);

@@ -16,10 +16,10 @@ jobs:
     steps:
       - name: Trigger notification cron endpoint
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CLOSED_PERIOD_CRON_SECRET: ${{ secrets.CLOSED_PERIOD_CRON_SECRET }}
           CRON_URL: https://info-room-reservation-site.vercel.app/api/cron/closed-period-notifications
         run: |
           curl --fail --show-error --silent --location \
             --max-time 25 \
-            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --header "Authorization: Bearer ${CLOSED_PERIOD_CRON_SECRET}" \
             "${CRON_URL}"

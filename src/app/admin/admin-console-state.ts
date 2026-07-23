@@ -2,6 +2,8 @@ import type {
   AdminAuditAction,
   AdminAuditActionFilter,
   AdminDashboardPeriod,
+  AdminNotificationBacklogItem,
+  AdminNotificationReconciliationAction,
   AdminNotificationSettings,
   AdminPeriodSetting,
   AdminReservation,
@@ -13,10 +15,12 @@ import type {
   AdminUserStatusFilter,
   StudyPeriod
 } from "./admin-types";
+import { DEFAULT_SHADOW_BAN_PROFILE, type ShadowBanProfile } from "@/lib/shadow-ban-profile";
 
 export type UserRestrictionDraft = {
   readonly days: string;
   readonly reason: string;
+  readonly shadowBanProfile: ShadowBanProfile;
   readonly status: "BANNED" | "RESTRICTED" | "SHADOW_BANNED";
 };
 
@@ -25,6 +29,7 @@ export type AdminSection = "audit" | "blacklist" | "dashboard" | "reservations" 
 export const DEFAULT_RESTRICTION_DRAFT = {
   days: "7",
   reason: "",
+  shadowBanProfile: DEFAULT_SHADOW_BAN_PROFILE,
   status: "RESTRICTED"
 } satisfies UserRestrictionDraft;
 
@@ -41,6 +46,7 @@ export type AdminConsoleState = {
   readonly dashboardPeriods: readonly AdminDashboardPeriod[];
   readonly date: string;
   readonly markNoShow: (reservationId: string) => Promise<void>;
+  readonly notificationBacklog: readonly AdminNotificationBacklogItem[];
   readonly notificationSettings: AdminNotificationSettings;
   readonly periods: readonly AdminPeriodSetting[];
   readonly refresh: () => Promise<void>;
@@ -53,7 +59,11 @@ export type AdminConsoleState = {
   readonly selectedUserDetail: AdminUserDetail | null;
   readonly selectedUserId: string | null;
   readonly selectStatus: (status: AdminReservationStatusFilter) => void;
-  readonly sendNotification: (period: AdminDashboardPeriod, force: boolean) => Promise<void>;
+  readonly reconcileNotification: (
+    item: AdminNotificationBacklogItem,
+    action: AdminNotificationReconciliationAction
+  ) => Promise<void>;
+  readonly sendNotification: (period: AdminDashboardPeriod) => Promise<void>;
   readonly setActiveSection: (section: AdminSection) => void;
   readonly setAuditActionFilter: (filter: AdminAuditActionFilter) => void;
   readonly setAuditQuery: (query: string) => void;

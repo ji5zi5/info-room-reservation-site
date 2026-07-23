@@ -2,9 +2,30 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { e2eNow, FIXED_FRIDAY_DATE, FIXED_THURSDAY_DATE, mockClientDate } from "./e2e-time";
 
+declare global {
+  interface Window {
+    __drainTrackedFetches: () => readonly string[];
+    __minuteIntervalCount: () => number;
+    __runMinuteIntervals: () => void;
+  }
+}
+
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+const SCHOOL_WEEK_DATES = [
+  "2026-06-08",
+  "2026-06-09",
+  "2026-06-10",
+  FIXED_THURSDAY_DATE,
+  FIXED_FRIDAY_DATE
+] as const;
 
 type StudyPeriod = "EIGHTH" | "FIRST";
+type PeriodRequestKind = "date" | "week";
+type PollingRequestCounts = {
+  date: number;
+  notifications: number;
+  week: number;
+};
 type MockSessionUser = {
   readonly bookingStatus: "ACTIVE";
   readonly generation: number;
@@ -15,6 +36,58 @@ type MockSessionUser = {
   readonly role: "STUDENT";
   readonly studentNumber: string;
 };
+
+test("student polling loads one weekly summary and one notification request", async ({ page }) => {
+  const counts: PollingRequestCounts = { date: 0, notifications: 0, week: 0 };
+  await mockPeriodRoutes(page, () => false, () => false, () => Promise.resolve(), (kind) => {
+    counts[kind] += 1;
+  });
+  await mockNotificationRoute(page, () => {
+    counts.notifications += 1;
+  });
+
+  await login(page, `polling-initial-${Date.now()}`);
+
+  await expect.poll(() => counts).toEqual({ date: 0, notifications: 1, week: 1 });
+});
+
+test("student polling makes one weekly and one notification request per visible minute", async ({ page }) => {
+  const counts: PollingRequestCounts = { date: 0, notifications: 0, week: 0 };
+  await installMinuteIntervalController(page);
+  await mockPeriodRoutes(page, () => false, () => false, () => Promise.resolve(), (kind) => {
+    counts[kind] += 1;
+  });
+  await mockNotificationRoute(page, () => {
+    counts.notifications += 1;
+  });
+  await login(page, `polling-visible-${Date.now()}`);
+  await expect.poll(() => counts.date + counts.week + counts.notifications).toBeGreaterThan(0);
+  await expect.poll(() => minuteIntervalCount(page)).toBe(2);
+  await drainTrackedFetches(page);
+
+  await runMinuteIntervals(page, "visible");
+
+  expect(pollingCounts(await drainTrackedFetches(page))).toEqual({ date: 0, notifications: 1, week: 1 });
+});
+
+test("student polling makes no requests while the document is hidden", async ({ page }) => {
+  const counts: PollingRequestCounts = { date: 0, notifications: 0, week: 0 };
+  await installMinuteIntervalController(page);
+  await mockPeriodRoutes(page, () => false, () => false, () => Promise.resolve(), (kind) => {
+    counts[kind] += 1;
+  });
+  await mockNotificationRoute(page, () => {
+    counts.notifications += 1;
+  });
+  await login(page, `polling-hidden-${Date.now()}`);
+  await expect.poll(() => counts.date + counts.week + counts.notifications).toBeGreaterThan(0);
+  await expect.poll(() => minuteIntervalCount(page)).toBe(2);
+  await drainTrackedFetches(page);
+
+  await runMinuteIntervals(page, "hidden");
+
+  expect(pollingCounts(await drainTrackedFetches(page))).toEqual({ date: 0, notifications: 0, week: 0 });
+});
 
 test("returning to the tab refreshes seat counts and updates the last refresh time", async ({ page }) => {
   let full = false;
@@ -131,16 +204,43 @@ async function mockPeriodRoutes(
   page: Page,
   isFull: () => boolean,
   shouldFail: () => boolean = () => false,
-  beforeFulfill: () => Promise<void> = () => Promise.resolve()
+  beforeFulfill: () => Promise<void> = () => Promise.resolve(),
+  onRequest: (kind: PeriodRequestKind) => void = () => undefined
 ): Promise<void> {
   await page.route("**/api/periods**", async (route) => {
-    const date = new URL(route.request().url()).searchParams.get("date") ?? FIXED_THURSDAY_DATE;
+    const url = new URL(route.request().url());
+    const weekStart = url.searchParams.get("weekStart");
+    const date = url.searchParams.get("date") ?? FIXED_THURSDAY_DATE;
+    onRequest(weekStart ? "week" : "date");
     await beforeFulfill();
     if (shouldFail()) {
       await route.fulfill({
         body: JSON.stringify({ error: { message: "refresh failed" } }),
         contentType: "application/json",
         status: 500
+      });
+      return;
+    }
+    if (weekStart) {
+      await route.fulfill({
+        body: JSON.stringify({
+          dates: SCHOOL_WEEK_DATES.map((weekDate) => ({
+            date: weekDate,
+            periods: [
+              weekPeriod({
+                availability: weekDate === FIXED_THURSDAY_DATE && isFull() ? 0 : 1,
+                studyPeriod: "EIGHTH"
+              }),
+              weekPeriod({ availability: 4, studyPeriod: "FIRST" })
+            ]
+          }))
+        }),
+        contentType: "application/json",
+        headers: {
+          "Cache-Control": "private, max-age=0, must-revalidate",
+          ETag: "\"test-week-etag\""
+        },
+        status: 200
       });
       return;
     }
@@ -157,9 +257,91 @@ async function mockPeriodRoutes(
         ]
       }),
       contentType: "application/json",
+      headers: {
+        "Cache-Control": "private, max-age=0, must-revalidate",
+        ETag: "\"test-date-etag\""
+      },
       status: 200
     });
   });
+}
+
+async function mockNotificationRoute(page: Page, onRequest: () => void): Promise<void> {
+  await page.route("**/api/me/notifications", async (route) => {
+    onRequest();
+    await route.fulfill({ contentType: "application/json", json: { notifications: [] }, status: 200 });
+  });
+}
+
+async function installMinuteIntervalController(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const minuteIntervals = new Map<number, { readonly args: readonly unknown[]; readonly handler: TimerHandler }>();
+    const trackedFetches: string[] = [];
+    const nativeFetch = window.fetch.bind(window);
+    const nativeSetInterval = window.setInterval.bind(window);
+    const nativeClearInterval = window.clearInterval.bind(window);
+    let nextMinuteIntervalId = -1;
+
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      trackedFetches.push(input instanceof Request ? input.url : String(input));
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]): number => {
+      if (timeout !== 60_000) {
+        return nativeSetInterval(handler, timeout, ...args);
+      }
+      const id = nextMinuteIntervalId;
+      nextMinuteIntervalId -= 1;
+      minuteIntervals.set(id, { args, handler });
+      return id;
+    }) as typeof window.setInterval;
+    window.clearInterval = ((id?: number): void => {
+      if (typeof id === "number" && minuteIntervals.delete(id)) {
+        return;
+      }
+      nativeClearInterval(id);
+    }) as typeof window.clearInterval;
+    window.__drainTrackedFetches = (): readonly string[] => trackedFetches.splice(0);
+    window.__minuteIntervalCount = (): number => minuteIntervals.size;
+    window.__runMinuteIntervals = (): void => {
+      for (const { args, handler } of minuteIntervals.values()) {
+        if (typeof handler === "function") {
+          handler(...args);
+        }
+      }
+    };
+  });
+}
+
+async function drainTrackedFetches(page: Page): Promise<readonly string[]> {
+  return page.evaluate(() => window.__drainTrackedFetches());
+}
+
+async function minuteIntervalCount(page: Page): Promise<number> {
+  return page.evaluate(() => window.__minuteIntervalCount());
+}
+
+async function runMinuteIntervals(page: Page, visibilityState: "hidden" | "visible"): Promise<void> {
+  await page.evaluate((state) => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: state === "hidden" });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+    window.__runMinuteIntervals();
+  }, visibilityState);
+}
+
+function pollingCounts(urls: readonly string[]): PollingRequestCounts {
+  const counts: PollingRequestCounts = { date: 0, notifications: 0, week: 0 };
+  for (const value of urls) {
+    const url = new URL(value, BASE_URL);
+    if (url.pathname === "/api/me/notifications") {
+      counts.notifications += 1;
+    } else if (url.pathname === "/api/periods" && url.searchParams.has("weekStart")) {
+      counts.week += 1;
+    } else if (url.pathname === "/api/periods" && url.searchParams.has("date")) {
+      counts.date += 1;
+    }
+  }
+  return counts;
 }
 
 function period(input: {
@@ -181,5 +363,18 @@ function period(input: {
     remaining: input.remaining,
     studyPeriod: input.studyPeriod,
     windowState: "open"
+  };
+}
+
+function weekPeriod(input: { readonly availability: number; readonly studyPeriod: StudyPeriod }) {
+  return {
+    studyPeriod: input.studyPeriod,
+    openTime: "00:00",
+    closeTime: "23:59",
+    capacity: 10,
+    reservedCount: 10 - input.availability,
+    enabled: true,
+    availability: input.availability,
+    myReservationId: null
   };
 }

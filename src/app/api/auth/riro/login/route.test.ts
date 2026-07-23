@@ -151,6 +151,7 @@ describe("Riro login route", () => {
         restrictionReason: "블랙리스트",
         restrictedUntil: "2026-07-01T00:00:00.000Z",
         role: "STUDENT",
+        shadowBanProfile: "HIGH",
         studentNumber: "90001"
       }
     });
@@ -158,16 +159,23 @@ describe("Riro login route", () => {
     const response = await POST(loginRequest(JSON.stringify({ id: "student-1", password: "example-password" })));
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(routeMocks.setSessionCookie).toHaveBeenCalledWith(response, "raw-shadow-session-token");
     const text = await response.text();
-    expect(JSON.parse(text)).toMatchObject({
+    expect(JSON.parse(text)).toEqual({
       user: {
         bookingStatus: "ACTIVE",
+        generation: 31,
+        id: "user-shadow",
+        name: "테스트학생",
         restrictionReason: null,
-        restrictedUntil: null
+        restrictedUntil: null,
+        role: "STUDENT",
+        studentNumber: "90001"
       }
     });
     expect(text).not.toContain("SHADOW_BANNED");
+    expect(text).not.toContain("shadowBanProfile");
     expect(text).not.toContain("블랙리스트");
   });
 

@@ -13,6 +13,7 @@ const adminUser = {
   restrictedUntil: null,
   restrictionReason: null,
   role: "ADMIN",
+  shadowBanProfile: "NORMAL",
   studentNumber: "local_student_a"
 } satisfies AdminUser;
 
@@ -24,6 +25,7 @@ const localStudentUser = {
   restrictedUntil: null,
   restrictionReason: null,
   role: "STUDENT",
+  shadowBanProfile: "NORMAL",
   studentNumber: "local_student_b"
 } satisfies AdminUser;
 

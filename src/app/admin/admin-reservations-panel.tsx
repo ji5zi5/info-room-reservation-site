@@ -10,6 +10,7 @@ import {
   type AdminReservationStatusFilter,
   type AdminReservationStudyPeriodFilter
 } from "./admin-types";
+import { AdminReservationCreateForm } from "./admin-reservation-create-form";
 
 const STATUS_LABELS: Record<AdminReservationStatusFilter, string> = {
   ALL: "전체",
@@ -25,6 +26,7 @@ const PERIOD_FILTER_LABELS: Record<AdminReservationStudyPeriodFilter, string> = 
 };
 
 export function AdminReservationsPanel({
+  date,
   onCancelReservation,
   onCopyCsv,
   onMarkNoShow,
@@ -38,6 +40,7 @@ export function AdminReservationsPanel({
   reservations,
   statusFilter
 }: {
+  readonly date: string;
   readonly onCancelReservation: (reservationId: string, reason: string) => void;
   readonly onCopyCsv: () => void;
   readonly onMarkNoShow: (reservationId: string) => void;
@@ -104,6 +107,7 @@ export function AdminReservationsPanel({
           </select>
         </label>
       </div>
+      <AdminReservationCreateForm date={date} onCreated={onRefresh} />
       <div className="status-filter" aria-label="예약 상태">
         {ADMIN_RESERVATION_STATUS_FILTERS.map((status) => (
           <button data-active={statusFilter === status} key={status} type="button" onClick={() => onSelectStatus(status)}>

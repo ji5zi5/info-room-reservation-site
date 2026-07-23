@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StudentProfilePayload } from "@/lib/student-profile";
-import { readStudentNotificationsPayload, readStudentProfilePayload } from "./client-api-response";
+import { readPeriodSummaries, readStudentNotificationsPayload, readStudentProfilePayload } from "./client-api-response";
 
 const profileFixture = {
   currentReservations: [
@@ -133,6 +133,45 @@ describe("readStudentNotificationsPayload", () => {
 
     // Then
     expect(result).toEqual({ kind: "error", message: "알림 응답 형식이 올바르지 않습니다." });
+  });
+});
+
+describe("readPeriodSummaries", () => {
+  it("drops peer applicant identity from period payloads", async () => {
+    const response = jsonResponse({
+      periods: [
+        {
+          applicants: [{ name: "다른 학생", reservationId: "peer-reservation", studentNumber: "31002" }],
+          capacity: 10,
+          closeTime: "16:20",
+          confirmedCount: 1,
+          date: "2026-07-22",
+          enabled: true,
+          label: "8면학",
+          myReservationId: null,
+          openTime: "13:00",
+          remaining: 9,
+          studyPeriod: "EIGHTH",
+          windowState: "open"
+        }
+      ]
+    });
+
+    await expect(readPeriodSummaries(response)).resolves.toEqual([
+      {
+        capacity: 10,
+        closeTime: "16:20",
+        confirmedCount: 1,
+        date: "2026-07-22",
+        enabled: true,
+        label: "8면학",
+        myReservationId: null,
+        openTime: "13:00",
+        remaining: 9,
+        studyPeriod: "EIGHTH",
+        windowState: "open"
+      }
+    ]);
   });
 });
 

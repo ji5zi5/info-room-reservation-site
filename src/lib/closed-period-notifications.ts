@@ -8,9 +8,14 @@ export const SENDING_DELIVERY_STALE_AFTER_MS = 10 * 60 * 1000;
 
 export type ClosedListNotificationKind = typeof CLOSED_LIST_NOTIFICATION_KIND;
 
-export type ClosedPeriodNotificationFinalStatus = "FAILED" | "SENT";
+export type ClosedPeriodNotificationFinalStatus = "FAILED" | "SENT" | "UNKNOWN";
 
-export type ClosedPeriodNotificationStatus = ClosedPeriodNotificationFinalStatus | "SENDING";
+export type ClosedPeriodNotificationStatus =
+  | ClosedPeriodNotificationFinalStatus
+  | "ABANDONED"
+  | "PENDING"
+  | "PENDING_REVIEW"
+  | "SENDING";
 
 export type ClosedPeriodCandidate = {
   readonly capacity: number;
@@ -24,6 +29,7 @@ export type ClosedPeriodCandidate = {
 export type ClosedPeriodDeliverySnapshot = {
   readonly date: string;
   readonly kind: string;
+  readonly nextAttemptAt?: Date | null;
   readonly status: ClosedPeriodNotificationStatus;
   readonly studyPeriod: StudyPeriod;
   readonly updatedAt?: Date;
@@ -75,9 +81,19 @@ function hasActiveDelivery(
     (delivery) =>
       delivery.date === setting.date &&
       delivery.kind === CLOSED_LIST_NOTIFICATION_KIND &&
-      (delivery.status === "SENT" || (delivery.status === "SENDING" && !isStaleSendingDelivery(delivery, now))) &&
+      isDeliveryBlockingAutomaticSend(delivery, now) &&
       delivery.studyPeriod === setting.studyPeriod
   );
+}
+
+function isDeliveryBlockingAutomaticSend(delivery: ClosedPeriodDeliverySnapshot, now: Date): boolean {
+  if (delivery.status === "PENDING") {
+    return false;
+  }
+  if (delivery.status === "FAILED") {
+    return delivery.nextAttemptAt !== null && delivery.nextAttemptAt !== undefined && delivery.nextAttemptAt > now;
+  }
+  return true;
 }
 
 function compareClosedPeriodCandidates(left: ClosedPeriodCandidate, right: ClosedPeriodCandidate): number {

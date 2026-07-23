@@ -1,8 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { systemDatabaseActor, withDatabaseContext } from "@/lib/db-context";
+import {
+  databaseActorFromSessionUser,
+  TransactionRetryExhaustedError,
+  userMutationLockKey,
+  withDatabaseMutation
+} from "@/lib/db-context";
 import { prisma } from "@/lib/db";
-import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
+import {
+  jsonError,
+  jsonMutatingRequestSafetyError,
+  jsonRateLimitError,
+  jsonTransactionRetryExhaustedError
+} from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { cancelMockReservation } from "@/lib/mock-reservation-data";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
@@ -48,14 +58,16 @@ export async function DELETE(request: Request, context: { readonly params: Promi
         reservation: { date, id, reason, status, studyPeriod, userId },
         user: publicUser
       });
+      response.headers.set("Cache-Control", "no-store");
       setSessionCookie(response, createMockSessionToken(publicUser));
       return response;
     }
 
     const ipHash = hashRequestClientIp(request);
-    const result = await withDatabaseContext({
-      actor: systemDatabaseActor(),
+    const result = await withDatabaseMutation({
+      actor: databaseActorFromSessionUser(user),
       client: prisma,
+      lockKeys: [userMutationLockKey(user.id)],
       operation: async (transaction) => {
       const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
       if (!reservation) {
@@ -67,11 +79,18 @@ export async function DELETE(request: Request, context: { readonly params: Promi
       if (reservation.status === "CANCELLED") {
         return { kind: "cancelled", reservation } as const;
       }
+      if (reservation.status !== "CONFIRMED") {
+        return { kind: "not_cancellable" } as const;
+      }
 
-      const updated = await transaction.reservation.update({
+      const transition = await transaction.reservation.updateMany({
         data: { status: "CANCELLED" },
-        where: { id: reservation.id }
+        where: { id: reservation.id, status: "CONFIRMED" }
       });
+      if (transition.count !== 1) {
+        return { kind: "not_cancellable" } as const;
+      }
+      const updated = { ...reservation, status: "CANCELLED" } as const;
 
       if (reservation.userId === user.id && user.role !== "ADMIN" && user.bookingStatus !== "SHADOW_BANNED") {
         const restriction = buildStudentCancellationRestriction(new Date());
@@ -140,10 +159,16 @@ export async function DELETE(request: Request, context: { readonly params: Promi
     if (result.kind === "forbidden") {
       return jsonError(403, "forbidden", "예약을 취소할 권한이 없습니다.");
     }
+    if (result.kind === "not_cancellable") {
+      return jsonError(409, "bad_request", "이미 처리된 예약은 취소할 수 없습니다.");
+    }
     return NextResponse.json({ reservation: result.reservation });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);
+    }
+    if (error instanceof TransactionRetryExhaustedError) {
+      return jsonTransactionRetryExhaustedError();
     }
     throw error;
   }

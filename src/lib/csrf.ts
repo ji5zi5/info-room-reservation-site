@@ -18,6 +18,7 @@ export type CsrfTokenStore = {
 export type CsrfValidationResult = { readonly kind: "ok" } | { readonly kind: "error"; readonly reason: CsrfErrorReason };
 
 const CSRF_TTL_MS = 3 * 60 * 60 * 1000;
+export const MAX_CSRF_TOKENS_PER_SESSION = 4;
 
 export async function mintCsrfToken(input: {
   readonly now: Date;

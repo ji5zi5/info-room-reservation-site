@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { TransactionRetryExhaustedError } from "@/lib/db-context";
 import type { RateLimitResult } from "@/lib/rate-limit";
 import type { ReservationResult } from "@/lib/reservation-service";
 import type { CurrentSession, SessionUser } from "@/lib/session";
@@ -123,6 +124,8 @@ describe("reservation create route Discord notification", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -138,18 +141,34 @@ describe("reservation create route Discord notification", () => {
       },
       reservation: confirmedReservation,
       sender: expect.any(Function),
-      user: { name: studentUser.name, studentNumber: studentUser.studentNumber },
       webhookUrl: "https://discord.com/api/webhooks/1/token"
     });
   });
 
   it("keeps the reservation response successful when the Discord notification sender fails", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     routeMocks.sendReservationCreatedNotification.mockRejectedValue(new Error("discord down"));
 
     const response = await POST(reservationRequest());
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({ reservation: confirmedReservation });
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expectStructuredNotificationFailure(errorLog.mock.calls[0]?.[0], "unexpected_error");
+  });
+
+  it("logs a redacted structured event when Discord returns a known delivery failure", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    routeMocks.sendReservationCreatedNotification.mockResolvedValue({
+      kind: "failed",
+      message: "failed https://discord.com/api/webhooks/1/[redacted]"
+    });
+
+    const response = await POST(reservationRequest());
+
+    expect(response.status).toBe(201);
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expectStructuredNotificationFailure(errorLog.mock.calls[0]?.[0], "delivery_failed");
   });
 
   it("does not send Discord notifications in no-database mock mode", async () => {
@@ -159,6 +178,54 @@ describe("reservation create route Discord notification", () => {
 
     expect(response.status).toBe(201);
     expect(routeMocks.getPrismaNotificationSettings).not.toHaveBeenCalled();
+    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+  });
+
+  it("returns a retryable 503 when reservation serialization is exhausted", async () => {
+    routeMocks.reserveStudyPeriod.mockRejectedValue(new TransactionRetryExhaustedError(new Error("P2034")));
+
+    const response = await POST(reservationRequest());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("1");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "transaction_retry_exhausted",
+        message: "동시 요청이 많습니다. 잠시 후 다시 시도해주세요."
+      }
+    });
+    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+  });
+
+  it("returns one deterministic generic denial for a shadow-banned reservation", async () => {
+    const randomSpy = vi.spyOn(Math, "random");
+    routeMocks.reserveStudyPeriod.mockResolvedValue({ kind: "error", reason: "shadow_banned" });
+
+    const response = await POST(reservationRequest());
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("X-Reservation-Error-Surface")).toBeNull();
+    expect(response.headers.get("X-Reservation-Error-Status")).toBeNull();
+    expect(response.headers.get("Retry-After")).toBeNull();
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "reservation_unavailable", message: "예약을 처리할 수 없습니다." }
+    });
+    expect(routeMocks.reserveStudyPeriod).toHaveBeenCalledTimes(1);
+    expect(randomSpy).not.toHaveBeenCalled();
+    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+  });
+
+  it("uses the same generic denial in no-database mock mode", async () => {
+    routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
+    routeMocks.reserveMockStudyPeriod.mockReturnValue({ kind: "error", reason: "shadow_banned" });
+
+    const response = await POST(reservationRequest());
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "reservation_unavailable", message: "예약을 처리할 수 없습니다." }
+    });
+    expect(routeMocks.reserveStudyPeriod).not.toHaveBeenCalled();
     expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
   });
 });
@@ -177,4 +244,20 @@ function reservationRequest(): Request {
     },
     method: "POST"
   });
+}
+
+function expectStructuredNotificationFailure(value: unknown, outcome: string): void {
+  expect(typeof value).toBe("string");
+  const serialized = String(value);
+  expect(JSON.parse(serialized)).toEqual({
+    date: confirmedReservation.date,
+    event: "reservation_created_notification_failed",
+    outcome,
+    reservationId: confirmedReservation.id,
+    studyPeriod: confirmedReservation.studyPeriod
+  });
+  expect(serialized).not.toContain(confirmedReservation.reason);
+  expect(serialized).not.toContain(confirmedReservation.userId);
+  expect(serialized).not.toContain("discord down");
+  expect(serialized).not.toContain("/api/webhooks/");
 }

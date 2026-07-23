@@ -539,107 +539,6 @@
   height: 100%;
 }
 
-.applicant-list {
-  background: var(--fog);
-  border-radius: var(--radius);
-  display: grid;
-  gap: var(--space-4);
-  padding: var(--space-5);
-}
-
-.applicant-toggle {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--graphite);
-  display: grid;
-  font: inherit;
-  gap: var(--space-4);
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-height: var(--control-height-md);
-  padding: 0;
-  text-align: left;
-  transition: color var(--motion);
-  width: 100%;
-}
-
-.applicant-toggle span:first-child {
-  color: var(--graphite);
-  font-size: var(--text-ui);
-  font-weight: var(--weight-medium);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.applicant-toggle svg {
-  color: var(--blue);
-  transition: transform var(--motion);
-}
-
-.applicant-toggle:hover {
-  color: var(--ink);
-}
-
-.applicant-list[data-open="true"] .applicant-toggle svg {
-  transform: rotate(180deg);
-}
-
-.applicant-content {
-  display: grid;
-  gap: var(--space-4);
-  max-height: var(--applicant-list-max-height);
-  opacity: 1;
-  overflow: auto;
-  transition:
-    opacity 0.18s ease,
-    visibility 0.18s ease;
-  visibility: visible;
-}
-
-.applicant-content[aria-hidden="true"] {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  pointer-events: none;
-  visibility: hidden;
-}
-
-.applicant-head,
-.applicant-list li {
-  align-items: center;
-  display: flex;
-  gap: var(--space-4);
-  justify-content: space-between;
-}
-
-.applicant-head {
-  color: var(--pewter);
-  font-size: var(--text-sm);
-}
-
-.applicant-list ul {
-  display: grid;
-  gap: var(--space-2);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.applicant-list li {
-  background: var(--white);
-  border-radius: var(--radius);
-  color: var(--ink);
-  min-height: var(--control-height-sm);
-  padding: var(--space-2) var(--space-4);
-}
-
-.applicant-list li span {
-  color: var(--pewter);
-  font-size: var(--text-sm);
-}
-
 .toast {
   background: var(--overlay-toast);
   border: var(--stroke-width) solid var(--silver);
@@ -682,6 +581,57 @@
   position: relative;
   width: min(100%, var(--dialog-width));
   z-index: 1;
+}
+
+.reservation-processing-backdrop {
+  background: var(--overlay-backdrop);
+  display: grid;
+  inset: 0;
+  padding: var(--space-11);
+  place-items: center;
+  position: fixed;
+  z-index: var(--z-overlay);
+}
+
+.reservation-processing-card {
+  align-items: center;
+  background: var(--white);
+  border: var(--stroke-width) solid var(--silver);
+  border-radius: var(--radius);
+  color: var(--graphite);
+  display: grid;
+  gap: var(--space-4);
+  justify-items: center;
+  max-width: var(--dialog-width);
+  padding: var(--space-10);
+  text-align: center;
+  width: min(100%, var(--dialog-width));
+}
+
+.reservation-processing-card strong {
+  color: var(--ink);
+  font-size: var(--text-title);
+  font-weight: var(--weight-medium);
+}
+
+.reservation-processing-card p {
+  font-size: var(--text-ui);
+  line-height: var(--leading-form);
+  margin: 0;
+}
+
+.reservation-processing-spinner {
+  align-items: center;
+  border-radius: var(--radius);
+  color: var(--blue);
+  display: inline-flex;
+  height: var(--icon-size-lg);
+  justify-content: center;
+  width: var(--icon-size-lg);
+}
+
+.reservation-processing-spinner svg {
+  animation: refresh-spin 0.9s linear infinite;
 }
 
 .confirm-close {
@@ -1051,6 +1001,10 @@
     grid-template-columns: 1fr;
   }
 
+  .workspace {
+    grid-template-rows: auto 1fr;
+  }
+
   .workspace[data-sidebar="closed"] {
     grid-template-columns: 1fr;
   }
@@ -1244,9 +1198,6 @@
   .tabbar button,
   .calendar-day,
   .status-filter button,
-  .applicant-toggle,
-  .applicant-toggle svg,
-  .applicant-content,
   .meter span,
   .student-notification-spinner,
   .student-notification-chevron,

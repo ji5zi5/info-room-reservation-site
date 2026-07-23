@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  applyUserRestriction,
   cancelAdminReservation,
+  fetchAdminDashboard,
   fetchAdminNotificationSettings,
   fetchAdminSettings,
   markReservationNoShow,
+  reconcileClosedPeriodNotification,
   saveAdminNotificationSettings,
   saveAdminSettings
 } from "./admin-api-client";
@@ -104,6 +107,45 @@ describe("admin api client", () => {
     });
   });
 
+  it("reads periods and the bounded notification reconciliation backlog together", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(
+          JSON.stringify({
+            notificationBacklog: [
+              {
+                attempts: 1,
+                date: "2026-06-12",
+                failureCode: "discord_timeout",
+                lastError: "Discord response timed out",
+                nextAttemptAt: null,
+                status: "UNKNOWN",
+                studyPeriod: "EIGHTH",
+                updatedAt: "2026-06-12T07:25:00.000Z"
+              }
+            ],
+            periods: [dashboardPeriod]
+          }),
+          { status: 200 }
+        )
+    );
+
+    await expect(fetchAdminDashboard("2026-06-12")).resolves.toEqual({
+      data: {
+        notificationBacklog: [
+          expect.objectContaining({
+            date: "2026-06-12",
+            status: "UNKNOWN",
+            studyPeriod: "EIGHTH"
+          })
+        ],
+        periods: [dashboardPeriod]
+      },
+      kind: "ok"
+    });
+  });
+
   it("saves only Discord notification toggle values", async () => {
     csrfFetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
 
@@ -124,6 +166,55 @@ describe("admin api client", () => {
           reservationCreatedNotificationsEnabled: true
         }
       })
+    );
+  });
+
+  it("sends only the delivery identity and selected reconciliation action", async () => {
+    csrfFetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await expect(
+      reconcileClosedPeriodNotification(
+        {
+          attempts: 1,
+          date: "2026-06-12",
+          failureCode: "discord_timeout",
+          lastError: "Discord response timed out",
+          nextAttemptAt: null,
+          status: "UNKNOWN",
+          studyPeriod: "EIGHTH",
+          updatedAt: "2026-06-12T07:25:00.000Z"
+        },
+        "confirm_sent"
+      )
+    ).resolves.toBe(true);
+
+    const [url, request] = csrfFetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/notifications/closed-periods/reconcile");
+    expect(request?.body).toBe(
+      JSON.stringify({
+        action: "confirm_sent",
+        date: "2026-06-12",
+        studyPeriod: "EIGHTH"
+      })
+    );
+  });
+
+  it("sends the selected shadow-ban profile when applying a restriction", async () => {
+    csrfFetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await expect(
+      applyUserRestriction("user-1", {
+        days: null,
+        reason: "블랙리스트",
+        shadowBanProfile: "HIGH",
+        status: "SHADOW_BANNED"
+      })
+    ).resolves.toBe(true);
+
+    const [url, request] = csrfFetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/admin/users/user-1/restriction");
+    expect(request?.body).toBe(
+      JSON.stringify({ days: null, reason: "블랙리스트", shadowBanProfile: "HIGH", status: "SHADOW_BANNED" })
     );
   });
 
@@ -149,3 +240,19 @@ describe("admin api client", () => {
     expect(request?.headers).toEqual({ "content-type": "application/json" });
   });
 });
+
+const dashboardPeriod = {
+  applicants: [],
+  capacity: 10,
+  closeTime: "16:20",
+  confirmedCount: 3,
+  date: "2026-06-12",
+  enabled: true,
+  isClosed: true,
+  label: "8면학",
+  notification: null,
+  openTime: "13:00",
+  remaining: 7,
+  studyPeriod: "EIGHTH",
+  windowState: "closed"
+} as const;
