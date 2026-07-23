@@ -50,9 +50,9 @@ Branch: main
 ## DATA AND ENV
 
 - Prisma datasource is PostgreSQL. Local SQLite assumptions are stale.
-- Required production envs: `DATABASE_URL`, `DIRECT_URL`, `SESSION_SECRET`, `ADMIN_STUDENT_NUMBERS`, `CRON_SECRET`, `DISCORD_WEBHOOK_URL`, `TRUST_FORWARDED_IP_HEADERS=true`.
+- Required production envs: `DATABASE_URL`, `DIRECT_URL`, `SESSION_SECRET`, `ADMIN_STUDENT_NUMBERS`, `CLOSED_PERIOD_CRON_SECRET`, `MAINTENANCE_CRON_SECRET`, `DISCORD_WEBHOOK_URL`, `TRUST_FORWARDED_IP_HEADERS=true`.
 - Development toggles: `RIRO_MOCK_LOGIN`, `ENABLE_LOCAL_ADMIN`, `ENABLE_LOCAL_STUDENT`, `ADMIN_LOGIN_ID`, `ADMIN_LOGIN_PASSWORD`, `LOCAL_STUDENT_*`. Production must not rely on these.
-- Current scheduling: external cron triggers `GET /api/cron/closed-period-notifications`; Vercel cron triggers `GET /api/cron/maintenance`; both use `Authorization: Bearer ${CRON_SECRET}`. GitHub Actions is fallback/manual only.
+- Current scheduling: external cron triggers `GET /api/cron/closed-period-notifications` every minute with `CLOSED_PERIOD_CRON_SECRET` and `GET /api/cron/maintenance` daily at 04:00 KST with `MAINTENANCE_CRON_SECRET`. GitHub Actions is fallback/manual only.
 - Production sessions should set Secure cookies via `src/lib/session.ts`.
 - External live checks use `npm run smoke:external`; never commit real smoke credentials or webhook URLs.
 

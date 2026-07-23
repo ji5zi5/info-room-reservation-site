@@ -18,7 +18,7 @@
 
 ## CONVENTIONS
 
-- Tests target `E2E_BASE_URL`, defaulting to `http://localhost:3000`; Playwright does not start the dev server.
+- Tests require an explicit `E2E_BASE_URL`; Playwright never starts or reuses a dev server.
 - The config intentionally runs one Chromium project with `workers: 1`; avoid assumptions that require parallel isolation.
 - Use `mockClientDate` before navigation when date policy matters.
 - Use unique login IDs with `Date.now()` for stateful flows.

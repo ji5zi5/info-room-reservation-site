@@ -27,8 +27,8 @@ src/app/
 | Admin route UI | `admin/page.tsx`, `admin/admin-console.tsx`, `reservation-home.tsx` | Admins also see `AdminConsole` immediately after normal login. |
 | Route handlers | `api/` | Nested `AGENTS.md` covers request parsing, auth, CSRF, and mutation rules. |
 | Reservation API | `api/reservations/route.ts`, `api/reservations/[id]/route.ts` | Server must be the authority for capacity, duplicates, windows, restrictions. |
-| Period summary API | `api/periods/route.ts` | Must include applicants and current user's `myReservationId`. |
-| Cron | `api/cron/closed-period-notifications/route.ts`, `api/cron/maintenance/route.ts` | Bearer secret required. |
+| Period summary API | `api/periods/route.ts` | Return aggregate counts and the current user's `myReservationId`; never return peer applicant identity. |
+| Cron | `api/cron/closed-period-notifications/route.ts`, `api/cron/maintenance/route.ts` | Each route requires its own scoped bearer secret. |
 
 ## CONVENTIONS
 
@@ -45,7 +45,7 @@ src/app/
 - `8면학` cards appear before `1면학` cards.
 - `당일예약` and `사전예약` tab areas must not shift size when switching.
 - `사전예약` chooses date before showing period cards.
-- Applicant lists are collapsed by default and toggle with accessible buttons.
+- Student period cards show aggregate availability only; applicant identity remains admin-only.
 - Mobile layouts must avoid horizontal overflow at 390px.
 - Buttons, chips, pills, and compact controls should preserve the design radius instead of drifting into oversized rounded badges.
 

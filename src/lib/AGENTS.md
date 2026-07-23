@@ -33,12 +33,14 @@
 - `RESTRICTED` blocks until `restrictedUntil` is null or in the future.
 - Discord payloads must include `allowed_mentions: { parse: [] }`.
 - Discord webhook execution should use `wait=true` so message IDs can be recorded.
+- Discord reservation payloads contain aggregate period metadata and deterministic delivery/reservation references only; never include student identity or free-text reasons.
 - `NotificationDelivery` uniqueness is `date + studyPeriod + kind`; use it to avoid duplicate cron sends.
 - Reservation-created Discord alerts are immediate best-effort sends and do not use `NotificationDelivery`.
 
 ## ANTI-PATTERNS
 
 - Do not duplicate Korean labels or period ordering outside `study-periods.ts`.
+- Do not expose peer applicant identity or internal shadow-ban profile fields through student-facing DTOs.
 - Do not use random success, fake close, or deceptive delay logic in reservation services.
 - Do not let reservation-created Discord failures change reservation success responses.
 - Do not make local admin/student fallback depend on `RIRO_MOCK_LOGIN`; use explicit env gates.

@@ -31,7 +31,7 @@ src/app/api/
 | Admin transitions | `admin/reservations/[id]/cancel/route.ts`, `admin/reservations/[id]/no-show/route.ts` | Only transition `CONFIRMED` reservations. |
 | User sanctions | `admin/users/[id]/restriction/route.ts` | `BANNED` uses `days: null`; `RESTRICTED` requires days. |
 | Discord send | `admin/notifications/closed-periods/send/route.ts`, `reservations/route.ts` | Manual close-list sends stay in admin; reservation-created alerts are student-route best-effort only. |
-| Cron | `cron/closed-period-notifications/route.ts`, `cron/maintenance/route.ts` | `Authorization: Bearer ${CRON_SECRET}` required. |
+| Cron | `cron/closed-period-notifications/route.ts`, `cron/maintenance/route.ts` | Separate `CLOSED_PERIOD_CRON_SECRET` and `MAINTENANCE_CRON_SECRET` bearer tokens are required. |
 
 ## CONVENTIONS
 
