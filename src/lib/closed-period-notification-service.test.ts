@@ -22,9 +22,10 @@ describe("closed period notification service", () => {
     const result = await service.sendClosedPeriod({ date: "2026-06-12", studyPeriod: "EIGHTH" });
 
     expect(result.kind).toBe("sent");
-    expect(sentTitles).toEqual(["8면학 마감 알림"]);
-    expect(sentPayloads[0]).not.toContain("26001");
-    expect(sentPayloads[0]).not.toContain("자습");
+    expect(sentTitles).toEqual(["8면학 마감 신청자 명단"]);
+    expect(sentPayloads[0]).toContain("26001");
+    expect(sentPayloads[0]).toContain("자습");
+    expect(sentPayloads[0]).not.toContain("closed-period:");
     expect(repository.writes).toEqual([
       expect.objectContaining({
         date: "2026-06-12",

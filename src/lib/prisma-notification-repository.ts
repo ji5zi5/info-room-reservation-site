@@ -44,7 +44,12 @@ export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationR
         studyPeriod: input.studyPeriod
       }
     });
-    const confirmedCount = await prisma.reservation.count({
+    const reservations = await prisma.reservation.findMany({
+      orderBy: { createdAt: "asc" },
+      select: {
+        reason: true,
+        user: { select: { name: true, studentNumber: true } }
+      },
       where: {
         date: input.date,
         status: "CONFIRMED",
@@ -53,7 +58,11 @@ export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationR
     });
     return toNotificationPeriod(
       resolveEffectivePeriodSetting(input.date, input.studyPeriod, settings),
-      confirmedCount
+      reservations.map((reservation) => ({
+        name: reservation.user.name,
+        reason: reservation.reason,
+        studentNumber: reservation.user.studentNumber
+      }))
     );
   },
 
@@ -395,12 +404,13 @@ export function toDeliveryRecord(delivery: NotificationDelivery): ClosedPeriodNo
 
 function toNotificationPeriod(
   setting: PeriodSetting | PeriodSettingDefaults,
-  confirmedCount: number
+  applicants: ClosedPeriodNotificationPeriod["applicants"]
 ): ClosedPeriodNotificationPeriod {
   return {
+    applicants,
     capacity: setting.capacity,
     closeTime: setting.closeTime,
-    confirmedCount,
+    confirmedCount: applicants.length,
     date: setting.date,
     enabled: setting.enabled,
     openTime: setting.openTime,

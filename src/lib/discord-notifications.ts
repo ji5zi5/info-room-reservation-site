@@ -3,10 +3,19 @@ import ky, { HTTPError, isTimeoutError } from "ky";
 import { parseDiscordWebhookUrl } from "./discord-webhook-url";
 import { getStudyPeriodLabel, type StudyPeriod } from "./study-periods";
 
+const DISCORD_FIELD_VALUE_LIMIT = 1024;
+const DISCORD_SAFE_FIELD_VALUE_LIMIT = 900;
 const DISCORD_WEBHOOK_URL_PATTERN =
   /(https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+)\/[^\s"')<>]+/gu;
 
+export type ClosedPeriodNotificationApplicant = {
+  readonly name: string;
+  readonly reason: string | null;
+  readonly studentNumber: string;
+};
+
 export type ClosedPeriodNotificationInput = {
+  readonly applicants: readonly ClosedPeriodNotificationApplicant[];
   readonly capacity: number;
   readonly closeTime: string;
   readonly confirmedCount: number;
@@ -76,14 +85,8 @@ export function buildClosedPeriodDiscordPayload(input: ClosedPeriodNotificationI
       {
         color: 0xe82127,
         description: `${input.date} · ${input.closeTime} 마감 · ${input.confirmedCount}/${input.capacity}명`,
-        fields: [
-          {
-            inline: false,
-            name: "전송 ID",
-            value: `closed-period:${input.date}:${input.studyPeriod}`
-          }
-        ],
-        title: `${label} 마감 알림`
+        fields: buildApplicantFields(input.applicants),
+        title: `${label} 마감 신청자 명단`
       }
     ],
     username: "정보실 예약"
@@ -183,4 +186,47 @@ function retryAfterAt(headers: Headers, now: Date): Date | null {
 
 export function redactDiscordWebhookTokens(message: string): string {
   return message.replace(DISCORD_WEBHOOK_URL_PATTERN, "$1/[redacted]");
+}
+
+function buildApplicantFields(
+  applicants: readonly ClosedPeriodNotificationApplicant[]
+): readonly DiscordEmbedField[] {
+  if (applicants.length === 0) {
+    return [{ inline: false, name: "신청자", value: "신청자 없음" }];
+  }
+
+  return chunkApplicantLines(applicants.map(formatApplicantLine)).map((chunk, index) => ({
+    inline: false,
+    name: index === 0 ? "신청자" : "신청자 계속",
+    value: chunk
+  }));
+}
+
+function formatApplicantLine(applicant: ClosedPeriodNotificationApplicant, index: number): string {
+  return `${index + 1}. ${applicant.name} (${applicant.studentNumber}) - ${reservationReasonLabel(applicant.reason)}`;
+}
+
+function reservationReasonLabel(reason: string | null): string {
+  const normalized = reason?.trim();
+  return normalized ? normalized : "사유 미기록";
+}
+
+function chunkApplicantLines(lines: readonly string[]): readonly string[] {
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const line of lines) {
+    const next = current ? `${current}\n${line}` : line;
+    if (next.length > DISCORD_SAFE_FIELD_VALUE_LIMIT && current) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = next;
+    }
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks.map((chunk) => chunk.slice(0, DISCORD_FIELD_VALUE_LIMIT));
 }

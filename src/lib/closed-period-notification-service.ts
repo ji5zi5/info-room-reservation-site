@@ -10,12 +10,14 @@ import {
   buildClosedPeriodDiscordPayload,
   classifyDiscordWebhookError,
   redactDiscordWebhookTokens,
+  type ClosedPeriodNotificationApplicant,
   type DiscordWebhookPayload,
   type DiscordWebhookSendResult
 } from "./discord-notifications";
 import type { StudyPeriod } from "./study-periods";
 
 export type ClosedPeriodNotificationPeriod = {
+  readonly applicants: readonly ClosedPeriodNotificationApplicant[];
   readonly capacity: number;
   readonly closeTime: string;
   readonly confirmedCount: number;
