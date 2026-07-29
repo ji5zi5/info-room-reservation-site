@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -19,21 +19,24 @@ const RETENTION_MIGRATION_PATH = join(
   "migration.sql"
 );
 
-const RLS_TABLES = [
-  "AdminAction",
-  "AuditLog",
-  "CsrfToken",
-  "NotificationDelivery",
-  "PeriodSetting",
-  "RateLimitBucket",
-  "Reservation",
-  "Session",
-  "User",
-  "UserSanction"
-] as const;
+const PRISMA_MIGRATION_ROOT = join(process.cwd(), "prisma", "migrations");
+const PRISMA_SCHEMA_PATH = join(process.cwd(), "prisma", "schema.prisma");
 
 function readRlsMigration(): string {
   return readFileSync(RLS_MIGRATION_PATH, "utf8");
+}
+
+function readAllMigrations(): string {
+  return readdirSync(PRISMA_MIGRATION_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => readFileSync(join(PRISMA_MIGRATION_ROOT, entry.name, "migration.sql"), "utf8"))
+    .join("\n");
+}
+
+function prismaTableNames(): readonly string[] {
+  const schema = readFileSync(PRISMA_SCHEMA_PATH, "utf8");
+  return Array.from(schema.matchAll(/^model\s+([A-Za-z][A-Za-z0-9_]*)\s+\{/gmu), (match) => match[1])
+    .filter((name): name is string => name !== undefined);
 }
 
 describe("Postgres row level security policy migration", () => {
@@ -46,10 +49,10 @@ describe("Postgres row level security policy migration", () => {
     expect(sql).not.toMatch(/FORCE\s+ROW\s+LEVEL\s+SECURITY/iu);
   });
 
-  it("enables RLS on user-owned and operational tables", () => {
-    const sql = readRlsMigration();
+  it("enables RLS on every Prisma and migration metadata table", () => {
+    const sql = readAllMigrations();
 
-    for (const tableName of RLS_TABLES) {
+    for (const tableName of [...prismaTableNames(), "_prisma_migrations"]) {
       expect(sql).toContain(`ALTER TABLE "${tableName}" ENABLE ROW LEVEL SECURITY;`);
     }
   });
