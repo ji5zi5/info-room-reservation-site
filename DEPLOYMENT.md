@@ -4,8 +4,8 @@ Target platform: Vercel with managed Postgres.
 
 ## Required Environment Variables
 
-- `DATABASE_URL`: runtime Postgres connection string. On Supabase, use the transaction pooler.
-- `DIRECT_URL`: migration Postgres connection string. On Supabase, use the session pooler.
+- `DATABASE_URL`: `info_room_runtime` runtime connection string. On Supabase, use the transaction pooler.
+- `DIRECT_URL`: owner-only migration connection string. On Supabase, use the `postgres` session pooler.
 - `SESSION_SECRET`: long random secret for session signing.
 - `ADMIN_STUDENT_NUMBERS`: comma-separated student numbers with admin access.
 - `CLOSED_PERIOD_CRON_SECRET`: bearer token used only by the closed-period notification cron.
@@ -58,10 +58,10 @@ previous deployment; an applied database migration is corrected with a forward m
 
 ## Supabase Postgres
 
-Use two Supabase connection strings:
+Use two Supabase connection strings with separate database roles:
 
-- `DATABASE_URL`: Supabase transaction pooler connection, usually port `6543`. This is the runtime URL used by Vercel serverless functions.
-- `DIRECT_URL`: Supabase session pooler connection, usually port `5432`. This is used by Prisma Migrate through `directUrl` in `prisma/schema.prisma`.
+- `DATABASE_URL`: `info_room_runtime` through the Supabase transaction pooler, usually port `6543`. This role can read and mutate application rows but cannot run DDL, manage roles, or read Prisma migration history.
+- `DIRECT_URL`: the `postgres` owner through the Supabase session pooler, usually port `5432`. Only Prisma Migrate uses this URL.
 
 Supabase direct database hosts can require IPv6. If your network or deploy environment is IPv4-only, use the Supavisor session pooler for `DIRECT_URL` instead of `db.<project-ref>.supabase.co`. On Vercel, set both env vars for Production, Preview, and Development if those environments deploy against Supabase. If you use separate Supabase projects per environment, keep the matching transaction/session pair together.
 
@@ -73,16 +73,14 @@ This app does not use Supabase Auth sessions. It authenticates with Riro, stores
 
 The committed migration `prisma/migrations/20260630150000_add_rls_policies/migration.sql` adds staged Postgres policies that read `app.current_user_id` and `app.current_user_role`. Runtime code sets those variables with transaction-local `set_config(..., true)` in the core auth/session/CSRF/rate-limit/maintenance/student-reservation paths.
 
-Do not switch `DATABASE_URL` to a limited non-owner role, and do not use `FORCE ROW LEVEL SECURITY`, until every remaining direct Prisma surface has been wrapped and smoke-tested with that exact runtime role. The current staged policy is safe to deploy because table owners still bypass RLS unless forced; it prepares the schema without pretending that Supabase `auth.uid()` applies to Riro sessions.
+The migration `20260729060000_add_limited_runtime_role` creates the non-owner `info_room_runtime` login without a password. Set its password through the Supabase SQL editor, then put that role only in `DATABASE_URL`. Never use the runtime role in `DIRECT_URL`.
 
 Guarded rollout:
 
-1. Deploy the staged migration with the existing owner/migration role.
-2. Keep API authorization tests and route guards as the active production boundary.
-3. Wrap and smoke-test the remaining admin/profile/closed-list repository queries with actor or system database context.
-4. Create a limited runtime role for Vercel `DATABASE_URL`; keep `DIRECT_URL` as the migration owner.
-5. Run production-like smoke for login, `/api/me`, reservation create/cancel, admin dashboard, student profile, closed-list cron, and maintenance cron.
-6. Only after those pass, consider `FORCE ROW LEVEL SECURITY` table by table.
+1. Deploy migrations with the existing owner role in `DIRECT_URL`.
+2. Assign a generated password to `info_room_runtime`.
+3. Set Vercel `DATABASE_URL` to the runtime role and keep `DIRECT_URL` as the migration owner.
+4. Run production-like smoke for login, `/api/me`, reservation create/cancel, admin dashboard, student profile, closed-list cron, and maintenance cron.
 
 See `supabase/rls-readiness.sql` for the operator checklist. A direct database credential leak still bypasses app-level checks if the leaked role can set arbitrary `app.current_*` variables or owns the tables, so database credentials must stay server-only.
 
