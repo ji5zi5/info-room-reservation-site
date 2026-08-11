@@ -32,6 +32,72 @@ Optional:
 - `ENABLE_PRODUCTION_LOCAL_STUDENT`: explicit production-only student fallback. Use only when Riro login is unavailable and pair it with local student credentials.
 - `LOCAL_STUDENT_LOGIN_ID`, `LOCAL_STUDENT_LOGIN_PASSWORD`, `LOCAL_STUDENT_NUMBER`: local student credentials when fallback login is enabled. IDs and numbers may be comma-separated; password may be one shared value or a comma-separated list matching the IDs.
 
+### Optional Discord Application group
+
+Interactive reservation operations are optional. With all seven variables absent, the
+application stays in webhook-only mode. If any one is present, every value is required in
+Production, Preview, Development, and local checks; partial configuration fails closed:
+
+- `DISCORD_APPLICATION_ID`: Discord application ID.
+- `DISCORD_PUBLIC_KEY`: the application's 64-hex-character Ed25519 public key.
+- `DISCORD_BOT_TOKEN`: bot token; server-only and never logged.
+- `DISCORD_GUILD_ID`: the one operations guild.
+- `DISCORD_CHANNEL_ID`: the private operations channel.
+- `DISCORD_ADMIN_ROLE_ID`: the role required to use reservation controls.
+- `DISCORD_ADMIN_USER_MAP`: comma-separated one-to-one `discordUserId:studentNumber` bindings. Discord IDs and student numbers cannot be repeated. Use placeholders in documentation, never copied live identifiers.
+
+`DISCORD_WEBHOOK_URL` remains required and independent. Closed-period messages continue
+through the original webhook. It is also the reservation-alert fallback when application
+delivery has a definite failure; ambiguous bot delivery is retried with the same nonce.
+
+## Discord Interactive Operations
+
+Use a dedicated Discord application installed only in the operations guild. In OAuth2 URL
+Generator select the `bot` scope and grant only `View Channel`, `Send Messages`, `Embed
+Links`, and `Read Message History`. Slash-command and Gateway scopes are not needed. Deny
+`View Channel` to `@everyone`, grant it only to the configured operations role and bot, and
+review category plus channel role/member overwrites. The guild owner and roles with the
+unavoidable `Administrator` permission can still view and must be part of the approved
+operations access list.
+
+In the Discord Developer Portal set Interactions Endpoint URL to:
+
+```text
+https://your-production-domain.example/api/discord/interactions
+```
+
+Discord validates this endpoint with a signed PING. The route verifies the Ed25519
+signature over the timestamp plus untouched bounded raw body, enforces the five-minute
+replay window, and rejects invalid requests before JSON parsing. There is no unsigned or
+test-bypass mode.
+
+The channel is private operations infrastructure. Student identity and reservation reason
+may appear there only after confirmed consent, with the configured role and mapped local
+administrator guard. Messages disable all mentions. Bot messages, interaction receipts,
+and their ledger rows expire after 30 days. Never copy this data to public channels,
+student-facing APIs, screenshots, or unsecured evidence.
+
+### Setup and rollout
+
+1. Create the application/bot, private channel, role, and one-to-one administrator map.
+2. Set the complete seven-variable group in the target environment. Keep the webhook set.
+3. Run `npm run predeploy:check`; output must say `discordApplication=enabled`. A missing group member, malformed public key/ID/map, or duplicate map binding must fail.
+4. Run `npm run discord:verify-setup -- --fixture private` for a no-network fixture check, then `npm run discord:verify-setup` with the target environment loaded. The live check reads guild roles, bot membership, channel/category overwrites, and the guild owner. It fails on a leaked role/member viewer, an unapproved effective viewer, partial configuration, missing bot permissions, or API/auth mismatch.
+5. Deploy to staging, configure its Interaction Endpoint URL, and run `npm run discord:smoke -- --mode route --port 3217`. This generates/signs requests locally and never writes to production Discord. Use `--mode full` only with `INTEGRATION_DATABASE_URL` pointing to loopback Postgres and a database name ending `_test`; it refuses every other database.
+6. Confirm signed PING, authorization rejects, modal/deferred responses, source-message completion, and webhook fallback. Promote the already-tested deployment, then repeat setup verification against production.
+
+The one-minute closed-period cron independently recovers pending initial sends and source
+message updates. Monitor interaction 4xx/5xx and latency, bot delivery outcomes, fallback
+count, retry age, claim age, unsynced revisions, and cron execution. Alert before a retry
+reaches its 60-minute cap. Keep the existing webhook operational so webhook-only mode and
+definite-failure fallback remain available.
+
+### Secret and identity rotation
+
+- Bot token: create/reset it in the Developer Portal, update `DISCORD_BOT_TOKEN` in every deployed environment as one complete group update, redeploy, and run setup verification. Revoke the old token immediately after the new deployment passes.
+- Public key/application replacement: create the replacement application, update all seven variables together, deploy, set and validate the new endpoint, then remove the old endpoint and credentials.
+- Role, channel, or administrator changes: update the matching ID/map as a complete group, review Discord overwrites, deploy, and rerun setup verification. Remove departed operators from both Discord access and the map.
+
 ## Vercel Build
 
 Set the Vercel build command to:
@@ -230,10 +296,19 @@ SMOKE_FORCE_DISCORD_SEND=true
 
 ## Rollback
 
-1. Roll back the Vercel deployment to the previous successful build.
-2. Do not run `db push` against production.
-3. If a migration has already been applied, create a forward migration that restores the expected schema.
-4. Re-run the smoke checks after rollback.
+For interactive Discord controls, use this exact order before changing the application
+deployment:
+
+1. Run `npm run discord:disable-pending -- --confirm DISABLE_DISCORD_INTERACTIONS` and require a successful report that every active bot message has controls removed.
+2. Remove the Interaction Endpoint URL in the Discord Developer Portal.
+3. Unset the complete seven-variable Discord application group together. Keep `DISCORD_WEBHOOK_URL` set so closed-period and fallback delivery remain available.
+
+Then roll back the Vercel deployment to the previous successful build. Do not run `db push`
+against production. If a migration has already been applied, create a forward migration
+that restores the expected schema, and re-run webhook, cron, application-disabled
+predeploy, and smoke checks. If disabling controls fails, stop: do not remove the endpoint
+or unset credentials until the command can finish, because doing so would strand active
+controls.
 
 ## Local Smoke Test
 

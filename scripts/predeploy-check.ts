@@ -36,7 +36,8 @@ try {
   }
   assertProductionEnvSafe(process.env);
   console.log(
-    `Predeploy environment check passed. deploymentSha=${deploymentSha ?? "unbound"} ` +
+    `Predeploy environment check passed. discordApplication=${env.discordApplication === null ? "webhook-only" : "enabled"} ` +
+    `deploymentSha=${deploymentSha ?? "unbound"} ` +
     `migrationDigest=${migrationDigest()}`
   );
 } catch (error) {

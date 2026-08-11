@@ -33,7 +33,7 @@
 - `RESTRICTED` blocks until `restrictedUntil` is null or in the future.
 - Discord payloads must include `allowed_mentions: { parse: [] }`.
 - Discord webhook execution should use `wait=true` so message IDs can be recorded.
-- Discord reservation payloads contain aggregate period metadata and deterministic delivery/reservation references only; never include student identity or free-text reasons.
+- With confirmed consent, Discord reservation payloads may include student identity and the reservation reason only in the configured private operations channel. The configured role guard, explicit one-to-one administrator map, `allowed_mentions: { parse: [] }`, and 30-day bot-message/ledger retention are mandatory; public and student-facing surfaces remain prohibited.
 - `NotificationDelivery` uniqueness is `date + studyPeriod + kind`; use it to avoid duplicate cron sends.
 - Reservation-created Discord alerts are immediate best-effort sends and do not use `NotificationDelivery`.
 

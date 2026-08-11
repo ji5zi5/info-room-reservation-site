@@ -11,6 +11,7 @@ src/app/api/
 ├── admin/        # Admin dashboard, settings, users, reservation transitions
 ├── auth/         # Riro login and logout
 ├── cron/         # Vercel cron endpoints
+├── discord/      # Signed Discord interaction endpoint
 ├── reservations/ # Student create/cancel reservation endpoints
 ├── csrf/         # CSRF token endpoint
 ├── me/           # Current session payload
@@ -31,11 +32,12 @@ src/app/api/
 | Admin transitions | `admin/reservations/[id]/cancel/route.ts`, `admin/reservations/[id]/no-show/route.ts` | Only transition `CONFIRMED` reservations. |
 | User sanctions | `admin/users/[id]/restriction/route.ts` | `BANNED` uses `days: null`; `RESTRICTED` requires days. |
 | Discord send | `admin/notifications/closed-periods/send/route.ts`, `reservations/route.ts` | Manual close-list sends stay in admin; reservation-created alerts are student-route best-effort only. |
+| Discord interactions | `discord/interactions/route.ts` | Preserve bounded raw bytes for Ed25519 verification before JSON parsing; this is the sole exception to the shared JSON reader. |
 | Cron | `cron/closed-period-notifications/route.ts`, `cron/maintenance/route.ts` | Separate `CLOSED_PERIOD_CRON_SECRET` and `MAINTENANCE_CRON_SECRET` bearer tokens are required. |
 
 ## CONVENTIONS
 
-- Use `readJsonRequest` for JSON bodies; do not call `request.json()` directly.
+- Use `readJsonRequest` for JSON bodies; do not call `request.json()` directly. The signed Discord interaction endpoint instead reads one bounded raw byte body, verifies Ed25519, then decodes and parses those exact bytes.
 - Validate route input with Zod at the boundary and return `jsonError` for expected failures.
 - Use `requireUser()` for student routes and `requireAdmin()` for admin routes.
 - Apply `assertRequestSafe`/CSRF/rate-limit checks before mutations.
