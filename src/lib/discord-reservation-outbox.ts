@@ -248,23 +248,38 @@ async function finishWebhookDelivery(
   if (!started) {
     return "terminal";
   }
-  const result = await dependencies.sendWebhook({
-    applicant: snapshot.reservation.user,
-    notificationSettings: settings,
-    reservation: reservationFromSnapshot(snapshot),
-    webhookUrl
-  });
-  const terminal = webhookTerminalResult(prefix, result);
-  await dependencies.repository.saveInitialSendFailure({
-    attempts: claim.attempts,
-    claimId: claim.claimId,
-    error: terminal.error,
-    now,
-    outcome: terminal.outcome,
-    reservationId: claim.reservationId,
-    retryable: false
-  });
-  return "terminal";
+  try {
+    const result = await dependencies.sendWebhook({
+      applicant: snapshot.reservation.user,
+      notificationSettings: settings,
+      reservation: reservationFromSnapshot(snapshot),
+      webhookUrl
+    });
+    const terminal = webhookTerminalResult(prefix, result);
+    await dependencies.repository.saveInitialSendFailure({
+      attempts: claim.attempts,
+      claimId: claim.claimId,
+      error: terminal.error,
+      now,
+      outcome: terminal.outcome,
+      reservationId: claim.reservationId,
+      retryable: false
+    });
+    return "terminal";
+  } catch (error) {
+    await Promise.allSettled([
+      dependencies.repository.saveInitialSendFailure({
+        attempts: claim.attempts,
+        claimId: claim.claimId,
+        error: errorMessage(error),
+        now,
+        outcome: `${prefix}_INTERRUPTED`,
+        reservationId: claim.reservationId,
+        retryable: false
+      })
+    ]);
+    return "terminal";
+  }
 }
 
 async function processSyncClaim(

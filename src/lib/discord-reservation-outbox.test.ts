@@ -125,6 +125,48 @@ describe("Discord reservation outbox", () => {
     }));
   });
 
+  it("keeps a successful webhook terminal when the terminal database save throws", async () => {
+    dependencies.bot.createChannelMessage.mockResolvedValue(botFailure());
+    dependencies.repository.saveInitialSendFailure.mockRejectedValueOnce(new Error("terminal save unavailable"));
+    dependencies.repository.claimInitialSend
+      .mockResolvedValueOnce(claim)
+      .mockResolvedValueOnce({ ...claim, attempts: 2, outcome: "WEBHOOK_FALLBACK_STARTED" });
+
+    const first = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
+    const second = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
+
+    expect(first.initial).toMatchObject({ retried: 0, terminal: 1 });
+    expect(second.initial).toMatchObject({ retried: 0, terminal: 1 });
+    expect(dependencies.sendWebhook).toHaveBeenCalledTimes(1);
+    expect(dependencies.repository.saveInitialSendFailure).not.toHaveBeenCalledWith(
+      expect.objectContaining({ retryable: true })
+    );
+    expect(dependencies.repository.saveInitialSendFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "WEBHOOK_FALLBACK_INTERRUPTED", retryable: false })
+    );
+  });
+
+  it("terminalizes an unexpected sender throw without reopening webhook retry", async () => {
+    dependencies.bot.createChannelMessage.mockResolvedValue(botFailure());
+    dependencies.sendWebhook.mockRejectedValueOnce(new Error("unexpected sender failure"));
+    dependencies.repository.claimInitialSend
+      .mockResolvedValueOnce(claim)
+      .mockResolvedValueOnce({ ...claim, attempts: 2, outcome: "WEBHOOK_FALLBACK_STARTED" });
+
+    const first = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
+    const second = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
+
+    expect(first.initial).toMatchObject({ retried: 0, terminal: 1 });
+    expect(second.initial).toMatchObject({ retried: 0, terminal: 1 });
+    expect(dependencies.sendWebhook).toHaveBeenCalledTimes(1);
+    expect(dependencies.repository.saveInitialSendFailure).not.toHaveBeenCalledWith(
+      expect.objectContaining({ retryable: true })
+    );
+    expect(dependencies.repository.saveInitialSendFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "WEBHOOK_FALLBACK_INTERRUPTED", retryable: false })
+    );
+  });
+
   it("performs one terminal webhook fallback for a definite application config failure", async () => {
     dependencies.getApplicationConfig.mockImplementation(() => {
       throw new ServerEnvError(["DISCORD_BOT_TOKEN"]);
