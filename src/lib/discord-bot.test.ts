@@ -111,6 +111,89 @@ describe("Discord bot REST transport", () => {
     expect(bodies[1]).toBe(bodies[0]);
   });
 
+  it("keeps a malformed successful create response ambiguous after one nonce-stable retry", async () => {
+    // Given: Discord accepts both creates but omits a usable message id.
+    const bodies: string[] = [];
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        bodies.push(await request.text());
+        return new Response(JSON.stringify({ id: "" }), { status: 200 });
+      }
+    });
+
+    // When: the bot creates a reservation message.
+    const result = await bot.createChannelMessage({ channelId: "321", payload, reservationId: "reservation-1" });
+
+    // Then: the outcome remains ambiguous, uses the same nonce, and cannot fall back to a webhook.
+    expect(result).toMatchObject({ code: "discord_invalid_response", kind: "unknown", outcome: "UNKNOWN" });
+    expect(canFallbackToDiscordWebhook(result)).toBe(false);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+  });
+
+  it.each([204, 404])("treats Discord message deletion status %s as removed", async (status) => {
+    // Given: Discord confirms deletion or reports that the message is already absent.
+    const requests: Request[] = [];
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async (input, init) => {
+        requests.push(new Request(input, init));
+        return new Response(null, { status });
+      }
+    });
+
+    // When: a channel message is deleted.
+    const result = await bot.deleteChannelMessage({ channelId: "321", messageId: "456" });
+
+    // Then: the operation is safe to follow with conditional ledger cleanup.
+    expect(result).toEqual({ kind: "removed" });
+    expect(requests[0]?.method).toBe("DELETE");
+    expect(requests[0]?.headers.get("authorization")).toBe(`Bot ${botToken}`);
+    expect(requests[0]?.url).toBe("https://discord.com/api/v10/channels/321/messages/456");
+  });
+
+  it("retains a failed deletion result without exposing the bot token", async () => {
+    // Given: the transport fails with a diagnostic containing the bot token.
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async () => {
+        throw new TypeError(`network failed for ${botToken}`);
+      }
+    });
+
+    // When: a channel message deletion is attempted.
+    const result = await bot.deleteChannelMessage({ channelId: "321", messageId: "456" });
+
+    // Then: the retryable failure is typed and redacted.
+    expect(result).toMatchObject({ code: "discord_network_error", kind: "failed" });
+    if (result.kind === "failed") {
+      expect(result.message).not.toContain(botToken);
+    }
+  });
+
+  it.each([401, 403, 429, 500])("returns a redacted failed deletion for Discord HTTP %s", async (status) => {
+    // Given: Discord refuses or cannot complete deletion and includes a secret response body.
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async () => new Response(`secret=${botToken}`, { status })
+    });
+
+    // When: a channel message deletion is attempted.
+    const result = await bot.deleteChannelMessage({ channelId: "321", messageId: "456" });
+
+    // Then: cleanup receives a retain-for-retry result without response content.
+    expect(result).toMatchObject({ code: `discord_http_${status}`, kind: "failed" });
+    if (result.kind === "failed") {
+      expect(result.message).not.toContain(botToken);
+    }
+  });
+
   it("keeps timeout outcomes ambiguous and prevents a webhook fallback", async () => {
     // Given: Discord times out after accepting an unknown amount of request data.
     const bot = createDiscordBotClient({

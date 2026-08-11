@@ -1,20 +1,18 @@
 import { createHash } from "node:crypto";
 
-import ky, { HTTPError, isTimeoutError } from "ky";
+import ky, { HTTPError } from "ky";
 import { z } from "zod";
+
+import { classifyDiscordBotError, getDiscordRateLimitDelay } from "./discord-bot-errors";
+
+export { redactDiscordBotTokens } from "./discord-bot-errors";
 
 const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
 const DISCORD_BOT_TIMEOUT_MS = 10_000;
 const MAX_RATE_LIMIT_RETRIES = 1;
-const INTERACTION_WEBHOOK_TOKEN_PATTERN =
-  /(https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/v\d+\/webhooks\/\d+)\/[^/\s]+/gu;
-const INTERACTION_WEBHOOK_PATH_TOKEN_PATTERN = /(\/webhooks\/\d+)\/[^/\s]+/gu;
 
 const discordMessageResponseSchema = z.object({
   id: z.string().min(1)
-});
-const discordRateLimitResponseSchema = z.object({
-  retry_after: z.number().finite().nonnegative()
 });
 
 export type DiscordEmbedField = {
@@ -65,10 +63,14 @@ export type DiscordBotDeliveryResult =
     }
   | {
       readonly kind: "unknown";
-      readonly code: "discord_network_error" | "discord_timeout";
+      readonly code: "discord_invalid_response" | "discord_network_error" | "discord_timeout";
       readonly message: string;
       readonly outcome: "UNKNOWN";
     };
+
+export type DiscordBotDeleteResult =
+  | { readonly kind: "removed" }
+  | { readonly code: string; readonly kind: "failed"; readonly message: string };
 
 export type DiscordBotClient = {
   readonly createChannelMessage: (input: {
@@ -76,6 +78,10 @@ export type DiscordBotClient = {
     readonly payload: DiscordBotMessagePayload;
     readonly reservationId: string;
   }) => Promise<DiscordBotDeliveryResult>;
+  readonly deleteChannelMessage: (input: {
+    readonly channelId: string;
+    readonly messageId: string;
+  }) => Promise<DiscordBotDeleteResult>;
   readonly editChannelMessage: (input: {
     readonly channelId: string;
     readonly messageId: string;
@@ -96,6 +102,7 @@ type DiscordBotClientInput = {
 
 type RequestOptions = {
   readonly authorization: "bot" | "none";
+  readonly invalidResponseOutcome: "failed" | "unknown";
   readonly method: "PATCH" | "POST";
   readonly payload: DiscordBotMessagePayload;
   readonly url: string;
@@ -119,10 +126,25 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
         }).json<unknown>();
         return { kind: "sent", messageId: discordMessageResponseSchema.parse(body).id };
       } catch (error) {
-        const rateLimitDelay = await getRateLimitDelay(error);
+        const rateLimitDelay = await getDiscordRateLimitDelay(error);
         if (rateLimitDelay !== null && retryCount < MAX_RATE_LIMIT_RETRIES) {
           await sleep(rateLimitDelay);
           continue;
+        }
+        if (error instanceof z.ZodError) {
+          return request.invalidResponseOutcome === "unknown"
+            ? {
+                code: "discord_invalid_response",
+                kind: "unknown",
+                message: "Discord response did not include a valid message id",
+                outcome: "UNKNOWN"
+              }
+            : {
+                code: "discord_invalid_response",
+                kind: "failed",
+                message: "Discord response did not include a valid message id",
+                outcome: "FAILED"
+              };
         }
         return classifyDiscordBotError(error, input.botToken);
       }
@@ -134,6 +156,7 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
     createChannelMessage: async ({ channelId, payload, reservationId }) => {
       const request: RequestOptions = {
         authorization: "bot",
+        invalidResponseOutcome: "unknown",
         method: "POST",
         payload: {
           ...payload,
@@ -145,9 +168,25 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
       const firstResult = await send(request);
       return firstResult.kind === "unknown" ? send(request) : firstResult;
     },
+    deleteChannelMessage: async ({ channelId, messageId }) => {
+      try {
+        await http.delete(
+          `${DISCORD_API_BASE_URL}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+          { headers: { authorization: `Bot ${input.botToken}` } }
+        );
+        return { kind: "removed" };
+      } catch (error) {
+        if (error instanceof HTTPError && error.response.status === 404) {
+          return { kind: "removed" };
+        }
+        const classified = classifyDiscordBotError(error, input.botToken);
+        return { code: classified.code, kind: "failed", message: classified.message };
+      }
+    },
     editChannelMessage: ({ channelId, messageId, payload }) =>
       send({
         authorization: "bot",
+        invalidResponseOutcome: "failed",
         method: "PATCH",
         payload,
         url: `${DISCORD_API_BASE_URL}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`
@@ -155,6 +194,7 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
     editOriginalEphemeralResponse: ({ interactionToken, payload }) =>
       send({
         authorization: "none",
+        invalidResponseOutcome: "failed",
         method: "PATCH",
         payload,
         url: `${DISCORD_API_BASE_URL}/webhooks/${encodeURIComponent(input.applicationId)}/${encodeURIComponent(interactionToken)}/messages/%40original`
@@ -168,66 +208,6 @@ export function buildReservationMessageNonce(reservationId: string): string {
 
 export function canFallbackToDiscordWebhook(result: DiscordBotDeliveryResult): boolean {
   return result.kind === "failed";
-}
-
-export function redactDiscordBotTokens(message: string, botToken: string): string {
-  return message
-    .replaceAll(botToken, "[redacted]")
-    .replace(INTERACTION_WEBHOOK_TOKEN_PATTERN, "$1/[redacted]")
-    .replace(INTERACTION_WEBHOOK_PATH_TOKEN_PATTERN, "$1/[redacted]");
-}
-
-async function getRateLimitDelay(error: unknown): Promise<number | null> {
-  if (!(error instanceof HTTPError) || error.response.status !== 429) {
-    return null;
-  }
-  let response: unknown = null;
-  try {
-    response = await error.response.clone().json();
-  } catch (parseError) {
-    if (!(parseError instanceof SyntaxError)) {
-      throw parseError;
-    }
-  }
-  const parsed = discordRateLimitResponseSchema.safeParse(response);
-  if (parsed.success) {
-    return Math.ceil(parsed.data.retry_after * 1_000);
-  }
-  const retryAfter = Number(error.response.headers.get("retry-after"));
-  return Number.isFinite(retryAfter) && retryAfter >= 0 ? Math.ceil(retryAfter * 1_000) : null;
-}
-
-function classifyDiscordBotError(error: unknown, botToken: string): DiscordBotDeliveryResult {
-  if (isTimeoutError(error)) {
-    return { code: "discord_timeout", kind: "unknown", message: redactErrorMessage(error, botToken), outcome: "UNKNOWN" };
-  }
-  if (error instanceof TypeError) {
-    return {
-      code: "discord_network_error",
-      kind: "unknown",
-      message: redactErrorMessage(error, botToken),
-      outcome: "UNKNOWN"
-    };
-  }
-  if (error instanceof HTTPError) {
-    return {
-      code: `discord_http_${error.response.status}`,
-      kind: "failed",
-      message: redactErrorMessage(error, botToken),
-      outcome: "FAILED"
-    };
-  }
-  return {
-    code: "discord_send_failed",
-    kind: "failed",
-    message: redactErrorMessage(error, botToken),
-    outcome: "FAILED"
-  };
-}
-
-function redactErrorMessage(error: unknown, botToken: string): string {
-  const message = error instanceof Error ? error.message : "Discord bot request failed";
-  return redactDiscordBotTokens(message, botToken);
 }
 
 function sleepFor(milliseconds: number): Promise<void> {

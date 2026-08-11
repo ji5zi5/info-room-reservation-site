@@ -347,20 +347,44 @@ describe("Prisma Discord reservation message repository", () => {
     expect(cappedDiscordRetryAt(now, 20)).toEqual(new Date("2026-08-11T01:00:00.000Z"));
   });
 
-  it("deletes only bounded expired terminal message rows", async () => {
-    const rows = Array.from({ length: 101 }, (_, index) => ({ reservationId: `reservation-${index}` }));
-    repositoryMocks.transaction.discordReservationMessage.findMany.mockResolvedValue(rows);
-    repositoryMocks.transaction.discordReservationMessage.deleteMany.mockResolvedValue({ count: 100 });
+  it("deletes only bounded expired terminal interaction receipts", async () => {
+    const rows = Array.from({ length: 101 }, (_, index) => ({ interactionId: `interaction-${index}` }));
+    repositoryMocks.transaction.discordInteractionReceipt.findMany.mockResolvedValue(rows);
+    repositoryMocks.transaction.discordInteractionReceipt.deleteMany.mockResolvedValue({ count: 100 });
 
-    const result = await prismaDiscordReservationMessageRepository.deleteExpiredMessages(now);
+    const result = await prismaDiscordReservationMessageRepository.deleteExpiredInteractionReceipts(now);
 
     expect(DISCORD_CLEANUP_BATCH_SIZE).toBe(100);
     expect(result).toEqual({ hasMore: true, processedCount: 100, remainingLowerBound: 1 });
+    expect(repositoryMocks.transaction.discordInteractionReceipt.deleteMany).toHaveBeenCalledWith({
+      where: {
+        expiresAt: { lte: now },
+        interactionId: { in: rows.slice(0, 100).map((row) => row.interactionId) },
+        status: "TERMINAL"
+      }
+    });
+  });
+
+  it("deletes expired terminal message rows locally only when no bot message pointer exists", async () => {
+    // Given: one terminal webhook-only ledger row.
+    const rows = [{ reservationId: "webhook-only" }];
+    repositoryMocks.transaction.discordReservationMessage.findMany.mockResolvedValue(rows);
+    repositoryMocks.transaction.discordReservationMessage.deleteMany.mockResolvedValue({ count: 1 });
+
+    // When: the compatibility cleanup method runs.
+    const result = await prismaDiscordReservationMessageRepository.deleteExpiredMessages(now);
+
+    // Then: the read and conditional delete both require a null message id.
+    expect(result.processedCount).toBe(1);
+    expect(repositoryMocks.transaction.discordReservationMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ messageId: null })
+    }));
     expect(repositoryMocks.transaction.discordReservationMessage.deleteMany).toHaveBeenCalledWith({
       where: {
         expiresAt: { lte: now },
         initialSendStatus: { in: ["SENT", "ABANDONED"] },
-        reservationId: { in: rows.slice(0, 100).map((row) => row.reservationId) },
+        messageId: null,
+        reservationId: { in: ["webhook-only"] },
         syncStatus: { in: ["SYNCED", "ABANDONED"] }
       }
     });

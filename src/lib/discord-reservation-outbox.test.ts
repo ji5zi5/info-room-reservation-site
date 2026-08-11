@@ -252,10 +252,12 @@ describe("Discord reservation outbox", () => {
 function dependenciesFixture() {
   const bot = {
     createChannelMessage: vi.fn<DiscordBotClient["createChannelMessage"]>(),
+    deleteChannelMessage: vi.fn<DiscordBotClient["deleteChannelMessage"]>(),
     editChannelMessage: vi.fn<DiscordBotClient["editChannelMessage"]>(),
     editOriginalEphemeralResponse: vi.fn<DiscordBotClient["editOriginalEphemeralResponse"]>()
   };
   bot.createChannelMessage.mockResolvedValue({ kind: "sent", messageId: "bot-message" });
+  bot.deleteChannelMessage.mockResolvedValue({ kind: "removed" });
   bot.editChannelMessage.mockResolvedValue({ kind: "sent", messageId: "bot-message" });
   const getApplicationConfig = vi.fn<DiscordReservationOutboxDependencies["getApplicationConfig"]>();
   getApplicationConfig.mockReturnValue({

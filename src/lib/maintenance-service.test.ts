@@ -75,6 +75,24 @@ describe("maintenance cleanup service", () => {
     expect(calls.filter((call) => call === "deleteExpiredSessions")).toHaveLength(10);
     expect(calls.filter((call) => call === "retention")).toHaveLength(1);
   });
+
+  it("keeps Discord deletion failures in backlog and deletes receipts only afterward", async () => {
+    // Given: remote message cleanup retains one pointer without requesting another batch.
+    const calls: string[] = [];
+    const store = storeWithOverrides(calls, {
+      deleteExpiredMessages: async () => {
+        calls.push("deleteExpiredMessages");
+        return { hasMore: false, processedCount: 0, remainingLowerBound: 1 };
+      }
+    });
+
+    // When: maintenance runs.
+    const result = await runCleanup(store);
+
+    // Then: the backlog is surfaced and receipt deletion remains after message cleanup.
+    expect(result.backlogCount).toBe(1);
+    expect(calls.slice(0, 2)).toEqual(["deleteExpiredMessages", "deleteExpiredInteractionReceipts"]);
+  });
 });
 
 type ExpiryMethod = (typeof categories)[number][1];

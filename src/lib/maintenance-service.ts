@@ -1,3 +1,8 @@
+import type { DiscordApplicationConfig } from "./discord-app-config";
+import { createDiscordBotClient, type DiscordBotClient } from "./discord-bot";
+import { createDiscordReservationRetention } from "./discord-reservation-retention";
+import { parseServerEnv, ServerEnvError } from "./env";
+import { prismaDiscordReservationMaintenanceRepository } from "./prisma-discord-reservation-maintenance-repository";
 import type { RetentionCleanupResult } from "./retention-policy";
 import { prismaDiscordReservationMessageRepository } from "./prisma-discord-reservation-message-repository";
 
@@ -40,7 +45,7 @@ export async function runMaintenanceCleanup(input: {
   readonly now: Date;
   readonly store: MaintenanceCleanupStore;
 }): Promise<MaintenanceCleanupResult> {
-  const discordStore = input.discordStore ?? prismaDiscordReservationMessageRepository;
+  const discordStore = input.discordStore ?? defaultDiscordMaintenanceStore();
   const discordMessages = await drainExpiryBatches(() => discordStore.deleteExpiredMessages(input.now));
   const discordReceipts = await drainExpiryBatches(() => discordStore.deleteExpiredInteractionReceipts(input.now));
   const sessions = await drainExpiryBatches(() => input.store.deleteExpiredSessions(input.now));
@@ -78,11 +83,52 @@ async function drainExpiryBatches(
     const batch = await expireBatch();
     processedCount += batch.processedCount;
     if (!batch.hasMore) {
-      return { processedCount, remainingLowerBound: 0 };
+      return { processedCount, remainingLowerBound: batch.remainingLowerBound };
     }
     if (batchNumber === MAX_EXPIRY_BATCHES - 1) {
       return { processedCount, remainingLowerBound: batch.remainingLowerBound };
     }
   }
   return { processedCount, remainingLowerBound: 0 };
+}
+
+function defaultDiscordMaintenanceStore(): DiscordMaintenanceCleanupStore {
+  let config: DiscordApplicationConfig | null | undefined;
+  const getConfig = (): DiscordApplicationConfig | null => {
+    if (config !== undefined) {
+      return config;
+    }
+    try {
+      config = parseServerEnv().discordApplication;
+    } catch (error) {
+      if (!(error instanceof ServerEnvError)) {
+        throw error;
+      }
+      config = null;
+    }
+    return config;
+  };
+  const bot: Pick<DiscordBotClient, "deleteChannelMessage"> = {
+    deleteChannelMessage: (message) => {
+      const current = getConfig();
+      if (current === null) {
+        return Promise.resolve({
+          code: "discord_application_unavailable",
+          kind: "failed",
+          message: "Discord application configuration is unavailable"
+        });
+      }
+      return createDiscordBotClient({ applicationId: current.applicationId, botToken: current.botToken })
+        .deleteChannelMessage(message);
+    }
+  };
+  return {
+    deleteExpiredInteractionReceipts: (now) =>
+      prismaDiscordReservationMessageRepository.deleteExpiredInteractionReceipts(now),
+    deleteExpiredMessages: createDiscordReservationRetention({
+      bot,
+      hasApplicationConfig: () => getConfig() !== null,
+      repository: prismaDiscordReservationMaintenanceRepository
+    })
+  };
 }

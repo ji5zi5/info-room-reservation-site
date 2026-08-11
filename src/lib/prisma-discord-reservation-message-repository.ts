@@ -111,15 +111,22 @@ export const prismaDiscordReservationMessageRepository = {
 
   async deleteExpiredMessages(now: Date): Promise<MaintenanceExpiryBatchResult> {
     return withSystemContext(async (transaction) => {
-      const terminal = terminalMessageWhere(now);
+      const terminalWithoutPointer = {
+        expiresAt: { lte: now },
+        initialSendStatus: { in: ["SENT", "ABANDONED"] },
+        messageId: null,
+        syncStatus: { in: ["SYNCED", "ABANDONED"] }
+      } satisfies Prisma.DiscordReservationMessageWhereInput;
       const candidates = await transaction.discordReservationMessage.findMany({
         orderBy: [{ expiresAt: "asc" }, { reservationId: "asc" }],
         select: { reservationId: true },
         take: DISCORD_CLEANUP_BATCH_SIZE + 1,
-        where: terminal
+        where: terminalWithoutPointer
       });
       const ids = candidates.slice(0, DISCORD_CLEANUP_BATCH_SIZE).map((row) => row.reservationId);
-      const processedCount = ids.length === 0 ? 0 : (await transaction.discordReservationMessage.deleteMany({ where: { ...terminal, reservationId: { in: ids } } })).count;
+      const processedCount = ids.length === 0 ? 0 : (await transaction.discordReservationMessage.deleteMany({
+        where: { ...terminalWithoutPointer, reservationId: { in: ids } }
+      })).count;
       return cleanupResult(candidates.length, processedCount);
     });
   },
@@ -321,9 +328,6 @@ function syncClaimableWhere(now: Date, staleBefore: Date): Prisma.DiscordReserva
   return { OR: [{ syncNextAttemptAt: { lte: now }, syncStatus: { in: ["PENDING", "RETRY"] } },
     { syncClaimedAt: { lte: staleBefore }, syncStatus: "SYNCING" }] };
 }
-
-const terminalMessageWhere = (now: Date): Prisma.DiscordReservationMessageWhereInput =>
-  ({ expiresAt: { lte: now }, initialSendStatus: { in: ["SENT", "ABANDONED"] }, syncStatus: { in: ["SYNCED", "ABANDONED"] } });
 
 async function conditionalUpdate(reservationId: string, data: Prisma.DiscordReservationMessageUpdateManyMutationInput, where: Prisma.DiscordReservationMessageWhereInput): Promise<boolean> {
   return withSystemContext(async (transaction) => (await transaction.discordReservationMessage.updateMany({ data, where: { ...where, reservationId } })).count === 1);

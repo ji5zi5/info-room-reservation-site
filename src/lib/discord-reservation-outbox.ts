@@ -484,6 +484,7 @@ function delegatingBotClient(config: () => DiscordApplicationConfig | null): Dis
   };
   return {
     createChannelMessage: (input) => client().createChannelMessage(input),
+    deleteChannelMessage: (input) => client().deleteChannelMessage(input),
     editChannelMessage: (input) => client().editChannelMessage(input),
     editOriginalEphemeralResponse: (input) => client().editOriginalEphemeralResponse(input)
   };
