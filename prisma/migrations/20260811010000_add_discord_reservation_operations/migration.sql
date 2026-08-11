@@ -67,6 +67,9 @@ ALTER TABLE "DiscordInteractionReceipt"
   ADD CONSTRAINT "DiscordInteractionReceipt_reservationId_fkey"
   FOREIGN KEY ("reservationId") REFERENCES "Reservation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "DiscordReservationMessage" TO info_room_runtime;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "DiscordInteractionReceipt" TO info_room_runtime;
+
 CREATE OR REPLACE FUNCTION app_private.bump_discord_reservation_message_revision()
 RETURNS trigger
 LANGUAGE plpgsql

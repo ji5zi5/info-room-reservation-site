@@ -96,7 +96,19 @@ describe("durable Discord reservation operations", () => {
     await expect(withSystemDatabaseContext((transaction) => transaction.discordReservationMessage.findUniqueOrThrow({ where: { reservationId } }))).resolves.toMatchObject({ messageRevision: 1, syncStatus: "PENDING" });
   });
 
-  it("denies students and permits ADMIN/SYSTEM through RLS", async () => {
+  it("grants runtime CRUD while RLS denies students and permits ADMIN/SYSTEM", async () => {
+    const privileges = await withSystemDatabaseContext((transaction) => transaction.$queryRaw<
+      readonly { readonly granted: boolean; readonly privilege: string; readonly tableName: string }[]
+    >`
+      SELECT tables.name AS "tableName", privileges.name AS "privilege",
+        has_table_privilege(current_user, format('public.%I', tables.name), privileges.name) AS "granted"
+      FROM (VALUES ('DiscordReservationMessage'), ('DiscordInteractionReceipt')) AS tables(name)
+      CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS privileges(name)
+      ORDER BY tables.name, privileges.name
+    `);
+    expect(privileges).toHaveLength(8);
+    expect(privileges.every(({ granted }) => granted)).toBe(true);
+
     const [admin, student] = await Promise.all([seedUser({ id: "discord-admin", role: "ADMIN" }), seedUser({ id: "discord-student" })]);
     await seedMessageForUser(student.id, "rls", "rls-nonce");
 

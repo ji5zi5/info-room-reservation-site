@@ -19,6 +19,14 @@ const RETENTION_MIGRATION_PATH = join(
   "migration.sql"
 );
 
+const DISCORD_OPERATIONS_MIGRATION_PATH = join(
+  process.cwd(),
+  "prisma",
+  "migrations",
+  "20260811010000_add_discord_reservation_operations",
+  "migration.sql"
+);
+
 const PRISMA_MIGRATION_ROOT = join(process.cwd(), "prisma", "migrations");
 const PRISMA_SCHEMA_PATH = join(process.cwd(), "prisma", "schema.prisma");
 const BAD_RUNTIME_ROLE_MIGRATION = "20260729060000_add_limited_runtime_role";
@@ -86,6 +94,20 @@ describe("Postgres row level security policy migration", () => {
     expect(sql).toContain('ALTER TABLE "RetentionPolicy" ENABLE ROW LEVEL SECURITY;');
     expect(sql).toContain('CREATE POLICY "retention_policy_admin_system_all"');
     expect(sql).toContain("app_private.is_admin_or_system()");
+  });
+
+  it("grants runtime CRUD access to Discord ledgers behind ADMIN/SYSTEM RLS", () => {
+    const sql = readFileSync(DISCORD_OPERATIONS_MIGRATION_PATH, "utf8");
+
+    for (const table of ["DiscordReservationMessage", "DiscordInteractionReceipt"]) {
+      expect(sql).toContain(
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "${table}" TO info_room_runtime;`
+      );
+    }
+    expect(sql.match(/USING \(app_private\.is_admin_or_system\(\)\)/gu)).toHaveLength(2);
+    expect(sql).not.toContain(
+      "GRANT EXECUTE ON FUNCTION app_private.bump_discord_reservation_message_revision() TO info_room_runtime;"
+    );
   });
 
   it("removes every unconditional runtime policy in a later additive migration", () => {
