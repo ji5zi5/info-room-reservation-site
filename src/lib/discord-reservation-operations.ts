@@ -6,7 +6,6 @@ import { prisma } from "./db";
 import { systemDatabaseActor, userMutationLockKey, withDatabaseContext, withDatabaseMutation } from "./db-context";
 import type { DiscordReservationInteractionCommand } from "./discord-interactions";
 import { findDiscordInteractionTerminalResult, recordDiscordInteractionReceipt, recordDiscordReservationDecision } from "./prisma-discord-reservation-message-repository";
-import { hashClientIp } from "./request-source";
 
 type DiscordReservationDecisionCommand = Extract<DiscordReservationInteractionCommand, { readonly kind: "accept" | "reject" }>;
 
@@ -40,6 +39,7 @@ const terminalResultSchema = z.discriminatedUnion("kind", [
 
 export async function processDiscordReservationDecision(input: {
   readonly command: DiscordReservationDecisionCommand;
+  readonly ipHash: string;
   readonly now: Date;
 }): Promise<DiscordReservationDecisionResult> {
   const resolved = await withDatabaseContext({
@@ -71,6 +71,7 @@ export async function processDiscordReservationDecision(input: {
     operation: async (transaction) => processInTransaction({
       actor,
       command: input.command,
+      ipHash: input.ipHash,
       now: input.now,
       targetUserId,
       transaction
@@ -106,6 +107,7 @@ export function selectDiscordReservationSourceMessageTerminalState(input: {
 async function processInTransaction(input: {
   readonly actor: { readonly id: string; readonly role: "ADMIN" };
   readonly command: DiscordReservationDecisionCommand;
+  readonly ipHash: string;
   readonly now: Date;
   readonly targetUserId: string;
   readonly transaction: Prisma.TransactionClient;
@@ -169,7 +171,7 @@ async function acceptReservation(input: Parameters<typeof processInTransaction>[
     actorId: input.actor.id,
     after: JSON.stringify({ reservationStatus: "CONFIRMED" }),
     before: JSON.stringify({ reservationStatus: "CONFIRMED" }),
-    ipHash: hashClientIp("discord-interaction"),
+    ipHash: input.ipHash,
     reservationId: input.command.reservationId,
     targetUserId
   } });
@@ -203,7 +205,7 @@ async function rejectReservation(input: Parameters<typeof processInTransaction>[
   if (!recorded) throw new DiscordReservationDecisionConflictError(input.command.reservationId);
   const cancellation = await cancelAdministratorReservationInTransaction(input.transaction, {
     actor: input.actor,
-    ipHash: hashClientIp("discord-interaction"),
+    ipHash: input.ipHash,
     reason: input.command.reason,
     reservationId: input.command.reservationId,
     source: { kind: "DISCORD_REJECTION" }

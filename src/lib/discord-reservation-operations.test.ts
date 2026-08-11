@@ -33,6 +33,7 @@ import {
 } from "./discord-reservation-operations";
 
 const now = new Date("2026-08-11T03:00:00.000Z");
+const ipHash = "transport-derived-ip-hash";
 const reservation: Reservation = {
   createdAt: now,
   date: "2026-08-12",
@@ -74,8 +75,8 @@ describe("Discord reservation decisions", () => {
     transaction.discordReservationMessage.findUnique.mockResolvedValue({ decision: null, messageId: "message-1" });
   });
 
-  it("accepts once under the target user lock with one receipt, revision, action, and audit", async () => {
-    const result = await processDiscordReservationDecision({ command: command("accept"), now });
+  it("persists the exact transport-derived ipHash when accepting once", async () => {
+    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
 
     expect(result).toEqual({ kind: "accepted", reservationId: "reservation-1" });
     expect(mocks.withDatabaseMutation).toHaveBeenCalledWith(expect.objectContaining({
@@ -93,6 +94,7 @@ describe("Discord reservation decisions", () => {
     expect(transaction.adminAction.create).toHaveBeenCalledWith({ data: expect.objectContaining({
       action: "DISCORD_RESERVATION_ACCEPT",
       actorId: "admin-1",
+      ipHash,
       reservationId: "reservation-1",
       targetUserId: "student-1"
     }) });
@@ -113,8 +115,8 @@ describe("Discord reservation decisions", () => {
     expect(mocks.cancel).not.toHaveBeenCalled();
   });
 
-  it("rejects through the shared administrator cancellation without a second revision", async () => {
-    const result = await processDiscordReservationDecision({ command: command("reject"), now });
+  it("passes the exact transport-derived ipHash to shared rejection cancellation", async () => {
+    const result = await processDiscordReservationDecision({ command: command("reject"), ipHash, now });
 
     expect(result).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
     expect(mocks.recordDecision).toHaveBeenCalledWith(transaction, expect.objectContaining({
@@ -123,7 +125,7 @@ describe("Discord reservation decisions", () => {
     }));
     expect(mocks.cancel).toHaveBeenCalledWith(transaction, {
       actor: { id: "admin-1", role: "ADMIN" },
-      ipHash: expect.any(String),
+      ipHash,
       reason: "행사 준비",
       reservationId: "reservation-1",
       source: { kind: "DISCORD_REJECTION" }
@@ -135,7 +137,7 @@ describe("Discord reservation decisions", () => {
     mocks.findReceipt.mockResolvedValue({ kind: "accepted", reservationId: "reservation-1" });
     transaction.discordReservationMessage.findUnique.mockResolvedValue(null);
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
 
     expect(result).toEqual({ kind: "accepted", reservationId: "reservation-1" });
     expect(mocks.recordReceipt).not.toHaveBeenCalled();
@@ -149,7 +151,7 @@ describe("Discord reservation decisions", () => {
       terminalResult: { kind: "accepted", reservationId: "reservation-1" }
     });
 
-    const result = await processDiscordReservationDecision({ command: command("reject"), now });
+    const result = await processDiscordReservationDecision({ command: command("reject"), ipHash, now });
 
     expect(result).toEqual({ kind: "accepted", reservationId: "reservation-1" });
     expect(mocks.recordDecision).not.toHaveBeenCalled();
@@ -166,7 +168,7 @@ describe("Discord reservation decisions", () => {
       reservation: { id: "reservation-1", status: "CONFIRMED", userId: "student-1" }
     });
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
 
     expect(result).toEqual({ code, kind: "noop" });
     expect(mocks.withDatabaseMutation).not.toHaveBeenCalled();
@@ -175,7 +177,7 @@ describe("Discord reservation decisions", () => {
   it("rejects a stale local admin or source message inside the mutation path", async () => {
     transaction.user.findUnique.mockResolvedValue({ id: "admin-1", role: "STUDENT" });
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
 
     expect(result).toEqual({ code: "stale_actor", kind: "noop" });
     expect(mocks.recordReceipt).not.toHaveBeenCalled();
@@ -185,7 +187,7 @@ describe("Discord reservation decisions", () => {
   it("returns a typed no-op when the source message disappeared without a receipt", async () => {
     transaction.discordReservationMessage.findUnique.mockResolvedValue(null);
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
 
     expect(result).toEqual({ code: "stale_message", kind: "noop" });
     expect(mocks.recordReceipt).not.toHaveBeenCalled();
@@ -198,7 +200,7 @@ describe("Discord reservation decisions", () => {
       reservation: null
     });
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
 
     expect(result).toEqual({ code: "reservation_not_found", kind: "noop" });
     expect(mocks.withDatabaseMutation).not.toHaveBeenCalled();
