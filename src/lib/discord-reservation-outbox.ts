@@ -190,7 +190,8 @@ async function processInitialClaim(
       if (!(error instanceof ServerEnvError)) {
         throw error;
       }
-      return finishWebhookDelivery(dependencies, claim, snapshotResult.snapshot, settings, now, "WEBHOOK_FALLBACK");
+      await saveTerminalInitial(dependencies, claim, now, "SKIPPED_CONFIG_INVALID");
+      return "terminal";
     }
     if (config === null) {
       return finishWebhookDelivery(dependencies, claim, snapshotResult.snapshot, settings, now, "WEBHOOK");

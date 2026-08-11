@@ -167,17 +167,22 @@ describe("Discord reservation outbox", () => {
     );
   });
 
-  it("performs one terminal webhook fallback for a definite application config failure", async () => {
+  it.each([
+    ["partial", ["DISCORD_BOT_TOKEN"]],
+    ["invalid", ["DISCORD_CHANNEL_ID"]]
+  ] as const)("fails closed for %s application config", async (_kind, keys) => {
     dependencies.getApplicationConfig.mockImplementation(() => {
-      throw new ServerEnvError(["DISCORD_BOT_TOKEN"]);
+      throw new ServerEnvError(keys);
     });
 
-    await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
+    const result = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
 
+    expect(result.initial).toMatchObject({ claimed: 1, terminal: 1 });
     expect(dependencies.bot.createChannelMessage).not.toHaveBeenCalled();
-    expect(dependencies.sendWebhook).toHaveBeenCalledTimes(1);
+    expect(dependencies.sendWebhook).not.toHaveBeenCalled();
     expect(dependencies.repository.saveInitialSendFailure).toHaveBeenCalledWith(expect.objectContaining({
-      outcome: "WEBHOOK_FALLBACK_SENT",
+      error: "SKIPPED_CONFIG_INVALID",
+      outcome: "SKIPPED_CONFIG_INVALID",
       retryable: false
     }));
   });
