@@ -52,7 +52,55 @@ describe("verifyDiscordSetup", () => {
     expect(result.issues).toContainEqual({ code: "leaked_role", subjectId: "500000000000000006" });
   });
 
-  it("uses the target channel overwrite after it de-syncs from a category allow", () => {
+  it("applies a category-only everyone deny before an empty child channel", () => {
+    // Given
+    const base = createDiscordSetupFixture("private");
+    const outsider = base.explicitMembers.find((member) => member.user.id === "500000000000000009");
+    expect(outsider).toBeDefined();
+    const snapshot = replaceChannel(
+      {
+        ...base,
+        category: {
+          ...base.category,
+          permissionOverwrites: [{ allow: "0", deny: "1024", id: base.guild.id, type: 0 }]
+        }
+      },
+      { ...base.channel, permissionOverwrites: [] }
+    );
+
+    // When
+    const permissions = computeEffectiveMemberPermissions(snapshot, outsider ?? base.botMember);
+
+    // Then
+    expect(permissions & DISCORD_PERMISSIONS.VIEW_CHANNEL).toBe(0n);
+  });
+
+  it("applies a category-only role allow before an empty child channel", () => {
+    // Given
+    const base = createDiscordSetupFixture("private");
+    const outsiderRoleId = "500000000000000006";
+    const outsider = base.explicitMembers.find((member) => member.user.id === "500000000000000009");
+    expect(outsider).toBeDefined();
+    const snapshot = replaceChannel(
+      {
+        ...base,
+        category: {
+          ...base.category,
+          permissionOverwrites: [{ allow: "1024", deny: "0", id: outsiderRoleId, type: 0 }]
+        },
+        roles: base.roles.map((role) => role.id === base.guild.id ? { ...role, permissions: "0" } : role)
+      },
+      { ...base.channel, permissionOverwrites: [] }
+    );
+
+    // When
+    const permissions = computeEffectiveMemberPermissions(snapshot, outsider ?? base.botMember);
+
+    // Then
+    expect(permissions & DISCORD_PERMISSIONS.VIEW_CHANNEL).toBe(DISCORD_PERMISSIONS.VIEW_CHANNEL);
+  });
+
+  it("applies a channel role deny after a category role allow", () => {
     // Given
     const base = createDiscordSetupFixture("private");
     const outsiderRoleId = "500000000000000006";

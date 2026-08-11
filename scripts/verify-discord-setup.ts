@@ -92,7 +92,8 @@ function effectivePermissions(snapshot: DiscordSetupSnapshot, roleIds: ReadonlyS
   if (memberId === snapshot.guild.ownerId || has(base, DISCORD_PERMISSIONS.ADMINISTRATOR)) {
     return Object.values(DISCORD_PERMISSIONS).reduce((all, permission) => all | permission, 0n);
   }
-  return applyOverwrites(base, snapshot.channel, snapshot.guild.id, roleIds, memberId);
+  const inherited = snapshot.category ? applyOverwrites(base, snapshot.category, snapshot.guild.id, roleIds, memberId) : base;
+  return applyOverwrites(inherited, snapshot.channel, snapshot.guild.id, roleIds, memberId);
 }
 
 export function computeEffectiveMemberPermissions(snapshot: DiscordSetupSnapshot, member: DiscordMember): bigint {

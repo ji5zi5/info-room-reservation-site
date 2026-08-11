@@ -15,6 +15,7 @@ describe("production CI contract", () => {
     expect(packageJson.scripts.test).toBe("vitest run");
     expect(packageJson.scripts["test:integration"]).toBe("node scripts/run-integration-tests.mjs");
     expect(packageJson.scripts["verify:receipts"]).toBe("node scripts/verify-readiness-receipts.mjs");
+    expect(read("vitest.config.ts")).toContain('include: ["src/**/*.test.ts", "scripts/**/*.test.ts"]');
     expect(read("vitest.config.ts")).toContain("maxWorkers: 4");
     expect(exists("vitest.integration.config.ts")).toBe(true);
     expect(exists("scripts/run-integration-tests.mjs")).toBe(true);
