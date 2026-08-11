@@ -99,7 +99,12 @@ export async function cancelAdministratorReservationInTransaction(
     data: {
       action: "ADMIN_RESERVATION_CANCEL",
       actorId: input.actor.id,
-      detail: JSON.stringify({ actionId: action.id, reason: input.reason, reservationId: reservation.id }),
+      detail: JSON.stringify({
+        actionId: action.id,
+        reason: input.reason,
+        reservationId: reservation.id,
+        source: input.source.kind
+      }),
       userId: reservation.userId
     }
   });

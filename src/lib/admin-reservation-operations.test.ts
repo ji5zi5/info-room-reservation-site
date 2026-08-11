@@ -102,13 +102,40 @@ describe("administrator reservation cancellation", () => {
         detail: JSON.stringify({
           actionId: "action-cancel",
           reason: input.reason,
-          reservationId: reservation.id
+          reservationId: reservation.id,
+          source: "WEB_ADMIN"
         }),
         userId: reservation.userId
       }
     });
     expect(mocks.withDatabaseContext).not.toHaveBeenCalled();
     expect(mocks.withDatabaseMutation).not.toHaveBeenCalled();
+  });
+
+  it("persists Discord rejection provenance through the transaction primitive", async () => {
+    // Given
+    const discordInput: AdministratorCancellationInput = {
+      ...input,
+      source: { kind: "DISCORD_REJECTION" }
+    };
+
+    // When
+    await cancelAdministratorReservationInTransaction(transactionClient(), discordInput);
+
+    // Then
+    expect(mocks.auditLogCreate).toHaveBeenCalledWith({
+      data: {
+        action: "ADMIN_RESERVATION_CANCEL",
+        actorId: input.actor.id,
+        detail: JSON.stringify({
+          actionId: "action-cancel",
+          reason: input.reason,
+          reservationId: reservation.id,
+          source: "DISCORD_REJECTION"
+        }),
+        userId: reservation.userId
+      }
+    });
   });
 
   it("returns invalid_status without writing when the reservation is already terminal", async () => {
