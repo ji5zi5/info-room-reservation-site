@@ -95,6 +95,9 @@ type MockPrismaTransaction = {
     readonly findUniqueOrThrow: (input: ReservationFindUniqueInput) => Promise<ReservationRow>;
     readonly updateMany: (input: ReservationUpdateManyInput) => Promise<{ readonly count: number }>;
   };
+  readonly discordReservationMessage: {
+    readonly create: ReturnType<typeof vi.fn>;
+  };
   readonly user: {
     readonly findUnique: (input: UserFindUniqueInput) => Promise<UserBookingRow | null>;
   };
@@ -142,6 +145,9 @@ const prismaMocks = vi.hoisted(() => {
       ),
       updateMany: vi.fn(async (_input: ReservationUpdateManyInput): Promise<{ readonly count: number }> => ({ count: 1 }))
     },
+    discordReservationMessage: {
+      create: vi.fn(async (input: unknown) => input)
+    },
     user: {
       findUnique: vi.fn(
         async (_input: UserFindUniqueInput): Promise<UserBookingRow> => ({
@@ -167,6 +173,7 @@ vi.mock("./db", () => ({
 }));
 
 import {
+  createPrismaReservationStoreForActor,
   isSerializableTransactionConflict,
   PRISMA_RESERVATION_TRANSACTION_OPTIONS,
   prismaReservationStore,
@@ -181,6 +188,7 @@ beforeEach(() => {
   prismaMocks.transaction.mockClear();
   prismaMocks.transactionClient.periodSetting.findMany.mockClear();
   prismaMocks.transactionClient.periodSetting.upsert.mockClear();
+  prismaMocks.transactionClient.discordReservationMessage.create.mockClear();
   prismaMocks.transactionClient.reservation.count.mockClear();
   prismaMocks.transactionClient.reservation.create.mockClear();
   prismaMocks.transactionClient.reservation.findUnique.mockClear();
@@ -271,6 +279,32 @@ describe("Prisma reservation store transaction safety", () => {
 });
 
 describe("Prisma reservation store period defaults", () => {
+  it("enqueues the ledger under system RLS context and restores the student actor in the same transaction", async () => {
+    const store = createPrismaReservationStoreForActor({ id: "user-1", role: "STUDENT" });
+
+    await reserveStudyPeriod({
+      date: "2026-06-16",
+      now: new Date("2026-06-16T05:00:00.000Z"),
+      reason: "자습",
+      store,
+      studyPeriod: "EIGHTH",
+      userId: "user-1"
+    });
+
+    const contextWrites = prismaMocks.rawCalls.filter((call) =>
+      call.strings.join("?").includes("set_config")
+    );
+    expect(contextWrites.map((call) => call.values)).toEqual([
+      ["app.current_user_id", "user-1"],
+      ["app.current_user_role", "STUDENT"],
+      ["app.current_user_id", ""],
+      ["app.current_user_role", "SYSTEM"],
+      ["app.current_user_id", "user-1"],
+      ["app.current_user_role", "STUDENT"]
+    ]);
+    expect(prismaMocks.transactionClient.discordReservationMessage.create).toHaveBeenCalledTimes(1);
+  });
+
   it("confirms a reservation with default period settings when the row is missing", async () => {
     const result = await reserveStudyPeriod({
       date: "2026-06-16",
@@ -308,6 +342,12 @@ describe("Prisma reservation store period defaults", () => {
         studyPeriod: "EIGHTH",
         userId: "user-1"
       }
+    });
+    expect(prismaMocks.transactionClient.discordReservationMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        nonce: "reservation-c0b40f5293a4",
+        reservationId: "reservation-1"
+      })
     });
   });
 

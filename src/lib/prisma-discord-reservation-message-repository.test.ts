@@ -34,6 +34,7 @@ const repositoryMocks = vi.hoisted(() => {
     updateMany: vi.fn()
   });
   const transaction = {
+    adminAction: { findFirst: vi.fn() },
     discordInteractionReceipt: receiptModel(),
     discordReservationMessage: model()
   };
@@ -76,6 +77,7 @@ describe("Prisma Discord reservation message repository", () => {
   it("claims at most 20 due initial sends with an exact 120-second stale lease", async () => {
     const rows = Array.from({ length: 25 }, (_, index) => ({
       initialSendAttempts: index,
+      initialSendOutcome: null,
       nonce: `nonce-${index}`,
       reservationId: `reservation-${index}`
     }));
@@ -101,6 +103,42 @@ describe("Prisma Discord reservation message repository", () => {
     );
     expect(claims).toHaveLength(20);
     expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledTimes(20);
+  });
+
+  it("marks webhook delivery started only while the caller owns the send claim", async () => {
+    repositoryMocks.transaction.discordReservationMessage.updateMany.mockResolvedValue({ count: 1 });
+
+    const marked = await prismaDiscordReservationMessageRepository.beginInitialSendTerminalDelivery({
+      claimId: "claim",
+      outcome: "WEBHOOK_FALLBACK_STARTED",
+      reservationId: "reservation"
+    });
+
+    expect(marked).toBe(true);
+    expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledWith({
+      data: { initialSendOutcome: "WEBHOOK_FALLBACK_STARTED" },
+      where: { initialSendClaimId: "claim", initialSendStatus: "SENDING", reservationId: "reservation" }
+    });
+  });
+
+  it("claims only the requested immediate reservation row", async () => {
+    repositoryMocks.transaction.discordReservationMessage.findMany.mockResolvedValue([{
+      initialSendAttempts: 2,
+      initialSendOutcome: null,
+      nonce: "nonce-priority",
+      reservationId: "reservation-priority"
+    }]);
+    repositoryMocks.transaction.discordReservationMessage.updateMany.mockResolvedValue({ count: 1 });
+
+    const claim = await prismaDiscordReservationMessageRepository.claimInitialSend(now, "reservation-priority");
+
+    expect(claim).toMatchObject({ attempts: 3, nonce: "nonce-priority", reservationId: "reservation-priority" });
+    expect(repositoryMocks.transaction.discordReservationMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 1, where: expect.objectContaining({ reservationId: "reservation-priority" }) })
+    );
+    expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ reservationId: "reservation-priority" }) })
+    );
   });
 
   it("rejects an initial-send save after its claim has been replaced", async () => {
@@ -217,6 +255,20 @@ describe("Prisma Discord reservation message repository", () => {
         decisionLocalActorId: "admin"
       },
       where: { decision: null, reservationId: "reservation" }
+    });
+  });
+
+  it("reads the latest administrator cancellation reason with the message decision", async () => {
+    repositoryMocks.transaction.discordReservationMessage.findUnique.mockResolvedValue({ decision: "ACCEPTED" });
+    repositoryMocks.transaction.adminAction.findFirst.mockResolvedValue({ reason: "최종 취소 사유" });
+
+    const state = await prismaDiscordReservationMessageRepository.readMessageSyncState("reservation");
+
+    expect(state).toEqual({ cancellationReason: "최종 취소 사유", decision: "ACCEPTED" });
+    expect(repositoryMocks.transaction.adminAction.findFirst).toHaveBeenCalledWith({
+      orderBy: { createdAt: "desc" },
+      select: { reason: true },
+      where: { action: "ADMIN_RESERVATION_CANCEL", reservationId: "reservation" }
     });
   });
 

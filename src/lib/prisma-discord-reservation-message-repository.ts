@@ -11,8 +11,9 @@ export const DISCORD_CLAIM_LEASE_MS = 120_000;
 export const DISCORD_CLEANUP_BATCH_SIZE = 100;
 const DISCORD_MAX_RETRY_DELAY_MS = 60 * 60 * 1_000, DISCORD_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 
-type InitialSendClaim = Readonly<{ attempts: number; claimId: string; nonce: string; reservationId: string }>;
-type SyncClaim = Readonly<{ attempts: number; channelId: string; claimId: string; guildId: string; messageId: string; reservationId: string; revision: number }>;
+export type DiscordInitialSendClaim = Readonly<{ attempts: number; claimId: string; nonce: string; outcome: string | null; reservationId: string }>;
+export type DiscordMessageSyncClaim = Readonly<{ attempts: number; channelId: string; claimId: string; guildId: string; messageId: string; reservationId: string; revision: number }>;
+export type DiscordMessageSyncState = Readonly<{ cancellationReason: string | null; decision: string | null }>;
 type ReceiptWrite = Readonly<{
   discordActorId: string; interactionId: string; intent: string; localActorId: string;
   messageId: string | null; reservationId: string; status: "TERMINAL";
@@ -40,43 +41,29 @@ export const prismaDiscordReservationMessageRepository = {
     });
   },
 
-  async claimInitialSends(now: Date): Promise<readonly InitialSendClaim[]> {
-    return withSystemContext(async (transaction) => {
-      const staleBefore = new Date(now.getTime() - DISCORD_CLAIM_LEASE_MS);
-      const claimable = initialSendClaimableWhere(now, staleBefore);
-      const candidates = await transaction.discordReservationMessage.findMany({
-        orderBy: [{ initialSendNextAttemptAt: "asc" }, { reservationId: "asc" }],
-        select: { initialSendAttempts: true, nonce: true, reservationId: true },
-        take: DISCORD_CLAIM_BATCH_SIZE,
-        where: claimable
-      });
-      const claims: InitialSendClaim[] = [];
-      for (const candidate of candidates.slice(0, DISCORD_CLAIM_BATCH_SIZE)) {
-        const claimId = randomUUID();
-        const result = await transaction.discordReservationMessage.updateMany({
-          data: {
-            initialSendAttempts: { increment: 1 },
-            initialSendClaimedAt: now,
-            initialSendClaimId: claimId,
-            initialSendError: null,
-            initialSendStatus: "SENDING"
-          },
-          where: { ...claimable, reservationId: candidate.reservationId }
-        });
-        if (result.count === 1) {
-          claims.push({
-            attempts: candidate.initialSendAttempts + 1,
-            claimId,
-            nonce: candidate.nonce,
-            reservationId: candidate.reservationId
-          });
-        }
-      }
-      return claims;
+  async beginInitialSendTerminalDelivery(input: {
+    readonly claimId: string;
+    readonly outcome: string;
+    readonly reservationId: string;
+  }): Promise<boolean> {
+    return conditionalUpdate(input.reservationId, {
+      initialSendOutcome: input.outcome
+    }, {
+      initialSendClaimId: input.claimId,
+      initialSendStatus: "SENDING"
     });
   },
 
-  async claimMessageSyncs(now: Date): Promise<readonly SyncClaim[]> {
+  async claimInitialSend(now: Date, reservationId: string): Promise<DiscordInitialSendClaim | null> {
+    const claims = await claimInitialSends(now, reservationId, 1);
+    return claims[0] ?? null;
+  },
+
+  async claimInitialSends(now: Date): Promise<readonly DiscordInitialSendClaim[]> {
+    return claimInitialSends(now, undefined, DISCORD_CLAIM_BATCH_SIZE);
+  },
+
+  async claimMessageSyncs(now: Date): Promise<readonly DiscordMessageSyncClaim[]> {
     return withSystemContext(async (transaction) => {
       const staleBefore = new Date(now.getTime() - DISCORD_CLAIM_LEASE_MS);
       const claimable = syncClaimableWhere(now, staleBefore);
@@ -85,7 +72,7 @@ export const prismaDiscordReservationMessageRepository = {
         take: DISCORD_CLAIM_BATCH_SIZE,
         where: { ...claimable, channelId: { not: null }, guildId: { not: null }, messageId: { not: null } }
       });
-      const claims: SyncClaim[] = [];
+      const claims: DiscordMessageSyncClaim[] = [];
       for (const candidate of candidates.slice(0, DISCORD_CLAIM_BATCH_SIZE)) {
         if (!candidate.channelId || !candidate.guildId || !candidate.messageId || candidate.messageRevision <= candidate.syncedRevision) {
           continue;
@@ -107,6 +94,25 @@ export const prismaDiscordReservationMessageRepository = {
         }
       }
       return claims;
+    });
+  },
+
+  async readMessageSyncState(reservationId: string): Promise<DiscordMessageSyncState | null> {
+    return withSystemContext(async (transaction) => {
+      const [message, cancellationAction] = await Promise.all([
+        transaction.discordReservationMessage.findUnique({
+          select: { decision: true },
+          where: { reservationId }
+        }),
+        transaction.adminAction.findFirst({
+          orderBy: { createdAt: "desc" },
+          select: { reason: true },
+          where: { action: "ADMIN_RESERVATION_CANCEL", reservationId }
+        })
+      ]);
+      return message === null
+        ? null
+        : { cancellationReason: cancellationAction?.reason ?? null, decision: message.decision };
     });
   },
 
@@ -190,6 +196,47 @@ export const prismaDiscordReservationMessageRepository = {
     }, { messageRevision: input.revision, syncClaimId: input.claimId, syncClaimRevision: input.revision, syncStatus: "SYNCING" });
   }
 } as const;
+
+async function claimInitialSends(
+  now: Date,
+  reservationId: string | undefined,
+  limit: number
+): Promise<readonly DiscordInitialSendClaim[]> {
+  return withSystemContext(async (transaction) => {
+    const staleBefore = new Date(now.getTime() - DISCORD_CLAIM_LEASE_MS);
+    const claimable = initialSendClaimableWhere(now, staleBefore);
+    const candidates = await transaction.discordReservationMessage.findMany({
+      orderBy: [{ initialSendNextAttemptAt: "asc" }, { reservationId: "asc" }],
+      select: { initialSendAttempts: true, initialSendOutcome: true, nonce: true, reservationId: true },
+      take: limit,
+      where: { ...claimable, ...(reservationId === undefined ? {} : { reservationId }) }
+    });
+    const claims: DiscordInitialSendClaim[] = [];
+    for (const candidate of candidates.slice(0, limit)) {
+      const claimId = randomUUID();
+      const result = await transaction.discordReservationMessage.updateMany({
+        data: {
+          initialSendAttempts: { increment: 1 },
+          initialSendClaimedAt: now,
+          initialSendClaimId: claimId,
+          initialSendError: null,
+          initialSendStatus: "SENDING"
+        },
+        where: { ...claimable, reservationId: candidate.reservationId }
+      });
+      if (result.count === 1) {
+        claims.push({
+          attempts: candidate.initialSendAttempts + 1,
+          claimId,
+          nonce: candidate.nonce,
+          outcome: candidate.initialSendOutcome,
+          reservationId: candidate.reservationId
+        });
+      }
+    }
+    return claims;
+  });
+}
 
 export function cappedDiscordRetryAt(now: Date, attempts: number): Date {
   const delay = Math.min(60_000 * 2 ** Math.max(0, attempts - 1), DISCORD_MAX_RETRY_DELAY_MS);

@@ -14,11 +14,14 @@ import {
   isSerializableTransactionConflict,
   PRISMA_MUTATION_TRANSACTION_OPTIONS,
   retrySerializableMutationTransaction,
+  setDatabaseContext,
   systemDatabaseActor,
   withDatabaseMutation
 } from "./db-context";
 import { parseStoredStudyPeriod } from "./period-settings";
 import { periodSettingReadDates, resolveEffectivePeriodSetting } from "./period-setting-values";
+import { buildReservationMessageNonce } from "./discord-reservation-messages";
+import { createDiscordReservationMessage } from "./prisma-discord-reservation-message-repository";
 import type { StudyPeriod } from "./study-periods";
 
 type PrismaTransaction = Prisma.TransactionClient;
@@ -42,7 +45,7 @@ export class PrismaReservationStore implements TransactionalReservationStore {
       actor: this.actor,
       client: prisma,
       lockKeys,
-      operation: async (transaction) => operation(new PrismaReservationStoreUnit(transaction))
+      operation: async (transaction) => operation(new PrismaReservationStoreUnit(transaction, this.actor))
     });
   }
 }
@@ -54,9 +57,11 @@ export function createPrismaReservationStoreForActor(actor: DatabaseActor): Pris
 }
 
 class PrismaReservationStoreUnit implements ReservationStore {
+  private readonly actor: DatabaseActor;
   private readonly client: PrismaTransaction;
 
-  public constructor(client: PrismaTransaction) {
+  public constructor(client: PrismaTransaction, actor: DatabaseActor) {
+    this.actor = actor;
     this.client = client;
   }
 
@@ -87,12 +92,35 @@ class PrismaReservationStoreUnit implements ReservationStore {
           userId: input.userId
         }
       });
+      await this.createDiscordReservationMessage(created.id);
       return toReservation(created);
     } catch (error) {
       if (!isReservationIdentityConflict(error)) {
         throw error;
       }
       throw new ReservationIdentityConflictError();
+    }
+  }
+
+  private async createDiscordReservationMessage(reservationId: string): Promise<void> {
+    if (this.actor.role !== "STUDENT") {
+      await createDiscordReservationMessage(this.client, {
+        nonce: buildReservationMessageNonce(reservationId),
+        now: new Date(),
+        reservationId
+      });
+      return;
+    }
+
+    await setDatabaseContext(this.client, systemDatabaseActor());
+    try {
+      await createDiscordReservationMessage(this.client, {
+        nonce: buildReservationMessageNonce(reservationId),
+        now: new Date(),
+        reservationId
+      });
+    } finally {
+      await setDatabaseContext(this.client, this.actor);
     }
   }
 

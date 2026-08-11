@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClosedPeriodNotificationService } from "@/lib/closed-period-notification-service";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { runDiscordReservationOutbox, type DiscordReservationOutboxRunResult } from "@/lib/discord-reservation-outbox";
 import { jsonError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { getMockNotificationSettings } from "@/lib/mock-notification-settings";
@@ -22,6 +23,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     return jsonError(401, "unauthorized", "크론 인증이 필요합니다.");
   }
   const now = new Date();
+  const reservationOutbox = await runReservationOutboxSafely(now);
   const noDatabaseMockMode = isNoDatabaseMockMode();
   const notificationSettings = noDatabaseMockMode
     ? getMockNotificationSettings()
@@ -29,6 +31,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!notificationSettings.closedPeriodNotificationsEnabled) {
     return NextResponse.json({
       processed: 0,
+      reservationOutbox,
       results: [],
       skipped: "closed_period_notifications_disabled"
     });
@@ -84,16 +87,39 @@ export async function GET(request: Request): Promise<NextResponse> {
     store: prismaOperationalJobStore
   });
   if (run.kind === "already_running") {
-    return NextResponse.json({ status: "already_running" }, { status: 202 });
+    return NextResponse.json({ reservationOutbox, status: "already_running" }, { status: 202 });
   }
   if (run.kind === "failed") {
     if (run.failureCode === "discord_webhook_missing") {
-      return jsonError(500, "discord_webhook_missing", "Discord webhook 설정이 필요합니다.");
+      return NextResponse.json({
+        error: { code: "discord_webhook_missing", message: "Discord webhook 설정이 필요합니다." },
+        reservationOutbox
+      }, { status: 500 });
     }
     if (!run.value) {
-      return jsonError(500, "server_error", "크론 실행에 실패했습니다.");
+      return NextResponse.json({
+        error: { code: "server_error", message: "크론 실행에 실패했습니다." },
+        reservationOutbox
+      }, { status: 500 });
     }
-    return NextResponse.json(run.value, { status: 502 });
+    return NextResponse.json({ ...run.value, reservationOutbox }, { status: 502 });
   }
-  return NextResponse.json(run.value);
+  return NextResponse.json({ ...run.value, reservationOutbox });
+}
+
+type ReservationOutboxReport = DiscordReservationOutboxRunResult | {
+  readonly kind: "failed";
+  readonly message: "discord_reservation_outbox_failed";
+};
+
+async function runReservationOutboxSafely(now: Date): Promise<ReservationOutboxReport> {
+  try {
+    return await runDiscordReservationOutbox({ now });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "discord_reservation_outbox_cron_failed",
+      message: error instanceof Error ? error.name : "UnknownError"
+    }));
+    return { kind: "failed", message: "discord_reservation_outbox_failed" };
+  }
 }

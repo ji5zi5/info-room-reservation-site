@@ -5,8 +5,7 @@ import { z } from "zod";
 
 import { isReservableDate } from "@/lib/advance-reservation-policy";
 import { databaseActorFromSessionUser, TransactionRetryExhaustedError } from "@/lib/db-context";
-import { buildAdminReservationDeepLinkUrl } from "@/app/admin/admin-console-url";
-import { parseServerEnv } from "@/lib/env";
+import { runDiscordReservationOutbox } from "@/lib/discord-reservation-outbox";
 import { reserveStudyPeriod } from "@/lib/reservation-service";
 import { createPrismaReservationStoreForActor } from "@/lib/prisma-reservation-store";
 import {
@@ -17,14 +16,11 @@ import {
 } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { reserveMockStudyPeriod } from "@/lib/mock-reservation-data";
-import { getPrismaNotificationSettings } from "@/lib/prisma-notification-settings";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
-import { sendDiscordWebhook } from "@/lib/discord-notifications";
-import { sendReservationCreatedNotification } from "@/lib/reservation-created-notification-service";
 import { enforceReservationRateLimit } from "@/lib/route-rate-limit";
-import { requireSession, type SessionUser, UnauthorizedSessionError } from "@/lib/session";
+import { requireSession, UnauthorizedSessionError } from "@/lib/session";
 
 const ReservationRequestSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
@@ -87,9 +83,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       userId: user.id
     });
     if (result.kind === "confirmed") {
-      const callbackInput = buildReservationCreatedNotificationCallbackInput(result.reservation, user);
       after(async () => {
-        await notifyReservationCreatedBestEffort(callbackInput);
+        try {
+          await runDiscordReservationOutbox({ now: new Date(), reservationId: result.reservation.id });
+        } catch (error) {
+          reportReservationOutboxFailure(result.reservation.id, error);
+        }
       });
     }
 
@@ -108,72 +107,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 }
 
-type ReservationCreatedNotificationCallbackInput = {
-  readonly applicant: {
-    readonly name: string;
-    readonly studentNumber: string;
-  };
-  readonly embedTitleUrl?: string;
-  readonly reservation: import("@/lib/reservation-service").Reservation;
-  readonly webhookUrl: string | undefined;
-};
-
-function buildReservationCreatedNotificationCallbackInput(
-  reservation: import("@/lib/reservation-service").Reservation,
-  user: SessionUser
-): ReservationCreatedNotificationCallbackInput {
-  const env = parseServerEnv();
-  const embedTitleUrl = env.appOrigin === null
-    ? undefined
-    : buildAdminReservationDeepLinkUrl(env.appOrigin, { date: reservation.date, reservationId: reservation.id });
-  return {
-    applicant: {
-      name: user.name,
-      studentNumber: user.studentNumber
-    },
-    ...(embedTitleUrl === undefined ? {} : { embedTitleUrl }),
-    reservation,
-    webhookUrl: env.discordWebhookUrl ?? undefined
-  };
-}
-
-async function notifyReservationCreatedBestEffort(
-  input: ReservationCreatedNotificationCallbackInput
-): Promise<void> {
-  try {
-    const notificationSettings = await getPrismaNotificationSettings();
-    const notificationResult = await sendReservationCreatedNotification({
-      applicant: input.applicant,
-      ...(input.embedTitleUrl === undefined ? {} : { embedTitleUrl: input.embedTitleUrl }),
-      notificationSettings,
-      reservation: input.reservation,
-      sender: (payload) => sendDiscordWebhook({ payload, webhookUrl: input.webhookUrl ?? "" }),
-      webhookUrl: input.webhookUrl
-    });
-    if (notificationResult.kind === "failed") {
-      reportReservationCreatedNotificationFailure(input.reservation, "delivery_failed");
-    } else if (
-      notificationResult.kind === "skipped" &&
-      notificationResult.reason === "webhook_missing"
-    ) {
-      reportReservationCreatedNotificationFailure(input.reservation, "webhook_missing");
-    }
-  } catch {
-    reportReservationCreatedNotificationFailure(input.reservation, "unexpected_error");
-  }
-}
-
-function reportReservationCreatedNotificationFailure(
-  reservation: import("@/lib/reservation-service").Reservation,
-  outcome: "delivery_failed" | "unexpected_error" | "webhook_missing"
-): void {
+function reportReservationOutboxFailure(reservationId: string, _error: unknown): void {
   console.error(
     JSON.stringify({
-      date: reservation.date,
-      event: "reservation_created_notification_failed",
-      outcome,
-      reservationId: reservation.id,
-      studyPeriod: reservation.studyPeriod
+      event: "discord_reservation_outbox_trigger_failed",
+      reservationId
     })
   );
 }

@@ -17,6 +17,7 @@ const routeMocks = vi.hoisted(() => ({
   getMockNotificationSettings: vi.fn(),
   getPrismaNotificationSettings: vi.fn(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
+  runDiscordReservationOutbox: vi.fn(),
   runOperationalJob: vi.fn<(input: RunJobInput) => Promise<unknown>>(),
   sendClosedPeriod: vi.fn(),
   sendDiscordWebhook: vi.fn()
@@ -24,6 +25,10 @@ const routeMocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/closed-period-notification-service", () => ({
   createClosedPeriodNotificationService: routeMocks.createClosedPeriodNotificationService
+}));
+
+vi.mock("@/lib/discord-reservation-outbox", () => ({
+  runDiscordReservationOutbox: routeMocks.runDiscordReservationOutbox
 }));
 
 vi.mock("@/lib/mock-dev-mode", () => ({
@@ -69,6 +74,11 @@ describe("closed-period notification cron", () => {
     routeMocks.getMockNotificationSettings.mockReturnValue(defaultNotificationSettings());
     routeMocks.getDueClosedPeriodNotificationCandidates.mockResolvedValue([]);
     routeMocks.getClosedPeriodNotificationBacklogSummary.mockResolvedValue({ count: 0, oldestAt: null });
+    routeMocks.runDiscordReservationOutbox.mockResolvedValue({
+      initial: { claimed: 0, retried: 0, sent: 0, terminal: 0 },
+      kind: "processed",
+      sync: { abandoned: 0, claimed: 0, retried: 0, synced: 0 }
+    });
     routeMocks.runOperationalJob.mockImplementation(async (input) => {
       const outcome = await input.operation();
       return outcome.kind === "succeeded"
@@ -95,9 +105,11 @@ describe("closed-period notification cron", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       processed: 0,
+      reservationOutbox: expect.objectContaining({ kind: "processed" }),
       results: [],
       skipped: "closed_period_notifications_disabled"
     });
+    expect(routeMocks.runDiscordReservationOutbox).toHaveBeenCalledWith({ now: expect.any(Date) });
     expect(routeMocks.getDueClosedPeriodNotificationCandidates).not.toHaveBeenCalled();
   });
 
@@ -109,7 +121,8 @@ describe("closed-period notification cron", () => {
       error: {
         code: "discord_webhook_missing",
         message: "Discord webhook 설정이 필요합니다."
-      }
+      },
+      reservationOutbox: expect.objectContaining({ kind: "processed" })
     });
   });
 
@@ -141,10 +154,29 @@ describe("closed-period notification cron", () => {
       backlog: { count: 1, oldestAt: "2026-06-12T07:25:00.000Z" },
       failed: 0,
       processed: 1,
+      reservationOutbox: expect.objectContaining({ kind: "processed" }),
       sent: 0,
       skipped: 0,
       unknown: 1
     });
+  });
+
+  it("runs reservation recovery safely in no-database mock mode before the disabled return", async () => {
+    routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
+    routeMocks.getMockNotificationSettings.mockReturnValue({
+      ...defaultNotificationSettings(),
+      closedPeriodNotificationsEnabled: false
+    });
+    routeMocks.runDiscordReservationOutbox.mockResolvedValue({ kind: "skipped", reason: "no_database_mock" });
+
+    const response = await GET(cronRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.runDiscordReservationOutbox).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toMatchObject({
+      reservationOutbox: { kind: "skipped", reason: "no_database_mock" }
+    });
+    expect(routeMocks.getPrismaNotificationSettings).not.toHaveBeenCalled();
   });
 });
 

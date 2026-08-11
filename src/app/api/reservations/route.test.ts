@@ -16,15 +16,13 @@ const nextServerMocks = vi.hoisted(
 const routeMocks = vi.hoisted(() => ({
   createPrismaReservationStoreForActor: vi.fn(),
   enforceReservationRateLimit: vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
-  getPrismaNotificationSettings: vi.fn(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
   isReservableDate: vi.fn<() => boolean>(),
   requireMutatingRequestSafety: vi.fn<(request: Request) => null>(),
   requireSession: vi.fn<RequireSession>(),
   reserveMockStudyPeriod: vi.fn(),
   reserveStudyPeriod: vi.fn<ReserveStudyPeriod>(),
-  sendDiscordWebhook: vi.fn(),
-  sendReservationCreatedNotification: vi.fn(),
+  runDiscordReservationOutbox: vi.fn(),
   validateRequestCsrf: vi.fn<ValidateRequestCsrf>()
 }));
 
@@ -48,16 +46,8 @@ vi.mock("@/lib/mock-reservation-data", () => ({
   reserveMockStudyPeriod: routeMocks.reserveMockStudyPeriod
 }));
 
-vi.mock("@/lib/prisma-notification-settings", () => ({
-  getPrismaNotificationSettings: routeMocks.getPrismaNotificationSettings
-}));
-
-vi.mock("@/lib/reservation-created-notification-service", () => ({
-  sendReservationCreatedNotification: routeMocks.sendReservationCreatedNotification
-}));
-
-vi.mock("@/lib/discord-notifications", () => ({
-  sendDiscordWebhook: routeMocks.sendDiscordWebhook
+vi.mock("@/lib/discord-reservation-outbox", () => ({
+  runDiscordReservationOutbox: routeMocks.runDiscordReservationOutbox
 }));
 
 vi.mock("@/lib/request-csrf", () => ({
@@ -128,12 +118,7 @@ describe("reservation create route Discord notification", () => {
     routeMocks.createPrismaReservationStoreForActor.mockReturnValue({});
     routeMocks.reserveStudyPeriod.mockResolvedValue({ kind: "confirmed", reservation: confirmedReservation });
     routeMocks.reserveMockStudyPeriod.mockReturnValue({ kind: "confirmed", reservation: confirmedReservation });
-    routeMocks.getPrismaNotificationSettings.mockResolvedValue({
-      closedPeriodNotificationsEnabled: true,
-      id: "global",
-      reservationCreatedNotificationsEnabled: true
-    });
-    routeMocks.sendReservationCreatedNotification.mockResolvedValue({ kind: "sent", messageIds: ["discord-1"] });
+    routeMocks.runDiscordReservationOutbox.mockResolvedValue({ initial: {}, sync: {} });
   });
 
   afterEach(() => {
@@ -148,67 +133,35 @@ describe("reservation create route Discord notification", () => {
     const response = await POST(reservationRequest());
 
     expect(response.status).toBe(201);
-    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(routeMocks.runDiscordReservationOutbox).not.toHaveBeenCalled();
     expect(nextServerMocks.capturedAfter).toEqual(expect.any(Function));
     expect(errorLog).not.toHaveBeenCalled();
 
     await nextServerMocks.capturedAfter?.();
 
-    expect(routeMocks.sendReservationCreatedNotification).toHaveBeenCalledWith({
-      applicant: {
-        name: studentUser.name,
-        studentNumber: studentUser.studentNumber
-      },
-      notificationSettings: {
-        closedPeriodNotificationsEnabled: true,
-        id: "global",
-        reservationCreatedNotificationsEnabled: true
-      },
-      reservation: confirmedReservation,
-      sender: expect.any(Function),
-      embedTitleUrl:
-        "https://example.test/?section=reservations&date=2026-07-01&status=CONFIRMED&reservation=reservation-1",
-      webhookUrl: "https://discord.com/api/webhooks/1/token"
+    expect(routeMocks.runDiscordReservationOutbox).toHaveBeenCalledWith({
+      now: expect.any(Date),
+      reservationId: confirmedReservation.id
     });
     expect(errorLog).not.toHaveBeenCalled();
   });
 
   it("logs an unexpected deferred notification failure only after returning 201", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    routeMocks.sendReservationCreatedNotification.mockRejectedValue(new Error("discord down"));
+    routeMocks.runDiscordReservationOutbox.mockRejectedValue(new Error("discord down"));
 
     const response = await POST(reservationRequest());
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({ reservation: confirmedReservation });
-    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(routeMocks.runDiscordReservationOutbox).not.toHaveBeenCalled();
     expect(nextServerMocks.capturedAfter).toEqual(expect.any(Function));
     expect(errorLog).not.toHaveBeenCalled();
 
     await nextServerMocks.capturedAfter?.();
 
     expect(errorLog).toHaveBeenCalledTimes(1);
-    expectStructuredNotificationFailure(errorLog.mock.calls[0]?.[0], "unexpected_error");
-  });
-
-  it("logs a redacted known delivery failure only after returning 201", async () => {
-    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    routeMocks.sendReservationCreatedNotification.mockResolvedValue({
-      kind: "failed",
-      message: "failed https://discord.com/api/webhooks/1/[redacted]"
-    });
-
-    const response = await POST(reservationRequest());
-
-    expect(response.status).toBe(201);
-    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
-    expect(nextServerMocks.capturedAfter).toEqual(expect.any(Function));
-    expect(errorLog).not.toHaveBeenCalled();
-
-    await nextServerMocks.capturedAfter?.();
-
-    expect(errorLog).toHaveBeenCalledTimes(1);
-    expectStructuredNotificationFailure(errorLog.mock.calls[0]?.[0], "delivery_failed");
+    expectStructuredOutboxFailure(errorLog.mock.calls[0]?.[0]);
   });
 
   it("does not send Discord notifications in no-database mock mode", async () => {
@@ -217,8 +170,7 @@ describe("reservation create route Discord notification", () => {
     const response = await POST(reservationRequest());
 
     expect(response.status).toBe(201);
-    expect(routeMocks.getPrismaNotificationSettings).not.toHaveBeenCalled();
-    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(routeMocks.runDiscordReservationOutbox).not.toHaveBeenCalled();
   });
 
   it("returns a retryable 503 when reservation serialization is exhausted", async () => {
@@ -234,7 +186,7 @@ describe("reservation create route Discord notification", () => {
         message: "동시 요청이 많습니다. 잠시 후 다시 시도해주세요."
       }
     });
-    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(routeMocks.runDiscordReservationOutbox).not.toHaveBeenCalled();
   });
 
   it("returns one deterministic generic denial for a shadow-banned reservation", async () => {
@@ -252,7 +204,7 @@ describe("reservation create route Discord notification", () => {
     });
     expect(routeMocks.reserveStudyPeriod).toHaveBeenCalledTimes(1);
     expect(randomSpy).not.toHaveBeenCalled();
-    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(routeMocks.runDiscordReservationOutbox).not.toHaveBeenCalled();
   });
 
   it("uses the same generic denial in no-database mock mode", async () => {
@@ -266,7 +218,7 @@ describe("reservation create route Discord notification", () => {
       error: { code: "reservation_unavailable", message: "예약을 처리할 수 없습니다." }
     });
     expect(routeMocks.reserveStudyPeriod).not.toHaveBeenCalled();
-    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(routeMocks.runDiscordReservationOutbox).not.toHaveBeenCalled();
   });
 });
 
@@ -288,15 +240,12 @@ function reservationRequest(): Request {
   });
 }
 
-function expectStructuredNotificationFailure(value: unknown, outcome: string): void {
+function expectStructuredOutboxFailure(value: unknown): void {
   expect(typeof value).toBe("string");
   const serialized = String(value);
   expect(JSON.parse(serialized)).toEqual({
-    date: confirmedReservation.date,
-    event: "reservation_created_notification_failed",
-    outcome,
-    reservationId: confirmedReservation.id,
-    studyPeriod: confirmedReservation.studyPeriod
+    event: "discord_reservation_outbox_trigger_failed",
+    reservationId: confirmedReservation.id
   });
   expect(serialized).not.toContain(confirmedReservation.reason);
   expect(serialized).not.toContain(confirmedReservation.userId);
