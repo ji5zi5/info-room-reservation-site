@@ -22,7 +22,7 @@ src/app/api/
 
 | Task | Location | Notes |
 | --- | --- | --- |
-| Student reservation create | `reservations/route.ts` | Uses request safety, CSRF, user session, rate limit, `createReservation`, and optional best-effort reservation-created Discord alerts after confirmation. |
+| Student reservation create | `reservations/route.ts` | Uses request safety, CSRF, user session, rate limit, `createReservation`, and durable `DiscordReservationMessage` outbox delivery/recovery after confirmation; Discord delivery remains independent of reservation success. |
 | Student reservation cancel | `reservations/[id]/route.ts` | Must apply cancellation restriction through the service/store path. |
 | Riro login | `auth/riro/login/route.ts` | Keep mock and local admin gates aligned with `src/lib/env.ts`. |
 | Current user | `me/route.ts` | Include restriction expiry so expired temporary restrictions do not block UI forever. |
@@ -31,7 +31,7 @@ src/app/api/
 | Admin API subtree | `admin/` | Nested `AGENTS.md` covers audit, mutation, and transition rules. |
 | Admin transitions | `admin/reservations/[id]/cancel/route.ts`, `admin/reservations/[id]/no-show/route.ts` | Only transition `CONFIRMED` reservations. |
 | User sanctions | `admin/users/[id]/restriction/route.ts` | `BANNED` uses `days: null`; `RESTRICTED` requires days. |
-| Discord send | `admin/notifications/closed-periods/send/route.ts`, `reservations/route.ts` | Manual close-list sends stay in admin; reservation-created alerts are student-route best-effort only. |
+| Discord send | `admin/notifications/closed-periods/send/route.ts`, `reservations/route.ts` | Manual close-list sends stay in admin; reservation-created delivery is durably enqueued on confirmation and recovered by the Discord outbox worker. |
 | Discord interactions | `discord/interactions/route.ts` | Preserve bounded raw bytes for Ed25519 verification before JSON parsing; this is the sole exception to the shared JSON reader. |
 | Cron | `cron/closed-period-notifications/route.ts`, `cron/maintenance/route.ts` | Separate `CLOSED_PERIOD_CRON_SECRET` and `MAINTENANCE_CRON_SECRET` bearer tokens are required. |
 

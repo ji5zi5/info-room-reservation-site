@@ -16,7 +16,7 @@
 | Env and local fallback gates | `env.ts`, `local-login.ts`, `mock-dev-mode.ts` | Mock, local admin, and local student modes are separate switches. |
 | Sessions | `session.ts` | `requireUser()` and `requireAdmin()` live here. |
 | Admin helpers | `admin-reservations.ts`, `admin-users.ts`, `admin-user-detail.ts`, `admin-dashboard.ts` | Pure filtering/sorting/summary helpers. |
-| Discord notifications | `discord-notifications.ts`, `closed-period-notifications.ts`, `closed-period-notification-service.ts`, `reservation-created-notification-service.ts`, `prisma-notification-repository.ts` | Closed-list delivery and optional best-effort reservation-created alerts. |
+| Discord notifications | `discord-notifications.ts`, `closed-period-notifications.ts`, `closed-period-notification-service.ts`, `reservation-created-notification-service.ts`, `discord-reservation-outbox.ts`, `prisma-discord-reservation-message-repository.ts` | Closed-list delivery plus durable outbox delivery/recovery for reservation-created alerts, with optional Discord Application bot transport. |
 
 ## CONVENTIONS
 
@@ -35,7 +35,7 @@
 - Discord webhook execution should use `wait=true` so message IDs can be recorded.
 - With confirmed consent, Discord reservation payloads may include student identity and the reservation reason only in the configured private operations channel. The configured role guard, explicit one-to-one administrator map, `allowed_mentions: { parse: [] }`, and 30-day bot-message/ledger retention are mandatory; public and student-facing surfaces remain prohibited.
 - `NotificationDelivery` uniqueness is `date + studyPeriod + kind`; use it to avoid duplicate cron sends.
-- Reservation-created Discord alerts are immediate best-effort sends and do not use `NotificationDelivery`.
+- Reservation-created Discord alerts are durably enqueued in `DiscordReservationMessage` during reservation creation and recovered by the outbox worker; delivery failures do not change reservation success.
 
 ## ANTI-PATTERNS
 

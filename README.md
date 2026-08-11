@@ -55,6 +55,7 @@
 - 노쇼는 `Reservation.status = NO_SHOW`로 기록하고 수동 제재와 분리합니다.
 - 관리자 취소는 제재 없이 취소 사유, 학생 알림, 감사 기록에 반영합니다.
 - Discord 알림은 마감 명단과 운영상 필요한 범위로 제한합니다.
+- 예약 확정은 Discord 전송 결과와 독립적이며, 생성 시 `DiscordReservationMessage`에 전송 작업을 기록하고 outbox가 재시도·복구합니다.
 
 ## 기술 구성
 
@@ -66,7 +67,7 @@
 | Validation | Zod |
 | Tests | Vitest, Playwright |
 | Deploy | Vercel |
-| Integrations | Riro School, Discord webhook |
+| Integrations | Riro School, Discord webhook + optional Discord Application bot |
 
 ## 코드 구조
 
