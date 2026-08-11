@@ -131,7 +131,7 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
           await sleep(rateLimitDelay);
           continue;
         }
-        if (error instanceof z.ZodError) {
+        if (error instanceof SyntaxError || error instanceof z.ZodError) {
           return request.invalidResponseOutcome === "unknown"
             ? {
                 code: "discord_invalid_response",

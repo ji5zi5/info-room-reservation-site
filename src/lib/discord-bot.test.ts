@@ -111,8 +111,8 @@ describe("Discord bot REST transport", () => {
     expect(bodies[1]).toBe(bodies[0]);
   });
 
-  it("keeps a malformed successful create response ambiguous after one nonce-stable retry", async () => {
-    // Given: Discord accepts both creates but omits a usable message id.
+  it("keeps a successful create response with a missing id ambiguous after one nonce-stable retry", async () => {
+    // Given: Discord accepts both creates but returns valid JSON without a message id.
     const bodies: string[] = [];
     const bot = createDiscordBotClient({
       applicationId: "123",
@@ -120,7 +120,10 @@ describe("Discord bot REST transport", () => {
       fetch: async (input, init) => {
         const request = new Request(input, init);
         bodies.push(await request.text());
-        return new Response(JSON.stringify({ id: "" }), { status: 200 });
+        return new Response(JSON.stringify({}), {
+          headers: { "content-type": "application/json" },
+          status: 200
+        });
       }
     });
 
@@ -131,6 +134,35 @@ describe("Discord bot REST transport", () => {
     expect(result).toMatchObject({ code: "discord_invalid_response", kind: "unknown", outcome: "UNKNOWN" });
     expect(canFallbackToDiscordWebhook(result)).toBe(false);
     expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toContain('"nonce":"reservation-');
+    expect(bodies[1]).toBe(bodies[0]);
+  });
+
+  it("keeps a successful create response with malformed JSON ambiguous after one nonce-stable retry", async () => {
+    // Given: Discord accepts both creates but returns malformed JSON.
+    const bodies: string[] = [];
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        bodies.push(await request.text());
+        return new Response("{", {
+          headers: { "content-type": "application/json" },
+          status: 200
+        });
+      }
+    });
+
+    // When: the bot creates a reservation message.
+    const result = await bot.createChannelMessage({ channelId: "321", payload, reservationId: "reservation-1" });
+
+    // Then: the outcome remains ambiguous, uses the same nonce, and cannot fall back to a webhook.
+    expect(result).toMatchObject({ code: "discord_invalid_response", kind: "unknown", outcome: "UNKNOWN" });
+    expect(canFallbackToDiscordWebhook(result)).toBe(false);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toContain('"enforce_nonce":true');
+    expect(bodies[0]).toContain('"nonce":"reservation-');
     expect(bodies[1]).toBe(bodies[0]);
   });
 
