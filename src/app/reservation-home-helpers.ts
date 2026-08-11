@@ -1,13 +1,28 @@
 import type { ReservationSidebarUser } from "./reservation-sidebar";
 
 export function consumeAdminRedirectMessage(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const reason = params.get("admin");
-  if (reason === "required" || reason === "forbidden") {
-    window.history.replaceState(null, "", window.location.pathname);
-    return reason === "required" ? "로그인이 필요합니다." : "관리자 권한이 필요합니다.";
+  const result = readAdminRedirectMessage(window.location.search);
+  if (result.message !== null) {
+    const query = result.cleanedSearch ? `?${result.cleanedSearch}` : "";
+    window.history.replaceState(null, "", `${window.location.pathname}${query}${window.location.hash}`);
   }
-  return null;
+  return result.message;
+}
+
+export function readAdminRedirectMessage(search: string): {
+  readonly cleanedSearch: string;
+  readonly message: string | null;
+} {
+  const params = new URLSearchParams(search);
+  const reason = params.get("admin");
+  if (reason !== "required" && reason !== "forbidden") {
+    return { cleanedSearch: params.toString(), message: null };
+  }
+  params.delete("admin");
+  return {
+    cleanedSearch: params.toString(),
+    message: reason === "required" ? "로그인이 필요합니다." : "관리자 권한이 필요합니다."
+  };
 }
 
 export function reservationRestrictionMessage(user: ReservationSidebarUser | null): string | null {

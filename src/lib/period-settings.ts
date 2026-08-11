@@ -1,4 +1,7 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "./db";
+import { type DatabaseActor, withDatabaseContext } from "./db-context";
 import { addDays } from "./date";
 import { getPeriodWindowState, type PeriodWindowState } from "./period-window";
 import {
@@ -70,6 +73,7 @@ type PeriodReservationData = {
 };
 
 type PeriodSummaryOptions = {
+  readonly actor: DatabaseActor;
   readonly currentUserId?: string;
   readonly includeApplicants?: boolean;
   readonly now?: Date;
@@ -87,18 +91,23 @@ export {
 
 export async function getPeriodSummaries(
   date: string,
-  options: PeriodSummaryOptions = {}
+  options: PeriodSummaryOptions
 ): Promise<readonly PeriodSummary[]> {
   const now = options.now ?? new Date();
-  const [settings, counts, reservationData] = await Promise.all([
-    prisma.periodSetting.findMany({ where: { date: { in: [...periodSettingReadDates(date)] } } }),
-    prisma.reservation.groupBy({
-      by: ["studyPeriod"],
-      where: { date, status: "CONFIRMED" },
-      _count: { _all: true }
-    }),
-    getPeriodReservationData(date, options)
-  ]);
+  const [settings, counts, reservationData] = await withDatabaseContext({
+    actor: options.actor,
+    client: prisma,
+    operation: (transaction) =>
+      Promise.all([
+        transaction.periodSetting.findMany({ where: { date: { in: [...periodSettingReadDates(date)] } } }),
+        transaction.reservation.groupBy({
+          by: ["studyPeriod"],
+          where: { date, status: "CONFIRMED" },
+          _count: { _all: true }
+        }),
+        getPeriodReservationData(transaction, date, options)
+      ])
+  });
 
   return STUDY_PERIODS.map((studyPeriod) => {
     const setting = resolveEffectivePeriodSetting(date, studyPeriod, settings);
@@ -123,23 +132,28 @@ export async function getPeriodSummaries(
 
 export async function getPeriodWeekSummaries(
   weekStart: string,
-  options: { readonly currentUserId: string }
+  options: { readonly actor: DatabaseActor; readonly currentUserId: string }
 ): Promise<PeriodWeekSummary> {
   const dates = Array.from({ length: 5 }, (_, index) => addDays(weekStart, index));
   const settingDates = [GLOBAL_PERIOD_SETTINGS_DATE, ...dates];
-  const [settings, counts, reservations] = await Promise.all([
-    prisma.periodSetting.findMany({ where: { date: { in: settingDates } } }),
-    prisma.reservation.groupBy({
-      _count: { _all: true },
-      by: ["date", "studyPeriod"],
-      where: { date: { in: dates }, status: "CONFIRMED" }
-    }),
-    prisma.reservation.findMany({
-      orderBy: { createdAt: "asc" },
-      select: { date: true, id: true, studyPeriod: true },
-      where: { date: { in: dates }, status: "CONFIRMED", userId: options.currentUserId }
-    })
-  ]);
+  const [settings, counts, reservations] = await withDatabaseContext({
+    actor: options.actor,
+    client: prisma,
+    operation: (transaction) =>
+      Promise.all([
+        transaction.periodSetting.findMany({ where: { date: { in: settingDates } } }),
+        transaction.reservation.groupBy({
+          _count: { _all: true },
+          by: ["date", "studyPeriod"],
+          where: { date: { in: dates }, status: "CONFIRMED" }
+        }),
+        transaction.reservation.findMany({
+          orderBy: { createdAt: "asc" },
+          select: { date: true, id: true, studyPeriod: true },
+          where: { date: { in: dates }, status: "CONFIRMED", userId: options.currentUserId }
+        })
+      ])
+  });
 
   return {
     dates: dates.map((date) => ({
@@ -171,6 +185,7 @@ export async function getPeriodWeekSummaries(
 }
 
 async function getPeriodReservationData(
+  transaction: Prisma.TransactionClient,
   date: string,
   options: PeriodSummaryOptions
 ): Promise<PeriodReservationData> {
@@ -178,7 +193,7 @@ async function getPeriodReservationData(
     if (!options.currentUserId) {
       return { applicants: [], owners: [] };
     }
-    const reservations = await prisma.reservation.findMany({
+    const reservations = await transaction.reservation.findMany({
       orderBy: { createdAt: "asc" },
       select: { id: true, studyPeriod: true, userId: true },
       where: { date, status: "CONFIRMED", userId: options.currentUserId }
@@ -193,7 +208,7 @@ async function getPeriodReservationData(
     };
   }
 
-  const reservations = await prisma.reservation.findMany({
+  const reservations = await transaction.reservation.findMany({
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
@@ -246,31 +261,37 @@ export function findMyReservationId(
   );
 }
 
-export async function ensurePeriodSettings(date: string): Promise<void> {
-  const globalSettings = await prisma.periodSetting.findMany({
-    where: { date: { in: [...periodSettingReadDates(date)] } }
-  });
+export async function ensurePeriodSettings(date: string, actor: DatabaseActor): Promise<void> {
+  await withDatabaseContext({
+    actor,
+    client: prisma,
+    operation: async (transaction) => {
+      const globalSettings = await transaction.periodSetting.findMany({
+        where: { date: { in: [...periodSettingReadDates(date)] } }
+      });
 
-  for (const studyPeriod of STUDY_PERIODS) {
-    const setting = resolveEffectivePeriodSetting(date, studyPeriod, globalSettings);
-    await prisma.periodSetting.upsert({
-      create: {
-        capacity: setting.capacity,
-        closeTime: setting.closeTime,
-        date,
-        enabled: setting.enabled,
-        openTime: setting.openTime,
-        studyPeriod
-      },
-      update: {},
-      where: {
-        date_studyPeriod: {
-          date,
-          studyPeriod
-        }
+      for (const studyPeriod of STUDY_PERIODS) {
+        const setting = resolveEffectivePeriodSetting(date, studyPeriod, globalSettings);
+        await transaction.periodSetting.upsert({
+          create: {
+            capacity: setting.capacity,
+            closeTime: setting.closeTime,
+            date,
+            enabled: setting.enabled,
+            openTime: setting.openTime,
+            studyPeriod
+          },
+          update: {},
+          where: {
+            date_studyPeriod: {
+              date,
+              studyPeriod
+            }
+          }
+        });
       }
-    });
-  }
+    }
+  });
 }
 
 export function parseStoredStudyPeriod(value: string): StudyPeriod {

@@ -3,7 +3,14 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CurrentSession, SessionUser } from "@/lib/session";
 
-import { prisma, resetPostgresTestDatabase, seedUser } from "./postgres-test-db";
+import {
+  prisma,
+  resetPostgresTestDatabase,
+  seedUser,
+  withAdminDatabaseContext,
+  withStudentDatabaseContext,
+  withSystemDatabaseContext
+} from "./postgres-test-db";
 
 type RouteAuthState = {
   adminSession: CurrentSession | null;
@@ -88,32 +95,39 @@ describe("real PostgreSQL mutation serialization", () => {
     expect(results.filter((result) => result.kind === "confirmed")).toHaveLength(1);
     expect(results.filter((result) => result.kind === "error" && result.reason === "full")).toHaveLength(1);
     await expect(
-      prisma.reservation.count({
-        where: { date: TEST_DATE, status: "CONFIRMED", studyPeriod: "EIGHTH" }
-      })
+      withSystemDatabaseContext((transaction) =>
+        transaction.reservation.count({
+          where: { date: TEST_DATE, status: "CONFIRMED", studyPeriod: "EIGHTH" }
+        })
+      )
     ).resolves.toBe(1);
   });
 
-  it("revives one cancelled identity exactly once", async () => {
+  it("keeps a cancelled identity permanently non-rebookable", async () => {
     const user = await seedUser({ id: "revive-user" });
     await seedPeriod(10);
-    await prisma.reservation.create({
-      data: {
-        date: TEST_DATE,
-        reason: "이전 취소",
-        status: "CANCELLED",
-        studyPeriod: "EIGHTH",
-        userId: user.id
-      }
-    });
+    await withSystemDatabaseContext((transaction) =>
+      transaction.reservation.create({
+        data: {
+          date: TEST_DATE,
+          reason: "이전 취소",
+          status: "CANCELLED",
+          studyPeriod: "EIGHTH",
+          userId: user.id
+        }
+      })
+    );
 
     const results = await Promise.all([reserve(user.id), reserve(user.id)]);
 
-    expect(results.filter((result) => result.kind === "confirmed")).toHaveLength(1);
-    expect(results.filter((result) => result.kind === "error" && result.reason === "duplicate")).toHaveLength(1);
+    expect(results.filter((result) => result.kind === "error" && result.reason === "duplicate")).toHaveLength(2);
     await expect(
-      prisma.reservation.count({ where: { date: TEST_DATE, studyPeriod: "EIGHTH", userId: user.id } })
-    ).resolves.toBe(1);
+      withStudentDatabaseContext(user.id, (transaction) =>
+        transaction.reservation.findUniqueOrThrow({
+          where: { userId_date_studyPeriod: { date: TEST_DATE, studyPeriod: "EIGHTH", userId: user.id } }
+        })
+      )
+    ).resolves.toMatchObject({ reason: "이전 취소", status: "CANCELLED" });
   });
 
   it("creates cancellation sanctions once under duplicate requests", async () => {
@@ -127,11 +141,17 @@ describe("real PostgreSQL mutation serialization", () => {
     ]);
 
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
-    await expect(prisma.adminAction.count()).resolves.toBe(1);
-    await expect(prisma.auditLog.count()).resolves.toBe(1);
-    await expect(prisma.userSanction.count()).resolves.toBe(1);
-    await expect(prisma.reservation.findUniqueOrThrow({ where: { id: reservation.id } })).resolves.toMatchObject({
-      status: "CANCELLED"
+    const studentState = await withStudentDatabaseContext(user.id, async (transaction) => ({
+      adminActions: await transaction.adminAction.count(),
+      auditLogs: await transaction.auditLog.count(),
+      reservation: await transaction.reservation.findUniqueOrThrow({ where: { id: reservation.id } }),
+      sanctions: await transaction.userSanction.count()
+    }));
+    expect(studentState).toMatchObject({
+      adminActions: 1,
+      auditLogs: 1,
+      reservation: { status: "CANCELLED" },
+      sanctions: 1
     });
   });
 
@@ -155,11 +175,14 @@ describe("real PostgreSQL mutation serialization", () => {
     ]);
 
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
-    await expect(prisma.adminAction.count()).resolves.toBe(1);
-    await expect(prisma.auditLog.count()).resolves.toBe(1);
-    await expect(prisma.userSanction.count()).resolves.toBe(1);
-    const stored = await prisma.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
-    expect(["CANCELLED", "NO_SHOW"]).toContain(stored.status);
+    const adminState = await withAdminDatabaseContext(admin.id, async (transaction) => ({
+      adminActions: await transaction.adminAction.count(),
+      auditLogs: await transaction.auditLog.count(),
+      reservation: await transaction.reservation.findUniqueOrThrow({ where: { id: reservation.id } }),
+      sanctions: await transaction.userSanction.count()
+    }));
+    expect(adminState).toMatchObject({ adminActions: 1, auditLogs: 1, sanctions: 1 });
+    expect(["CANCELLED", "NO_SHOW"]).toContain(adminState.reservation.status);
   });
 
   it("leaves no confirmed reservation when a ban races creation", async () => {
@@ -183,14 +206,20 @@ describe("real PostgreSQL mutation serialization", () => {
     ]);
 
     expect(restrictionResponse.status).toBe(200);
-    await expect(prisma.user.findUniqueOrThrow({ where: { id: user.id } })).resolves.toMatchObject({
-      bookingStatus: "BANNED"
+    const adminState = await withAdminDatabaseContext(admin.id, async (transaction) => ({
+      adminActions: await transaction.adminAction.count(),
+      confirmedReservations: await transaction.reservation.count({
+        where: { status: "CONFIRMED", userId: user.id }
+      }),
+      sanctions: await transaction.userSanction.count(),
+      user: await transaction.user.findUniqueOrThrow({ where: { id: user.id } })
+    }));
+    expect(adminState).toMatchObject({
+      adminActions: 1,
+      confirmedReservations: 0,
+      sanctions: 1,
+      user: { bookingStatus: "BANNED" }
     });
-    await expect(
-      prisma.reservation.count({ where: { status: "CONFIRMED", userId: user.id } })
-    ).resolves.toBe(0);
-    await expect(prisma.adminAction.count()).resolves.toBe(1);
-    await expect(prisma.userSanction.count()).resolves.toBe(1);
   });
 });
 
@@ -242,28 +271,32 @@ function routeContext(id: string): { readonly params: Promise<{ readonly id: str
 }
 
 async function seedPeriod(capacity: number): Promise<void> {
-  await prisma.periodSetting.create({
-    data: {
-      capacity,
-      closeTime: "23:59",
-      date: TEST_DATE,
-      enabled: true,
-      openTime: "00:00",
-      studyPeriod: "EIGHTH"
-    }
-  });
+  await withSystemDatabaseContext((transaction) =>
+    transaction.periodSetting.create({
+      data: {
+        capacity,
+        closeTime: "23:59",
+        date: TEST_DATE,
+        enabled: true,
+        openTime: "00:00",
+        studyPeriod: "EIGHTH"
+      }
+    })
+  );
 }
 
 async function seedReservation(userId: string) {
-  return prisma.reservation.create({
-    data: {
-      date: TEST_DATE,
-      reason: "통합 예약",
-      status: "CONFIRMED",
-      studyPeriod: "EIGHTH",
-      userId
-    }
-  });
+  return withSystemDatabaseContext((transaction) =>
+    transaction.reservation.create({
+      data: {
+        date: TEST_DATE,
+        reason: "통합 예약",
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId
+      }
+    })
+  );
 }
 
 function sessionFor(user: User, id: string): CurrentSession {

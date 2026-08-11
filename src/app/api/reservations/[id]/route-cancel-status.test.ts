@@ -10,8 +10,13 @@ type ReservationUpdate = (input: unknown) => Promise<Reservation>;
 type UserUpdate = (input: unknown) => Promise<unknown>;
 type AdminActionCreate = (input: unknown) => Promise<{ readonly id: string }>;
 type WriteMutation = (input: unknown) => Promise<unknown>;
+type CancellationCapability = (
+  strings: TemplateStringsArray,
+  ...values: readonly unknown[]
+) => Promise<readonly { readonly outcome: string }[]>;
 type TransactionClient = {
   readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
+  readonly $queryRaw: CancellationCapability;
   readonly adminAction: { readonly create: AdminActionCreate };
   readonly auditLog: { readonly create: WriteMutation };
   readonly reservation: { readonly findUnique: ReservationFindUnique; readonly update: ReservationUpdate };
@@ -40,6 +45,7 @@ const routeMocks = vi.hoisted(() => {
     UnauthorizedSessionError,
     adminActionCreate: vi.fn<AdminActionCreate>(),
     auditLogCreate: vi.fn<WriteMutation>(),
+    cancellationCapability: vi.fn<CancellationCapability>(),
     cancelMockReservation: vi.fn<CancelMockReservation>(),
     createMockSessionToken: vi.fn<CreateMockSessionToken>(),
     enforceReservationRateLimit: vi.fn<EnforceReservationRateLimit>(),
@@ -123,6 +129,7 @@ describe("student reservation cancellation status guard", () => {
     routeMocks.validateRequestCsrf.mockResolvedValue({ kind: "ok" });
     routeMocks.enforceReservationRateLimit.mockResolvedValue(allowedRateLimit);
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
+    routeMocks.cancellationCapability.mockResolvedValue([{ outcome: "NOT_CANCELLABLE" }]);
     routeMocks.reservationFindUnique.mockResolvedValue(noShowReservation);
     routeMocks.reservationUpdate.mockResolvedValue({ ...noShowReservation, status: "CANCELLED" });
     routeMocks.userUpdate.mockResolvedValue({
@@ -138,7 +145,7 @@ describe("student reservation cancellation status guard", () => {
     routeMocks.transaction.mockImplementation(async (operation) => operation(transactionClient()));
   });
 
-  it("rejects a student cancellation Given a no-show reservation When deleting it Then no status or sanction mutation runs", async () => {
+  it("returns conflict Given a no-show reservation When cancellation is requested Then no cancellation payload is returned", async () => {
     // Given
     const { DELETE } = await loadCancelRoute();
 
@@ -147,13 +154,11 @@ describe("student reservation cancellation status guard", () => {
 
     // Then
     expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({ error: { code: "bad_request" } });
-    expect(routeMocks.reservationUpdate).not.toHaveBeenCalled();
-    expect(routeMocks.userUpdate).not.toHaveBeenCalled();
-    expect(routeMocks.adminActionCreate).not.toHaveBeenCalled();
-    expect(routeMocks.auditLogCreate).not.toHaveBeenCalled();
-    expect(routeMocks.userSanctionCreate).not.toHaveBeenCalled();
-    expect(routeMocks.userSanctionUpdateMany).not.toHaveBeenCalled();
+    const body = await response.json();
+    expect(body).toMatchObject({ error: { code: "bad_request" } });
+    expect(body).not.toHaveProperty("reservation");
+    expect(routeMocks.cancellationCapability).toHaveBeenCalledTimes(1);
+    expect(routeMocks.cancellationCapability.mock.calls[0]?.[1]).toBe(noShowReservation.id);
   });
 });
 
@@ -162,6 +167,7 @@ function transactionClient(): TransactionClient {
     async $executeRaw(): Promise<number> {
       return 1;
     },
+    $queryRaw: routeMocks.cancellationCapability,
     adminAction: { create: routeMocks.adminActionCreate },
     auditLog: { create: routeMocks.auditLogCreate },
     reservation: { findUnique: routeMocks.reservationFindUnique, update: routeMocks.reservationUpdate },

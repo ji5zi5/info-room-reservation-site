@@ -109,7 +109,7 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
     viewportWidth: document.documentElement.clientWidth
   }));
   expect(overflow.documentWidth).toBeLessThanOrEqual(overflow.viewportWidth);
-  expect(overflow.bodyWidth).toBeLessThanOrEqual(overflow.viewportWidth);
+  expect(overflow.bodyWidth).toBe(overflow.viewportWidth);
   expect(firstPeriodCardBox.y, "first reservation card should be reachable on the first mobile screen").toBeLessThanOrEqual(760);
   expect(calendarBox.y, "mobile calendar should stay above reservation cards").toBeLessThan(firstPeriodCardBox.y);
   expect(calendarGridBox.height, "mobile calendar dates should fit in one compact strip").toBeLessThanOrEqual(120);

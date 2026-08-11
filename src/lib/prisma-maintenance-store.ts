@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { systemDatabaseActor, userMutationLockKey, withDatabaseContext, withDatabaseMutation } from "./db-context";
-import type { MaintenanceCleanupStore } from "./maintenance-service";
+import type { MaintenanceCleanupStore, MaintenanceExpiryBatchResult } from "./maintenance-service";
 import { prismaRetentionStore } from "./prisma-retention-store";
 
 export const prismaMaintenanceCleanupStore: MaintenanceCleanupStore = {
@@ -9,58 +9,105 @@ export const prismaMaintenanceCleanupStore: MaintenanceCleanupStore = {
   },
 
   async deleteExpiredCsrfTokens(now) {
+    const candidates = await withDatabaseContext({
+      actor: systemDatabaseActor(),
+      client: prisma,
+      operation: (transaction) => transaction.csrfToken.findMany({
+        orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+        select: { id: true },
+        take: 101,
+        where: { expiresAt: { lte: now } }
+      })
+    });
+    const ids = candidates.slice(0, 100).map((candidate) => candidate.id);
+    if (ids.length === 0) {
+      return expiryBatchResult(candidates.length, 0);
+    }
     const result = await withDatabaseContext({
       actor: systemDatabaseActor(),
       client: prisma,
       operation: (transaction) =>
         transaction.csrfToken.deleteMany({
-          where: { expiresAt: { lte: now } }
+          where: { expiresAt: { lte: now }, id: { in: ids } }
         })
     });
-    return result.count;
+    return expiryBatchResult(candidates.length, result.count);
   },
 
   async deleteExpiredRateLimitBuckets(now) {
+    const candidates = await withDatabaseContext({
+      actor: systemDatabaseActor(),
+      client: prisma,
+      operation: (transaction) => transaction.rateLimitBucket.findMany({
+        orderBy: [{ expiresAt: "asc" }, { key: "asc" }],
+        select: { key: true },
+        take: 101,
+        where: { expiresAt: { lte: now } }
+      })
+    });
+    const keys = candidates.slice(0, 100).map((candidate) => candidate.key);
+    if (keys.length === 0) {
+      return expiryBatchResult(candidates.length, 0);
+    }
     const result = await withDatabaseContext({
       actor: systemDatabaseActor(),
       client: prisma,
       operation: (transaction) =>
         transaction.rateLimitBucket.deleteMany({
-          where: { expiresAt: { lte: now } }
+          where: { expiresAt: { lte: now }, key: { in: keys } }
         })
     });
-    return result.count;
+    return expiryBatchResult(candidates.length, result.count);
   },
 
   async deleteExpiredSessions(now) {
+    const candidates = await withDatabaseContext({
+      actor: systemDatabaseActor(),
+      client: prisma,
+      operation: (transaction) => transaction.session.findMany({
+        orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+        select: { id: true },
+        take: 101,
+        where: { expiresAt: { lte: now } }
+      })
+    });
+    const ids = candidates.slice(0, 100).map((candidate) => candidate.id);
+    if (ids.length === 0) {
+      return expiryBatchResult(candidates.length, 0);
+    }
     const result = await withDatabaseContext({
       actor: systemDatabaseActor(),
       client: prisma,
       operation: (transaction) =>
         transaction.session.deleteMany({
-          where: { expiresAt: { lte: now } }
+          where: { expiresAt: { lte: now }, id: { in: ids } }
         })
     });
-    return result.count;
+    return expiryBatchResult(candidates.length, result.count);
   },
 
   async releaseExpiredRestrictions(now) {
-    const candidates = await prisma.user.findMany({
-      orderBy: { id: "asc" },
-      select: { id: true },
-      take: 100,
-      where: {
-        bookingStatus: "RESTRICTED",
-        restrictedUntil: { lte: now }
-      }
+    const candidates = await withDatabaseContext({
+      actor: systemDatabaseActor(),
+      client: prisma,
+      operation: (transaction) => transaction.user.findMany({
+        orderBy: [{ restrictedUntil: "asc" }, { id: "asc" }],
+        select: { id: true },
+        take: 101,
+        where: {
+          bookingStatus: "RESTRICTED",
+          restrictedUntil: { lte: now }
+        }
+      })
     });
-    if (candidates.length === 0) {
-      return 0;
+    const selected = candidates.slice(0, 100);
+    if (selected.length === 0) {
+      return expiryBatchResult(candidates.length, 0);
     }
     const result = await withDatabaseMutation({
       actor: systemDatabaseActor(),
       client: prisma,
-      lockKeys: candidates.map((candidate) => userMutationLockKey(candidate.id)),
+      lockKeys: selected.map((candidate) => userMutationLockKey(candidate.id)),
       operation: (transaction) =>
         transaction.user.updateMany({
           data: {
@@ -70,31 +117,36 @@ export const prismaMaintenanceCleanupStore: MaintenanceCleanupStore = {
           },
           where: {
             bookingStatus: "RESTRICTED",
-            id: { in: candidates.map((candidate) => candidate.id) },
+            id: { in: selected.map((candidate) => candidate.id) },
             restrictedUntil: { lte: now }
           }
         })
     });
-    return result.count;
+    return expiryBatchResult(candidates.length, result.count);
   },
 
   async revokeExpiredSanctions(now) {
-    const candidates = await prisma.userSanction.findMany({
-      orderBy: { id: "asc" },
-      select: { userId: true },
-      take: 100,
-      where: {
-        endsAt: { lte: now },
-        status: "ACTIVE"
-      }
+    const candidates = await withDatabaseContext({
+      actor: systemDatabaseActor(),
+      client: prisma,
+      operation: (transaction) => transaction.userSanction.findMany({
+        orderBy: [{ endsAt: "asc" }, { id: "asc" }],
+        select: { id: true, userId: true },
+        take: 101,
+        where: {
+          endsAt: { lte: now },
+          status: "ACTIVE"
+        }
+      })
     });
-    if (candidates.length === 0) {
-      return 0;
+    const selected = candidates.slice(0, 100);
+    if (selected.length === 0) {
+      return expiryBatchResult(candidates.length, 0);
     }
     const result = await withDatabaseMutation({
       actor: systemDatabaseActor(),
       client: prisma,
-      lockKeys: candidates.map((candidate) => userMutationLockKey(candidate.userId)),
+      lockKeys: selected.map((candidate) => userMutationLockKey(candidate.userId)),
       operation: (transaction) =>
         transaction.userSanction.updateMany({
           data: {
@@ -105,11 +157,20 @@ export const prismaMaintenanceCleanupStore: MaintenanceCleanupStore = {
           },
           where: {
             endsAt: { lte: now },
-            status: "ACTIVE",
-            userId: { in: candidates.map((candidate) => candidate.userId) }
+            id: { in: selected.map((candidate) => candidate.id) },
+            status: "ACTIVE"
           }
         })
     });
-    return result.count;
+    return expiryBatchResult(candidates.length, result.count);
   }
 };
+
+function expiryBatchResult(candidateCount: number, processedCount: number): MaintenanceExpiryBatchResult {
+  const hasMore = candidateCount > 100;
+  return {
+    hasMore,
+    processedCount,
+    remainingLowerBound: hasMore ? 1 : 0
+  };
+}

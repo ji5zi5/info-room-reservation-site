@@ -1,6 +1,7 @@
 import { filterAdminReservations, filterAdminReservationsByQuery, orderAdminReservations } from "./admin-reservations";
 import type { AdminReservationQueryFilters, AdminReservationStatusFilter } from "./admin-reservations";
-import { summarizeAdminUserReservations } from "./admin-user-detail";
+import { canAdminCancelReservation } from "./admin-reservation-transition";
+import { orderAdminUserReservations, summarizeAdminUserReservations } from "./admin-user-detail";
 import { filterAdminUsers, type AdminUserFilterInput } from "./admin-users";
 import { toKstDate } from "./date";
 import type { PeriodSummary } from "./period-settings";
@@ -28,12 +29,26 @@ export function getMockAdminUsers(filters: AdminUserFilterInput): readonly MockU
 }
 
 export function getMockAdminReservations(input: {
-  readonly filters: AdminReservationQueryFilters;
-  readonly status: AdminReservationStatusFilter;
   readonly date: string;
+  readonly filters?: AdminReservationQueryFilters;
+  readonly reservationId?: string;
+  readonly status?: AdminReservationStatusFilter;
 }): readonly MockReservation[] {
+  if (input.reservationId) {
+    return reservations
+      .filter(
+        (reservation) =>
+          reservation.date === input.date && reservation.id === input.reservationId && reservation.status === "CONFIRMED"
+      )
+      .slice(0, 1);
+  }
   const dateReservations = reservations.filter((reservation) => reservation.date === input.date);
-  return orderAdminReservations(filterAdminReservationsByQuery(filterAdminReservations(dateReservations, input.status), input.filters));
+  return orderAdminReservations(
+    filterAdminReservationsByQuery(
+      filterAdminReservations(dateReservations, input.status ?? "CONFIRMED"),
+      input.filters ?? { query: "", studyPeriod: "ALL", userId: null }
+    )
+  );
 }
 
 export function getMockAdminUserDetail(userId: string): object | null {
@@ -42,18 +57,25 @@ export function getMockAdminUserDetail(userId: string): object | null {
     return null;
   }
   const now = new Date();
-  const userReservations = reservations
-    .filter((reservation) => reservation.userId === userId)
-    .map((reservation) => ({
-      createdAt: reservation.createdAt,
-      date: reservation.date,
-      id: reservation.id,
-      reason: reservation.reason,
-      status: reservation.status,
-      studyPeriod: reservation.studyPeriod,
-      updatedAt: reservation.createdAt,
-      userId: reservation.userId
-    }));
+  const userReservations = orderAdminUserReservations(
+    reservations
+      .filter((reservation) => reservation.userId === userId)
+      .map((reservation) => ({
+        createdAt: reservation.createdAt,
+        date: reservation.date,
+        id: reservation.id,
+        reason: reservation.reason,
+        status: reservation.status,
+        studyPeriod: reservation.studyPeriod,
+        updatedAt: reservation.updatedAt,
+        userId: reservation.userId
+      }))
+      .sort((left, right) => {
+        const dateDelta = right.date.localeCompare(left.date);
+        return dateDelta !== 0 ? dateDelta : left.createdAt.getTime() - right.createdAt.getTime();
+      })
+      .slice(0, 100)
+  );
   const today = toKstDate(now);
   return {
     adminActions: [],
@@ -137,6 +159,16 @@ export function reserveMockStudyPeriod(input: {
   if (summary.windowState !== "open") {
     return { kind: "error", reason: summary.windowState };
   }
+  if (
+    reservations.some(
+      (reservation) =>
+        reservation.date === input.date &&
+        reservation.studyPeriod === input.studyPeriod &&
+        reservation.userId === input.user.id
+    )
+  ) {
+    return { kind: "error", reason: "duplicate" };
+  }
   if (summary.myReservationId) {
     return { kind: "error", reason: "duplicate" };
   }
@@ -152,6 +184,7 @@ export function reserveMockStudyPeriod(input: {
 export function cancelMockReservation(input: {
   readonly id: string;
   readonly now: Date;
+  readonly requireConfirmed?: boolean;
   readonly user: SessionUser;
 }): MockCancelResult {
   const user = upsertMockReservationUserRecord(input.user);
@@ -162,13 +195,17 @@ export function cancelMockReservation(input: {
     if (reservation.user.id !== input.user.id && input.user.role !== "ADMIN") {
       return { kind: "forbidden" };
     }
+    if (input.requireConfirmed && !canAdminCancelReservation(reservation.status)) {
+      return { kind: "not_cancellable", reservation, user: input.user };
+    }
 
     const nextReservation =
       reservation.status === "CANCELLED"
         ? reservation
         : ({
             ...reservation,
-            status: "CANCELLED"
+            status: "CANCELLED",
+            updatedAt: input.now
           } satisfies MockReservation);
     reservations[index] = nextReservation;
 
@@ -201,6 +238,7 @@ export function cancelMockReservation(input: {
 function createMockReservation(
   input: {
     readonly date: string;
+    readonly now: Date;
     readonly reason: string;
     readonly studyPeriod: StudyPeriod;
     readonly user: SessionUser;
@@ -208,12 +246,13 @@ function createMockReservation(
   user: MockUser
 ): MockReservation {
   return {
-    createdAt: new Date(),
+    createdAt: input.now,
     date: input.date,
     id: `mock-reservation-${reservations.length + 1}`,
     reason: input.reason,
     status: "CONFIRMED",
     studyPeriod: input.studyPeriod,
+    updatedAt: input.now,
     user: {
       bookingStatus: user.bookingStatus,
       id: user.id,

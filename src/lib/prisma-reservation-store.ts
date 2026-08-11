@@ -73,9 +73,6 @@ class PrismaReservationStoreUnit implements ReservationStore {
     const existing = await this.client.reservation.findUnique({
       where: reservationIdentity(input)
     });
-    if (existing?.status === "CANCELLED") {
-      return this.reviveCancelledReservation(input);
-    }
     if (existing) {
       throw new ReservationIdentityConflictError();
     }
@@ -104,13 +101,8 @@ class PrismaReservationStoreUnit implements ReservationStore {
     readonly studyPeriod: StudyPeriod;
     readonly userId: string;
   }): Promise<Reservation | null> {
-    const reservation = await this.client.reservation.findFirst({
-      where: {
-        date: input.date,
-        status: "CONFIRMED",
-        studyPeriod: input.studyPeriod,
-        userId: input.userId
-      }
+    const reservation = await this.client.reservation.findUnique({
+      where: reservationIdentity(input)
     });
     return reservation ? toReservation(reservation) : null;
   }
@@ -135,33 +127,6 @@ class PrismaReservationStoreUnit implements ReservationStore {
       bookingStatus: parseBookingStatus(user.bookingStatus),
       restrictedUntil: user.restrictedUntil
     };
-  }
-
-  private async reviveCancelledReservation(input: {
-    readonly date: string;
-    readonly reason: string;
-    readonly studyPeriod: StudyPeriod;
-    readonly userId: string;
-  }): Promise<Reservation> {
-    const revived = await this.client.reservation.updateMany({
-      data: {
-        reason: input.reason,
-        status: "CONFIRMED"
-      },
-      where: {
-        date: input.date,
-        status: "CANCELLED",
-        studyPeriod: input.studyPeriod,
-        userId: input.userId
-      }
-    });
-    if (revived.count !== 1) {
-      throw new ReservationIdentityConflictError();
-    }
-    const reservation = await this.client.reservation.findUniqueOrThrow({
-      where: reservationIdentity(input)
-    });
-    return toReservation(reservation);
   }
 }
 

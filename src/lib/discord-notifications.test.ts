@@ -89,19 +89,37 @@ describe("Discord webhook failure classification", () => {
 });
 
 describe("Discord reservation-created notification payload", () => {
-  it("contains only period metadata and a reservation reference", () => {
+  it("shows the applicant and reason with a canonical admin title URL", () => {
     const input = {
+      applicant: { name: "엄지오", studentNumber: "31001" },
       date: "2026-06-17",
-      reservationId: "reservation-reference",
+      embedTitleUrl:
+        "https://example.test/admin?section=reservations&date=2026-06-17&status=CONFIRMED&reservation=reservation-reference",
+      reason: "과제",
       studyPeriod: "FIRST"
     } as const;
 
     const payload = buildReservationCreatedDiscordPayload(input);
+    const serialized = JSON.stringify(payload);
 
     expect(payload.allowed_mentions).toEqual({ parse: [] });
     expect(payload.embeds[0]?.fields).toEqual([
-      { inline: false, name: "예약 ID", value: input.reservationId }
+      { inline: true, name: "신청자", value: "31001 엄지오" },
+      { inline: false, name: "신청 사유", value: "과제" }
     ]);
+    expect(serialized).toContain(input.embedTitleUrl);
+  });
+
+  it("omits the title URL when no canonical origin is available", () => {
+    const payload = buildReservationCreatedDiscordPayload({
+      applicant: { name: "엄지오", studentNumber: "31001" },
+      date: "2026-06-17",
+      reason: null,
+      studyPeriod: "FIRST"
+    });
+
+    expect(payload.embeds[0]?.url).toBeUndefined();
+    expect(payload.embeds[0]?.fields[1]?.value).toBe("사유 미기록");
   });
 });
 

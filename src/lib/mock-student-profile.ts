@@ -19,6 +19,7 @@ export type MockStudentProfileReservation = {
   readonly date: string;
   readonly status: ReservationStatus;
   readonly studyPeriod: StudyPeriod;
+  readonly updatedAt: Date;
 };
 
 export function buildMockStudentProfilePayload(input: {
@@ -34,7 +35,7 @@ export function buildMockStudentProfilePayload(input: {
       date: reservation.date,
       status: reservation.status,
       studyPeriod: reservation.studyPeriod,
-      updatedAt: reservation.createdAt
+      updatedAt: reservation.updatedAt
     })),
     sanctions: [],
     user: {

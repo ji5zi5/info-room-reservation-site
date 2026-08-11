@@ -66,4 +66,21 @@ describe("AdminUsersPanel", () => {
     expect(markup).toContain("local_student_b");
     expect(markup).not.toContain("local_student_b · 0기");
   });
+
+  it("discloses the existing 100-student search maximum when the result list is empty", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminUsersPanel, {
+        onSelectUser: () => undefined,
+        onSetQuery: () => undefined,
+        onSetStatus: () => undefined,
+        query: "없음",
+        selectedUserId: null,
+        status: "ALL",
+        users: []
+      })
+    );
+
+    expect(markup).toContain("검색 결과 최대 100명");
+    expect(markup).toContain("검색된 학생이 없습니다.");
+  });
 });

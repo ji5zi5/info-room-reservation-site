@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { assertProductionEnvSafe, parseServerEnv, ServerEnvError } from "../src/lib/env";
 
 const requiredProductionKeys = [
+  "APP_ORIGIN",
   "DATABASE_URL",
   "DIRECT_URL",
   "SESSION_SECRET",

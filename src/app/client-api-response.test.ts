@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { StudentProfilePayload } from "@/lib/student-profile";
-import { readPeriodSummaries, readStudentNotificationsPayload, readStudentProfilePayload } from "./client-api-response";
+import {
+  readCurrentUser,
+  readPeriodSummaries,
+  readStudentNotificationsPayload,
+  readStudentProfilePayload
+} from "./client-api-response";
 
 const profileFixture = {
   currentReservations: [
@@ -56,6 +61,63 @@ const profileFixture = {
     studentNumber: "1201"
   }
 } satisfies StudentProfilePayload;
+
+describe("readCurrentUser", () => {
+  const user = {
+    bookingStatus: "ACTIVE",
+    generation: 4,
+    id: "student-a",
+    name: "학생 A",
+    restrictionReason: null,
+    restrictedUntil: null,
+    role: "STUDENT",
+    studentNumber: "32001"
+  } as const;
+
+  it("returns loaded with the stable user when the session response is valid", async () => {
+    // Given
+    const response = jsonResponse({ user });
+
+    // When
+    const result = await readCurrentUser(response);
+
+    // Then
+    expect(result).toEqual({ kind: "loaded", user });
+  });
+
+  it("returns loaded with null when the session is authoritatively signed out", async () => {
+    // Given
+    const response = jsonResponse({ user: null });
+
+    // When
+    const result = await readCurrentUser(response);
+
+    // Then
+    expect(result).toEqual({ kind: "loaded", user: null });
+  });
+
+  it("distinguishes a 401 authorization failure from transient session failures", async () => {
+    // Given
+    const response = jsonResponse({ error: { message: "로그인이 필요합니다." } }, { status: 401 });
+
+    // When
+    const result = await readCurrentUser(response);
+
+    // Then
+    expect(result).toEqual({ kind: "unauthorized" });
+  });
+
+  it.each([
+    ["malformed success", new Response("{bad-json", { status: 200 })],
+    ["non-401 failure", jsonResponse({ error: { message: "temporary" } }, { status: 500 })]
+  ])("returns a stale-session error for %s", async (_scenario, response) => {
+    // Given / When
+    const result = await readCurrentUser(response);
+
+    // Then
+    expect(result).toEqual({ kind: "error" });
+  });
+});
 
 describe("readStudentProfilePayload", () => {
   it("returns a loaded profile when the response contains a valid student profile", async () => {

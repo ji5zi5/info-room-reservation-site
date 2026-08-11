@@ -1,7 +1,7 @@
 "use client";
 
-import { ClipboardList, RotateCcw, UserSearch, UserX, X, XCircle } from "lucide-react";
-import { useState, type ReactElement } from "react";
+import { ClipboardList, RotateCcw, UserSearch, UserX, XCircle } from "lucide-react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import {
   ADMIN_RESERVATION_PERIOD_FILTERS,
@@ -11,6 +11,8 @@ import {
   type AdminReservationStudyPeriodFilter
 } from "./admin-types";
 import { AdminReservationCreateForm } from "./admin-reservation-create-form";
+import { AdminConfirmationDialog } from "./admin-confirmation-dialog";
+import type { AdminMutationResult, CancelReservationData, NoShowReservationData } from "./admin-api-client";
 
 const STATUS_LABELS: Record<AdminReservationStatusFilter, string> = {
   ALL: "전체",
@@ -28,6 +30,7 @@ const PERIOD_FILTER_LABELS: Record<AdminReservationStudyPeriodFilter, string> = 
 export function AdminReservationsPanel({
   date,
   onCancelReservation,
+  onCancellationRequestConsumed = noop,
   onCopyCsv,
   onMarkNoShow,
   onRefresh,
@@ -37,13 +40,15 @@ export function AdminReservationsPanel({
   onViewUser,
   periodFilter,
   query,
+  requestedCancellation = null,
   reservations,
   statusFilter
 }: {
   readonly date: string;
-  readonly onCancelReservation: (reservationId: string, reason: string) => void;
+  readonly onCancelReservation: (reservationId: string, reason: string) => Promise<AdminMutationResult<CancelReservationData>>;
+  readonly onCancellationRequestConsumed?: () => void;
   readonly onCopyCsv: () => void;
-  readonly onMarkNoShow: (reservationId: string) => void;
+  readonly onMarkNoShow: (reservationId: string) => Promise<AdminMutationResult<NoShowReservationData>>;
   readonly onRefresh: () => void;
   readonly onSelectStatus: (status: AdminReservationStatusFilter) => void;
   readonly onSetPeriod: (period: AdminReservationStudyPeriodFilter) => void;
@@ -51,12 +56,23 @@ export function AdminReservationsPanel({
   readonly onViewUser: (userId: string) => void;
   readonly periodFilter: AdminReservationStudyPeriodFilter;
   readonly query: string;
+  readonly requestedCancellation?: AdminReservation | null;
   readonly reservations: readonly AdminReservation[];
   readonly statusFilter: AdminReservationStatusFilter;
 }): ReactElement {
-  const [cancelDraft, setCancelDraft] = useState<AdminReservation | null>(null);
+  const [cancelDraft, setCancelDraft] = useState<AdminReservation | null>(requestedCancellation);
   const [cancelReason, setCancelReason] = useState("");
+  const [noShowDraft, setNoShowDraft] = useState<AdminReservation | null>(null);
+  const cancelReasonRef = useRef<HTMLTextAreaElement>(null);
   const trimmedCancelReason = cancelReason.trim();
+
+  useEffect(() => {
+    if (requestedCancellation === null) {
+      return;
+    }
+    openCancelDialog(requestedCancellation);
+    onCancellationRequestConsumed();
+  }, [onCancellationRequestConsumed, requestedCancellation]);
 
   function openCancelDialog(reservation: AdminReservation): void {
     setCancelDraft(reservation);
@@ -68,12 +84,17 @@ export function AdminReservationsPanel({
     setCancelReason("");
   }
 
-  function confirmCancelReservation(): void {
+  async function confirmCancelReservation(): Promise<AdminMutationResult<CancelReservationData>> {
     if (cancelDraft === null || !trimmedCancelReason) {
-      return;
+      return {
+        kind: "error",
+        message: "취소 사유를 입력하세요.",
+        retryAfterMs: null,
+        retryable: false,
+        status: null
+      };
     }
-    onCancelReservation(cancelDraft.id, trimmedCancelReason);
-    closeCancelDialog();
+    return onCancelReservation(cancelDraft.id, trimmedCancelReason);
   }
 
   return (
@@ -132,11 +153,11 @@ export function AdminReservationsPanel({
               </button>
               {reservation.status === "CONFIRMED" ? (
                 <>
-                  <button className="ghost-button" type="button" onClick={() => openCancelDialog(reservation)}>
+                  <button aria-haspopup="dialog" className="ghost-button" type="button" onClick={() => openCancelDialog(reservation)}>
                     <XCircle size={16} />
                     취소
                   </button>
-                  <button className="danger-button" type="button" onClick={() => onMarkNoShow(reservation.id)}>
+                  <button aria-haspopup="dialog" className="danger-button" type="button" onClick={() => setNoShowDraft(reservation)}>
                     <UserX size={16} />
                     노쇼
                   </button>
@@ -148,67 +169,50 @@ export function AdminReservationsPanel({
         {reservations.length === 0 ? <div className="table-line muted">아직 예약자가 없습니다.</div> : null}
       </div>
       {cancelDraft ? (
-        <div
-          className="confirm-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target) {
-              closeCancelDialog();
-            }
-          }}
+        <AdminConfirmationDialog
+          cancelLabel="닫기"
+          confirmDisabled={!trimmedCancelReason}
+          confirmLabel="취소 확정"
+          initialFocusRef={cancelReasonRef}
+          onConfirm={confirmCancelReservation}
+          onDismiss={closeCancelDialog}
+          title="예약을 관리자 취소할까요?"
         >
-          <section
-            aria-labelledby="admin-cancel-title"
-            aria-modal="true"
-            className="confirm-dialog admin-cancel-dialog"
-            role="dialog"
-          >
-            <button aria-label="닫기" className="icon-button confirm-close" type="button" onClick={closeCancelDialog}>
-              <X aria-hidden="true" size={18} />
-            </button>
-            <span className="confirm-mark">
-              <XCircle aria-hidden="true" size={22} />
-            </span>
-            <div>
-              <h3 id="admin-cancel-title">예약을 관리자 취소할까요?</h3>
-              <p className="muted">입력한 사유는 학생 알림과 감사 기록에 남습니다.</p>
-            </div>
-            <div className="cancel-policy-preview">
-              <p>
-                <strong>{cancelDraft.user.name}</strong>
-                <span className="muted">
-                  {cancelDraft.date} {studyPeriodLabel(cancelDraft.studyPeriod)}
-                </span>
-              </p>
-            </div>
-            <label className="field">
-              <span>취소 사유</span>
-              <textarea
-                maxLength={200}
-                rows={3}
-                value={cancelReason}
-                onChange={(event) => setCancelReason(event.currentTarget.value)}
-              />
-            </label>
-            <div className="admin-dialog-actions">
-              <button className="ghost-button" type="button" onClick={closeCancelDialog}>
-                닫기
-              </button>
-              <button
-                className="danger-button"
-                disabled={!trimmedCancelReason}
-                type="button"
-                onClick={confirmCancelReservation}
-              >
-                취소 확정
-              </button>
-            </div>
-          </section>
-        </div>
+          <p className="muted">입력한 사유는 학생 알림과 감사 기록에 남습니다.</p>
+          <div className="cancel-policy-preview">
+            <p>
+              <strong>{cancelDraft.user.name}</strong>
+              <span className="muted">{cancelDraft.date} {studyPeriodLabel(cancelDraft.studyPeriod)}</span>
+            </p>
+          </div>
+          <label className="field">
+            <span>취소 사유</span>
+            <textarea
+              maxLength={200}
+              ref={cancelReasonRef}
+              rows={3}
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.currentTarget.value)}
+            />
+          </label>
+        </AdminConfirmationDialog>
+      ) : null}
+      {noShowDraft ? (
+        <AdminConfirmationDialog
+          cancelLabel="돌아가기"
+          confirmLabel="노쇼 처리"
+          onConfirm={() => onMarkNoShow(noShowDraft.id)}
+          onDismiss={() => setNoShowDraft(null)}
+          title="노쇼로 처리할까요?"
+        >
+          <p className="muted">노쇼 처리하면 학생은 영구 제한됩니다.</p>
+        </AdminConfirmationDialog>
       ) : null}
     </section>
   );
 }
+
+function noop(): void {}
 
 function reservationReasonLabel(reason: string | null): string {
   const normalized = reason?.trim();

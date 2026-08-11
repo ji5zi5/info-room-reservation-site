@@ -4,6 +4,7 @@ import { z } from "zod";
 import { buildClosedListNotificationAdminAction } from "@/lib/admin-operation-audit";
 import { createClosedPeriodNotificationService } from "@/lib/closed-period-notification-service";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { sendDiscordWebhook } from "@/lib/discord-notifications";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { prismaClosedPeriodNotificationRepository } from "@/lib/prisma-notification-repository";
@@ -64,27 +65,33 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (result.kind === "skipped") {
       return jsonError(409, result.reason, messageForSkipped(result.reason));
     }
-    const action = await prisma.adminAction.create({
-      data: buildClosedListNotificationAdminAction({
-        actorId: session.user.id,
-        date: parsed.data.date,
-        force: parsed.data.force === true,
-        ipHash,
-        result,
-        studyPeriod: parsed.data.studyPeriod
-      })
-    });
-    await prisma.auditLog.create({
-      data: {
-        action: "CLOSED_LIST_NOTIFICATION_SEND",
-        actorId: session.user.id,
-        detail: JSON.stringify({
-          actionId: action.id,
-          date: parsed.data.date,
-          force: parsed.data.force === true,
-          kind: result.kind,
-          studyPeriod: parsed.data.studyPeriod
-        })
+    await withDatabaseContext({
+      actor: databaseActorFromSessionUser(session.user),
+      client: prisma,
+      operation: async (transaction) => {
+        const action = await transaction.adminAction.create({
+          data: buildClosedListNotificationAdminAction({
+            actorId: session.user.id,
+            date: parsed.data.date,
+            force: parsed.data.force === true,
+            ipHash,
+            result,
+            studyPeriod: parsed.data.studyPeriod
+          })
+        });
+        await transaction.auditLog.create({
+          data: {
+            action: "CLOSED_LIST_NOTIFICATION_SEND",
+            actorId: session.user.id,
+            detail: JSON.stringify({
+              actionId: action.id,
+              date: parsed.data.date,
+              force: parsed.data.force === true,
+              kind: result.kind,
+              studyPeriod: parsed.data.studyPeriod
+            })
+          }
+        });
       }
     });
     return NextResponse.json(result);

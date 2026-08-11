@@ -1,7 +1,7 @@
 "use client";
 
 import { ShieldOff, UserX, X } from "lucide-react";
-import type { ReactElement, ReactNode } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 
 import { parseShadowBanProfile, shadowBanProfileLabel } from "@/lib/shadow-ban-profile";
 import { adminAccountDescription, adminAccountName } from "./admin-account-labels";
@@ -17,6 +17,8 @@ import {
   statusLabel
 } from "./admin-student-detail-labels";
 import { AdminStudentRestrictionForm } from "./admin-student-restriction-form";
+import { AdminConfirmationDialog } from "./admin-confirmation-dialog";
+import type { AdminMutationResult, ApplyRestrictionData, NoShowReservationData } from "./admin-api-client";
 import type { AdminUserDetail } from "./admin-types";
 
 export function AdminStudentDetail({
@@ -29,16 +31,19 @@ export function AdminStudentDetail({
   restrictionDraft
 }: {
   readonly detail: AdminUserDetail | null;
-  readonly onApplyRestriction: (userId: string) => void;
+  readonly onApplyRestriction: (userId: string) => Promise<AdminMutationResult<ApplyRestrictionData>>;
   readonly onClose?: () => void;
-  readonly onMarkNoShow: (reservationId: string) => void;
+  readonly onMarkNoShow: (reservationId: string) => Promise<AdminMutationResult<NoShowReservationData>>;
   readonly onRelease: (userId: string) => void;
   readonly onSetRestrictionDraft: (userId: string, patch: Partial<UserRestrictionDraft>) => void;
   readonly restrictionDraft: UserRestrictionDraft;
 }): ReactElement | null {
+  const [noShowReservationId, setNoShowReservationId] = useState<string | null>(null);
   if (!detail) {
     return null;
   }
+
+  const visibleSanctions = detail.sanctions.slice(0, 30);
 
   return (
     <aside className="student-detail-panel" data-open="true">
@@ -58,6 +63,7 @@ export function AdminStudentDetail({
         <span>확정 {detail.summary.confirmedCount}</span>
         <span>노쇼 {detail.summary.noShowCount}</span>
         <span>취소 {detail.summary.cancelledCount}</span>
+        <span>최근 최대 100건 기준</span>
       </div>
       <div className="notice-panel">
         <strong>현재 상태</strong>
@@ -67,7 +73,7 @@ export function AdminStudentDetail({
         ) : null}
         {detail.user.restrictedUntil ? <p className="muted">제한 종료 {formatKst(detail.user.restrictedUntil)}</p> : null}
         <p className="muted">
-          누적 제재 {detail.sanctionSummary.totalCount}회 · 활성 {detail.sanctionSummary.activeCount}회 · 해제{" "}
+          최근 조회 제재 {detail.sanctionSummary.totalCount}회 · 활성 {detail.sanctionSummary.activeCount}회 · 해제{" "}
           {detail.sanctionSummary.revokedCount}회
         </p>
       </div>
@@ -92,8 +98,8 @@ export function AdminStudentDetail({
               action={
                 reservation.status === "CONFIRMED" ? (
                   <button
-                    className="danger-button detail-line-action" data-reservation-action={reservation.id} type="button"
-                    onClick={() => onMarkNoShow(reservation.id)}
+                    aria-haspopup="dialog" className="danger-button detail-line-action" data-reservation-action={reservation.id} type="button"
+                    onClick={() => setNoShowReservationId(reservation.id)}
                   >
                     <UserX size={16} />
                     노쇼
@@ -108,7 +114,7 @@ export function AdminStudentDetail({
           <p className="muted">현재 예약 없음</p>
         )}
       </DetailSection>
-      <DetailSection title="예약 이력">
+      <DetailSection title="예약 이력 · 최근 12건 표시">
         {detail.reservationHistory.slice(0, 12).map((reservation) => (
           <DetailLine
             key={reservation.id}
@@ -117,9 +123,9 @@ export function AdminStudentDetail({
           />
         ))}
       </DetailSection>
-      <DetailSection title="제재 이력">
-        {detail.sanctions.length > 0 ? (
-          detail.sanctions.map((sanction) => (
+      <DetailSection title="제재 이력 · 최근 최대 30건">
+        {visibleSanctions.length > 0 ? (
+          visibleSanctions.map((sanction) => (
             <DetailLine
               key={sanction.id}
               left={`${sanctionTypeLabel(sanction.type)} · ${sanction.reason}`}
@@ -130,7 +136,7 @@ export function AdminStudentDetail({
           <p className="muted">제재 이력 없음</p>
         )}
       </DetailSection>
-      <DetailSection title="관리자 액션">
+      <DetailSection title="관리자 액션 · 최근 12건 표시 · 최대 30건 조회">
         {detail.adminActions.length > 0 ? (
           detail.adminActions.slice(0, 12).map((action) => (
             <DetailLine
@@ -143,13 +149,24 @@ export function AdminStudentDetail({
           <p className="muted">액션 기록 없음</p>
         )}
       </DetailSection>
-      <DetailSection title="감사 로그">
+      <DetailSection title="감사 로그 · 최근 최대 20건">
         {detail.auditLogs.length > 0 ? (
           detail.auditLogs.map((log) => <DetailLine key={log.id} left={actionLabel(log.action)} right={formatKst(log.createdAt)} />)
         ) : (
           <p className="muted">아직 로그 없음</p>
         )}
       </DetailSection>
+      {noShowReservationId ? (
+        <AdminConfirmationDialog
+          cancelLabel="돌아가기"
+          confirmLabel="노쇼 처리"
+          onConfirm={() => onMarkNoShow(noShowReservationId)}
+          onDismiss={() => setNoShowReservationId(null)}
+          title="노쇼로 처리할까요?"
+        >
+          <p className="muted">노쇼 처리하면 학생은 영구 제한됩니다.</p>
+        </AdminConfirmationDialog>
+      ) : null}
     </aside>
   );
 }

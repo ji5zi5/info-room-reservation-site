@@ -6,6 +6,7 @@ import type { StudentPeriodSummary } from "@/lib/student-period-summary";
 export type PeriodSummary = StudentPeriodSummary;
 
 type ReservationPeriodCardProps = {
+  readonly actionsReady?: boolean;
   readonly loading: boolean;
   readonly onCancel: (reservationId: string) => void;
   readonly onReserve: (studyPeriod: "EIGHTH" | "FIRST") => void;
@@ -14,6 +15,7 @@ type ReservationPeriodCardProps = {
 };
 
 export function ReservationPeriodCard({
+  actionsReady = true,
   loading,
   onCancel,
   onReserve,
@@ -24,7 +26,13 @@ export function ReservationPeriodCard({
   const reserved = currentReservationId !== null;
   const periodAvailable = period.enabled && period.remaining > 0 && period.windowState === "open";
   const reserveDisabled =
-    reserved || !userReady || loading || period.remaining <= 0 || !period.enabled || period.windowState !== "open";
+    reserved ||
+    !actionsReady ||
+    !userReady ||
+    loading ||
+    period.remaining <= 0 ||
+    !period.enabled ||
+    period.windowState !== "open";
   const reserveButtonLabel = reserved
     ? "예약됨"
     : !period.enabled
@@ -62,7 +70,7 @@ export function ReservationPeriodCard({
         {currentReservationId ? (
           <button
             className="ghost-button"
-            disabled={loading}
+            disabled={loading || !actionsReady}
             type="button"
             onClick={() => onCancel(currentReservationId)}
           >

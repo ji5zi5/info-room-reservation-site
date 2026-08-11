@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DatabaseActor } from "@/lib/db-context";
 import type { RateLimitResult } from "@/lib/rate-limit";
 import type { CurrentSession, SessionUser } from "@/lib/session";
 
@@ -22,7 +26,11 @@ type TransactionClient = {
   readonly adminAction: { readonly create: AdminActionCreate };
   readonly auditLog: { readonly create: AuditLogCreate };
 };
-type PrismaTransaction = <T>(operation: (transaction: TransactionClient) => Promise<T>) => Promise<T>;
+type WithDatabaseContext = (input: {
+  readonly actor: DatabaseActor;
+  readonly client: unknown;
+  readonly operation: (transaction: TransactionClient) => Promise<unknown>;
+}) => Promise<unknown>;
 type RequireAdminSession = () => Promise<CurrentSession>;
 type ValidateRequestCsrf = (
   request: Request,
@@ -32,13 +40,14 @@ type ValidateRequestCsrf = (
 const routeMocks = vi.hoisted(() => ({
   adminActionCreate: vi.fn<AdminActionCreate>(),
   auditLogCreate: vi.fn<AuditLogCreate>(),
+  databaseActorFromSessionUser: vi.fn<(user: SessionUser) => DatabaseActor>(),
   enforceAdminMutationRateLimit:
     vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
   reconcileClosedPeriod: vi.fn<ReconcileClosedPeriod>(),
   requireAdminSession: vi.fn<RequireAdminSession>(),
   requireMutatingRequestSafety: vi.fn<(request: Request) => null>(),
   sendDiscordWebhook: vi.fn(),
-  transaction: vi.fn<PrismaTransaction>(),
+  withDatabaseContext: vi.fn<WithDatabaseContext>(),
   validateRequestCsrf: vi.fn<ValidateRequestCsrf>()
 }));
 
@@ -48,10 +57,11 @@ vi.mock("@/lib/closed-period-notification-service", () => ({
   })
 }));
 
-vi.mock("@/lib/db", () => ({
-  prisma: {
-    $transaction: routeMocks.transaction
-  }
+vi.mock("@/lib/db", () => ({ prisma: { marker: "prisma-client" } }));
+
+vi.mock("@/lib/db-context", () => ({
+  databaseActorFromSessionUser: routeMocks.databaseActorFromSessionUser,
+  withDatabaseContext: routeMocks.withDatabaseContext
 }));
 
 vi.mock("@/lib/discord-notifications", () => ({
@@ -113,7 +123,8 @@ describe("admin closed-period notification reconciliation route", () => {
     routeMocks.reconcileClosedPeriod.mockResolvedValue(confirmedResult());
     routeMocks.adminActionCreate.mockResolvedValue({ id: "action-1" });
     routeMocks.auditLogCreate.mockResolvedValue({});
-    routeMocks.transaction.mockImplementation(async (operation) => operation(transactionClient()));
+    routeMocks.databaseActorFromSessionUser.mockImplementation((user) => ({ id: user.id, role: "ADMIN" }));
+    routeMocks.withDatabaseContext.mockImplementation(async (input) => input.operation(transactionClient()));
   });
 
   it("confirms an unknown delivery and audits only the winning transition", async () => {
@@ -146,6 +157,18 @@ describe("admin closed-period notification reconciliation route", () => {
         })
       }
     });
+    expect(routeMocks.databaseActorFromSessionUser).toHaveBeenCalledWith(adminUser);
+    expect(routeMocks.withDatabaseContext).toHaveBeenCalledWith(expect.objectContaining({
+      actor: { id: adminUser.id, role: "ADMIN" },
+      client: { marker: "prisma-client" }
+    }));
+  });
+
+  it("contains no raw protected audit model access or raw Prisma transaction boundary", () => {
+    const source = readFileSync(join(process.cwd(), "src/app/api/admin/notifications/closed-periods/reconcile/route.ts"), "utf8");
+
+    expect(source).not.toMatch(/prisma\.(?:adminAction|auditLog)\b/u);
+    expect(source).not.toContain("prisma.$transaction");
   });
 
   it("requires a configured webhook only for explicit retry", async () => {

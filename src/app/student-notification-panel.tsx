@@ -2,7 +2,7 @@
 
 import { Bell, ChevronDown, LoaderCircle } from "lucide-react";
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { StudentNotification } from "@/lib/student-notifications";
 import { formatKstTime } from "@/lib/student-reservation-status";
@@ -10,25 +10,34 @@ import { readStudentNotificationsPayload, type StudentNotificationsReadResult } 
 import type { ReservationSidebarUser } from "./reservation-sidebar";
 
 type StudentNotificationPanelProps = {
+  readonly authenticationGeneration: number;
   readonly user: ReservationSidebarUser | null;
 };
 
 type StudentNotificationState = {
+  readonly authenticationGeneration: number;
   readonly errorMessage: string | null;
   readonly loading: boolean;
   readonly notifications: readonly StudentNotification[];
+  readonly userId: string | null;
 };
 
 const EMPTY_NOTIFICATION_STATE = {
+  authenticationGeneration: -1,
   errorMessage: null,
   loading: false,
-  notifications: []
+  notifications: [],
+  userId: null
 } satisfies StudentNotificationState;
 
 const STUDENT_NOTIFICATION_REFRESH_INTERVAL_MS = 60_000;
 
-export function StudentNotificationPanel({ user }: StudentNotificationPanelProps): ReactElement {
-  const state = useStudentNotificationState(user);
+export function StudentNotificationPanel({ authenticationGeneration, user }: StudentNotificationPanelProps): ReactElement {
+  const loadedState = useStudentNotificationState(authenticationGeneration, user);
+  const state =
+    loadedState.authenticationGeneration === authenticationGeneration && loadedState.userId === (user?.id ?? null)
+      ? loadedState
+      : { ...EMPTY_NOTIFICATION_STATE, authenticationGeneration, userId: user?.id ?? null };
   const [open, setOpen] = useState(false);
   const bodyId = useId();
   const latestNotification = state.notifications[0] ?? null;
@@ -72,29 +81,59 @@ export function StudentNotificationPanel({ user }: StudentNotificationPanelProps
   );
 }
 
-function useStudentNotificationState(user: ReservationSidebarUser | null): StudentNotificationState {
+function useStudentNotificationState(
+  authenticationGeneration: number,
+  user: ReservationSidebarUser | null
+): StudentNotificationState {
   const [state, setState] = useState<StudentNotificationState>(EMPTY_NOTIFICATION_STATE);
+  const latestRequestGenerationRef = useRef(0);
+  const currentOwnerRef = useRef({ authenticationGeneration, userId: user?.id ?? null });
+  currentOwnerRef.current = { authenticationGeneration, userId: user?.id ?? null };
 
   const refreshNotifications = useCallback(async (): Promise<void> => {
-    if (!canReadStudentNotifications(user)) {
+    if (user === null || user.role === "ADMIN") {
+      latestRequestGenerationRef.current += 1;
       setState(EMPTY_NOTIFICATION_STATE);
       return;
     }
 
-    setState((current) => ({ ...current, errorMessage: null, loading: true }));
+    const requestGeneration = latestRequestGenerationRef.current + 1;
+    latestRequestGenerationRef.current = requestGeneration;
+    const ownerUserId = user.id;
+    setState({
+      authenticationGeneration,
+      errorMessage: null,
+      loading: true,
+      notifications: [],
+      userId: ownerUserId
+    });
     const result = await fetchStudentNotifications();
+    if (
+      requestGeneration !== latestRequestGenerationRef.current ||
+      currentOwnerRef.current.authenticationGeneration !== authenticationGeneration ||
+      currentOwnerRef.current.userId !== ownerUserId
+    ) {
+      return;
+    }
     switch (result.kind) {
       case "loaded":
-        setState({ errorMessage: null, loading: false, notifications: result.notifications });
+        setState({
+          authenticationGeneration,
+          errorMessage: null,
+          loading: false,
+          notifications: result.notifications,
+          userId: ownerUserId
+        });
         return;
       case "error":
         setState((current) => ({ ...current, errorMessage: result.message, loading: false }));
         return;
     }
-  }, [user?.id, user?.role]);
+  }, [authenticationGeneration, user?.id, user?.role]);
 
   useEffect(() => {
     if (!canReadStudentNotifications(user)) {
+      latestRequestGenerationRef.current += 1;
       setState(EMPTY_NOTIFICATION_STATE);
       return;
     }
@@ -115,7 +154,7 @@ function useStudentNotificationState(user: ReservationSidebarUser | null): Stude
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", refreshOnVisible);
     };
-  }, [refreshNotifications, user?.id, user?.role]);
+  }, [authenticationGeneration, refreshNotifications, user?.id, user?.role]);
 
   return state;
 }

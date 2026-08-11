@@ -3,7 +3,7 @@
 import { ClipboardList, UserSearch } from "lucide-react";
 import type { ReactElement } from "react";
 
-import { getAdminAuditActionLabel, parseAdminAuditActionFilter } from "@/lib/admin-audit-actions";
+import { getAdminAuditActionLabel } from "@/lib/admin-audit-actions";
 
 import { buildAuditActionsCsv } from "./admin-csv";
 import { ADMIN_AUDIT_ACTION_FILTERS, type AdminAuditAction, type AdminAuditActionFilter } from "./admin-types";
@@ -34,8 +34,10 @@ export function AdminAuditPanel({
   readonly onViewUser: (userId: string) => void;
   readonly query: string;
 }): ReactElement {
+  const visibleActions = actions.slice(0, 80);
+
   async function copyAuditCsv(): Promise<void> {
-    await navigator.clipboard.writeText(buildAuditActionsCsv(actions));
+    await navigator.clipboard.writeText(buildAuditActionsCsv(visibleActions));
   }
 
   return (
@@ -43,6 +45,7 @@ export function AdminAuditPanel({
       <div className="topbar">
         <div>
           <h2>감사 로그</h2>
+          <p className="muted">최근 최대 80건 표시 · 최대 200건 조회</p>
         </div>
         <div className="admin-action-row">
           <button className="ghost-button" type="button" onClick={() => void copyAuditCsv()}>
@@ -56,14 +59,6 @@ export function AdminAuditPanel({
           <span>학생, 관리자, 사유 검색</span>
           <input value={query} onChange={(event) => onSetQuery(event.currentTarget.value)} />
         </label>
-        <label className="field">
-          <span>분류</span>
-          <select value={actionFilter} onChange={(event) => onSetActionFilter(parseAdminAuditActionFilter(event.currentTarget.value))}>
-            {ADMIN_AUDIT_ACTION_FILTERS.map((filter) => (
-              <option key={filter} value={filter}>{FILTER_LABELS[filter]}</option>
-            ))}
-          </select>
-        </label>
       </div>
       <div className="status-filter" aria-label="감사 로그 분류">
         {ADMIN_AUDIT_ACTION_FILTERS.map((filter) => (
@@ -73,7 +68,7 @@ export function AdminAuditPanel({
         ))}
       </div>
       <div className="audit-list">
-        {actions.map((action) => {
+        {visibleActions.map((action) => {
           const targetUser = action.targetUser;
           return (
             <article className="audit-line" key={action.id}>
@@ -107,7 +102,7 @@ export function AdminAuditPanel({
             </article>
           );
         })}
-        {actions.length === 0 ? <div className="table-line muted">표시할 감사 로그가 없습니다.</div> : null}
+        {visibleActions.length === 0 ? <div className="table-line muted">표시할 감사 로그가 없습니다.</div> : null}
       </div>
     </section>
   );

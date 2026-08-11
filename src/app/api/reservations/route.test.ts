@@ -9,6 +9,10 @@ type ReserveStudyPeriod = (input: unknown) => Promise<ReservationResult>;
 type RequireSession = () => Promise<CurrentSession>;
 type ValidateRequestCsrf = (request: Request, sessionId: string) => Promise<{ readonly kind: "ok" }>;
 
+const nextServerMocks = vi.hoisted(
+  (): { capturedAfter: (() => void | Promise<void>) | undefined } => ({ capturedAfter: undefined })
+);
+
 const routeMocks = vi.hoisted(() => ({
   createPrismaReservationStoreForActor: vi.fn(),
   enforceReservationRateLimit: vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
@@ -74,6 +78,13 @@ vi.mock("@/lib/session", () => ({
   requireSession: routeMocks.requireSession
 }));
 
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: vi.fn((callback: () => void | Promise<void>) => {
+    nextServerMocks.capturedAfter = callback;
+  })
+}));
+
 import { POST } from "./route";
 
 const studentUser: SessionUser = {
@@ -104,7 +115,9 @@ const allowedRateLimit: RateLimitResult = {
 
 describe("reservation create route Discord notification", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    vi.clearAllMocks();
+    nextServerMocks.capturedAfter = undefined;
+    vi.stubEnv("APP_ORIGIN", "https://example.test");
     vi.stubEnv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/token");
     routeMocks.requireMutatingRequestSafety.mockReturnValue(null);
     routeMocks.requireSession.mockResolvedValue({ id: "session-student", user: studentUser });
@@ -129,11 +142,23 @@ describe("reservation create route Discord notification", () => {
     vi.unstubAllEnvs();
   });
 
-  it("sends a best-effort reservation-created notification after a confirmed database reservation", async () => {
+  it("returns 201 before the deferred successful notification callback runs", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
     const response = await POST(reservationRequest());
 
     expect(response.status).toBe(201);
+    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(nextServerMocks.capturedAfter).toEqual(expect.any(Function));
+    expect(errorLog).not.toHaveBeenCalled();
+
+    await nextServerMocks.capturedAfter?.();
+
     expect(routeMocks.sendReservationCreatedNotification).toHaveBeenCalledWith({
+      applicant: {
+        name: studentUser.name,
+        studentNumber: studentUser.studentNumber
+      },
       notificationSettings: {
         closedPeriodNotificationsEnabled: true,
         id: "global",
@@ -141,11 +166,14 @@ describe("reservation create route Discord notification", () => {
       },
       reservation: confirmedReservation,
       sender: expect.any(Function),
+      embedTitleUrl:
+        "https://example.test/?section=reservations&date=2026-07-01&status=CONFIRMED&reservation=reservation-1",
       webhookUrl: "https://discord.com/api/webhooks/1/token"
     });
+    expect(errorLog).not.toHaveBeenCalled();
   });
 
-  it("keeps the reservation response successful when the Discord notification sender fails", async () => {
+  it("logs an unexpected deferred notification failure only after returning 201", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     routeMocks.sendReservationCreatedNotification.mockRejectedValue(new Error("discord down"));
 
@@ -153,11 +181,17 @@ describe("reservation create route Discord notification", () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({ reservation: confirmedReservation });
+    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(nextServerMocks.capturedAfter).toEqual(expect.any(Function));
+    expect(errorLog).not.toHaveBeenCalled();
+
+    await nextServerMocks.capturedAfter?.();
+
     expect(errorLog).toHaveBeenCalledTimes(1);
     expectStructuredNotificationFailure(errorLog.mock.calls[0]?.[0], "unexpected_error");
   });
 
-  it("logs a redacted structured event when Discord returns a known delivery failure", async () => {
+  it("logs a redacted known delivery failure only after returning 201", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     routeMocks.sendReservationCreatedNotification.mockResolvedValue({
       kind: "failed",
@@ -167,6 +201,12 @@ describe("reservation create route Discord notification", () => {
     const response = await POST(reservationRequest());
 
     expect(response.status).toBe(201);
+    expect(routeMocks.sendReservationCreatedNotification).not.toHaveBeenCalled();
+    expect(nextServerMocks.capturedAfter).toEqual(expect.any(Function));
+    expect(errorLog).not.toHaveBeenCalled();
+
+    await nextServerMocks.capturedAfter?.();
+
     expect(errorLog).toHaveBeenCalledTimes(1);
     expectStructuredNotificationFailure(errorLog.mock.calls[0]?.[0], "delivery_failed");
   });
@@ -239,6 +279,8 @@ function reservationRequest(): Request {
     }),
     headers: {
       "content-type": "application/json",
+      forwarded: "host=spoofed.example;proto=https",
+      host: "spoofed.example",
       "x-csrf-token": "csrf-token",
       origin: "https://example.test"
     },

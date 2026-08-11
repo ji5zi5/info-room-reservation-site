@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { toKstDate } from "@/lib/date";
+import { databaseActorFromSessionUser } from "@/lib/db-context";
 import { getAdminDashboard } from "@/lib/admin-dashboard";
 import { jsonError } from "@/lib/http";
 import { getMockAdminDashboard } from "@/lib/mock-admin-data";
@@ -14,7 +15,7 @@ const DashboardQuerySchema = z.object({
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
     const url = new URL(request.url);
     const parsed = DashboardQuerySchema.safeParse({ date: url.searchParams.get("date") ?? undefined });
     if (!parsed.success) {
@@ -27,7 +28,9 @@ export async function GET(request: Request): Promise<NextResponse> {
         periods: getMockAdminDashboard(date, new Date())
       });
     }
-    return NextResponse.json(await getAdminDashboard(date, new Date()));
+    return NextResponse.json(
+      await getAdminDashboard(date, new Date(), databaseActorFromSessionUser(admin))
+    );
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);

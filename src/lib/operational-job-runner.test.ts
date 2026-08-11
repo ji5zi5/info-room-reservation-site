@@ -88,6 +88,61 @@ describe("operational job runner", () => {
     expect(unexpectedStore.current?.result).toBe('{"status":"unexpected_error"}');
     expect(unexpectedStore.current?.result).not.toContain("contains-sensitive-runtime-detail");
   });
+
+  it("records maintenance backlog as a failed run with its nonzero lower bound", async () => {
+    const store = memoryStore();
+
+    const result = await runOperationalJob({
+      clock: () => finishedAt,
+      job: "MAINTENANCE",
+      now: startedAt,
+      operation: async () => ({
+        backlogCount: 1,
+        failureCode: "maintenance_backlog_remaining",
+        kind: "failed",
+        oldestBacklogAt: null,
+        result: { backlogCount: 1, sessionsDeleted: 1_000 },
+        value: { backlogCount: 1, sessionsDeleted: 1_000 }
+      }),
+      store
+    });
+
+    expect(result).toEqual({
+      failureCode: "maintenance_backlog_remaining",
+      kind: "failed",
+      value: { backlogCount: 1, sessionsDeleted: 1_000 }
+    });
+    expect(store.current).toMatchObject({
+      backlogCount: 1,
+      failureCode: "maintenance_backlog_remaining",
+      status: "FAILED"
+    });
+  });
+
+  it("records unexpected_error when retention throws after backlog detection", async () => {
+    const store = memoryStore();
+    let backlogDetected = false;
+
+    const result = await runOperationalJob({
+      clock: () => finishedAt,
+      job: "MAINTENANCE",
+      now: startedAt,
+      operation: async () => {
+        backlogDetected = true;
+        throw new Error("retention failed after backlog detection");
+      },
+      store
+    });
+
+    expect(backlogDetected).toBe(true);
+    expect(result).toEqual({ failureCode: "unexpected_error", kind: "failed" });
+    expect(store.current).toMatchObject({
+      backlogCount: 0,
+      failureCode: "unexpected_error",
+      result: '{"status":"unexpected_error"}',
+      status: "FAILED"
+    });
+  });
 });
 
 function memoryStore(input: { readonly refuseStart?: boolean } = {}): OperationalJobStore & {

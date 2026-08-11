@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { assertRestrictableUser } from "@/lib/admin-users";
+import { selectCancellableConfirmedReservationIds } from "@/lib/admin-cancellable-reservations";
 import {
   databaseActorFromSessionUser,
+  isSerializableTransactionConflict,
   TransactionRetryExhaustedError,
   userMutationLockKey,
   withDatabaseMutation
@@ -13,6 +15,7 @@ import { toKstDate } from "@/lib/date";
 import { jsonError, jsonTransactionRetryExhaustedError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { applyMockUserRestriction, removeMockUserRestriction, type MockUserRestrictionResult } from "@/lib/mock-user-restrictions";
+import { periodSettingReadDates } from "@/lib/period-setting-values";
 import { readJsonRequest } from "@/lib/request-json";
 import { hashRequestClientIp } from "@/lib/request-source";
 import { DEFAULT_SHADOW_BAN_PROFILE, parseShadowBanProfile } from "@/lib/shadow-ban-profile";
@@ -91,6 +94,13 @@ export async function POST(request: Request, context: { readonly params: Promise
       if (target.bookingStatus === "BANNED" && parsed.data.status !== "BANNED") {
         return { kind: "weaker_status" } as const;
       }
+      if (
+        target.bookingStatus === "BANNED" &&
+        parsed.data.status === "BANNED" &&
+        target.restrictionReason === parsed.data.reason
+      ) {
+        return { cancelledFutureReservationCount: 0, idempotent: true, kind: "ok", user: target } as const;
+      }
       const updated = await transaction.user.update({
         data: {
           bookingStatus: parsed.data.status,
@@ -100,23 +110,36 @@ export async function POST(request: Request, context: { readonly params: Promise
         },
         where: { id: params.id }
       });
-      const cancelledFutureReservationCount = shouldCancelFutureReservations(parsed.data.status)
-        ? (
+      const today = toKstDate(now);
+      let cancelledFutureReservationCount = 0;
+      if (shouldCancelFutureReservations(parsed.data.status)) {
+        const candidates = await transaction.reservation.findMany({
+          where: { date: { gte: today }, status: "CONFIRMED", userId: params.id }
+        });
+        const settings = await transaction.periodSetting.findMany({
+          where: { date: { in: [...periodSettingReadDates(today)] } }
+        });
+        const cancellableReservationIds = selectCancellableConfirmedReservationIds({ now, reservations: candidates, settings });
+        if (cancellableReservationIds.length > 0) {
+          cancelledFutureReservationCount = (
             await transaction.reservation.updateMany({
               data: { status: "CANCELLED" },
-              where: {
-                date: { gte: toKstDate(now) },
-                status: "CONFIRMED",
-                userId: params.id
-              }
+              where: { id: { in: [...cancellableReservationIds] }, status: "CONFIRMED" }
             })
-          ).count
-        : 0;
+          ).count;
+        }
+      }
       const action = await transaction.adminAction.create({
         data: {
           action: "USER_RESTRICTION_APPLY",
           actorId: admin.id,
-          after: stringifyRestrictionSnapshot(updated),
+          after: JSON.stringify({
+            bookingStatus: updated.bookingStatus,
+            ...(parsed.data.status === "BANNED" ? { cancelledFutureReservationCount } : {}),
+            restrictedUntil: updated.restrictedUntil,
+            restrictionReason: updated.restrictionReason,
+            shadowBanProfile: updated.shadowBanProfile
+          }),
           before: stringifyRestrictionSnapshot(target),
           ipHash,
           reason: parsed.data.reason,
@@ -179,16 +202,20 @@ export async function POST(request: Request, context: { readonly params: Promise
       return jsonError(409, "bad_request", "영구 차단 상태는 먼저 해제해야 합니다.");
     }
 
-    return NextResponse.json({ cancelledFutureReservationCount: result.cancelledFutureReservationCount, user: result.user });
+    return NextResponse.json({
+      cancelledFutureReservationCount: result.cancelledFutureReservationCount,
+      ...(result.idempotent ? { idempotent: true } : {}),
+      user: result.user
+    });
   } catch (error) {
-    if (error instanceof TransactionRetryExhaustedError) {
-      return jsonTransactionRetryExhaustedError();
+    if (error instanceof TransactionRetryExhaustedError && isSerializableTransactionConflict(error.cause)) {
+      return jsonError(409, "bad_request", "동시에 처리된 사용자 제재 요청입니다. 현재 상태를 다시 확인해 주세요.");
     }
     const response = adminSessionErrorResponse(error);
     if (response) {
       return response;
     }
-    throw error;
+    return jsonError(500, "server_error", "사용자 제재 처리 중 오류가 발생했습니다.");
   }
 }
 
@@ -290,7 +317,11 @@ function shouldCancelFutureReservations(status: RestrictionStatus): boolean {
 function mockRestrictionResultResponse(result: MockUserRestrictionResult): NextResponse {
   switch (result.kind) {
     case "ok":
-      return NextResponse.json({ cancelledFutureReservationCount: result.cancelledFutureReservationCount, user: result.user });
+      return NextResponse.json({
+        cancelledFutureReservationCount: result.cancelledFutureReservationCount,
+        ...(result.idempotent ? { idempotent: true } : {}),
+        user: result.user
+      });
     case "not_found":
       return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
     case "forbidden":

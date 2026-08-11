@@ -152,7 +152,7 @@ export async function reserveStudyPeriod(input: ReserveStudyPeriodInput): Promis
           studyPeriod: input.studyPeriod,
           userId: input.userId
         });
-        if (existing?.status === "CONFIRMED") {
+        if (existing) {
           return { kind: "error", reason: "duplicate" };
         }
 

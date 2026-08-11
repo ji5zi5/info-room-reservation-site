@@ -8,6 +8,7 @@ import {
   parseAdminAuditActionFilter
 } from "@/lib/admin-audit-actions";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { jsonError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
@@ -20,7 +21,7 @@ const AdminActionsQuerySchema = z.object({
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
     const url = new URL(request.url);
     const parsed = AdminActionsQuerySchema.safeParse({
       action: url.searchParams.get("action"),
@@ -35,13 +36,18 @@ export async function GET(request: Request): Promise<NextResponse> {
     if (isNoDatabaseMockMode()) {
       return NextResponse.json({ actions: [] });
     }
-    const rows = await prisma.adminAction.findMany({
-      include: {
-        actor: { select: { id: true, name: true, studentNumber: true } },
-        targetUser: { select: { id: true, name: true, studentNumber: true } }
-      },
-      orderBy: { createdAt: "desc" },
-      take: 200
+    const rows = await withDatabaseContext({
+      actor: databaseActorFromSessionUser(admin),
+      client: prisma,
+      operation: (transaction) =>
+        transaction.adminAction.findMany({
+          include: {
+            actor: { select: { id: true, name: true, studentNumber: true } },
+            targetUser: { select: { id: true, name: true, studentNumber: true } }
+          },
+          orderBy: { createdAt: "desc" },
+          take: 200
+        })
     });
     const actions = orderAdminAuditActions(
       filterAdminAuditActions(rows, { action: filter, query: parsed.data.query ?? "" })

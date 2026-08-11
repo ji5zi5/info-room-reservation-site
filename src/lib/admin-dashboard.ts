@@ -1,5 +1,6 @@
 import { CLOSED_LIST_NOTIFICATION_KIND, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
 import { prisma } from "./db";
+import { type DatabaseActor, withDatabaseContext } from "./db-context";
 import { getPeriodSummaries, type PeriodSummary } from "./period-settings";
 import {
   getClosedPeriodNotificationReconciliationBacklog,
@@ -37,14 +38,23 @@ export type AdminDashboardPayload = {
   readonly periods: readonly AdminDashboardPeriod[];
 };
 
-export async function getAdminDashboard(date: string, now: Date): Promise<AdminDashboardPayload> {
+export async function getAdminDashboard(
+  date: string,
+  now: Date,
+  actor: DatabaseActor
+): Promise<AdminDashboardPayload> {
   const [periods, deliveries, notificationBacklog] = await Promise.all([
-    getPeriodSummaries(date, { includeApplicants: true, now }),
-    prisma.notificationDelivery.findMany({
-      where: {
-        date,
-        kind: CLOSED_LIST_NOTIFICATION_KIND
-      }
+    getPeriodSummaries(date, { actor, includeApplicants: true, now }),
+    withDatabaseContext({
+      actor,
+      client: prisma,
+      operation: (transaction) =>
+        transaction.notificationDelivery.findMany({
+          where: {
+            date,
+            kind: CLOSED_LIST_NOTIFICATION_KIND
+          }
+        })
     }),
     getClosedPeriodNotificationReconciliationBacklog(now)
   ]);

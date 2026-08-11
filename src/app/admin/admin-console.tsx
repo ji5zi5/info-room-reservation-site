@@ -95,13 +95,15 @@ export function AdminConsole(): ReactElement {
             {consoleState.activeSection === "reservations" ? (
               <AdminReservationsPanel
                 date={consoleState.date}
+                requestedCancellation={consoleState.deepLinkCancellation}
                 periodFilter={consoleState.reservationPeriodFilter}
                 query={consoleState.reservationQuery}
                 reservations={consoleState.reservations}
                 statusFilter={consoleState.statusFilter}
-                onCancelReservation={(reservationId, reason) => void consoleState.cancelReservation(reservationId, reason)}
+                onCancelReservation={consoleState.cancelReservation}
                 onCopyCsv={() => void consoleState.copyReservationsCsv()}
-                onMarkNoShow={(reservationId) => void consoleState.markNoShow(reservationId)}
+                onMarkNoShow={consoleState.markNoShow}
+                onCancellationRequestConsumed={consoleState.consumeDeepLinkCancellation}
                 onRefresh={() => void consoleState.refresh()}
                 onSelectStatus={consoleState.selectStatus}
                 onSetPeriod={consoleState.setReservationPeriodFilter}
@@ -159,9 +161,9 @@ export function AdminConsole(): ReactElement {
                   ? consoleState.restrictionDrafts[consoleState.selectedUserId] ?? DEFAULT_RESTRICTION_DRAFT
                   : DEFAULT_RESTRICTION_DRAFT
               }
-              onApplyRestriction={(userId) => void consoleState.applyRestriction(userId)}
+              onApplyRestriction={consoleState.applyRestriction}
               onClose={consoleState.clearSelectedUser}
-              onMarkNoShow={(reservationId) => void consoleState.markNoShow(reservationId)}
+              onMarkNoShow={consoleState.markNoShow}
               onRelease={(userId) => void consoleState.removeRestriction(userId)}
               onSetRestrictionDraft={consoleState.setRestrictionDraft}
             />

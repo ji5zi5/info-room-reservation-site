@@ -1,6 +1,15 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { delivery, periodSetting, prismaMocks } from "./prisma-notification-repository-test-utils";
+import {
+  databaseContextMocks,
+  delivery,
+  periodSetting,
+  prismaClient,
+  prismaMocks
+} from "./prisma-notification-repository-test-utils";
 import { GLOBAL_PERIOD_SETTINGS_DATE } from "./period-setting-values";
 import {
   getClosedPeriodNotificationBacklogSummary,
@@ -11,6 +20,60 @@ import {
 
 beforeEach(() => {
   prismaMocks.reset();
+  databaseContextMocks.withDatabaseContext.mockReset();
+  databaseContextMocks.withDatabaseContext.mockImplementation(async (input) => input.operation(prismaClient));
+});
+
+describe("Prisma closed-period notification database context", () => {
+  it("uses a trusted SYSTEM actor for every public repository operation", async () => {
+    const now = new Date("2026-06-12T07:25:00.000Z");
+
+    await prismaClosedPeriodNotificationRepository.getDelivery({ date: "2026-06-12", studyPeriod: "EIGHTH" });
+    await prismaClosedPeriodNotificationRepository.getPeriod({ date: "2026-06-12", studyPeriod: "EIGHTH" });
+    await prismaClosedPeriodNotificationRepository.claimDelivery({
+      date: "2026-06-12",
+      staleSendingBefore: now,
+      studyPeriod: "EIGHTH"
+    });
+    await prismaClosedPeriodNotificationRepository.claimDeliveryForReconciliation({
+      date: "2026-06-12",
+      studyPeriod: "FIRST"
+    });
+    await prismaClosedPeriodNotificationRepository.resolveDelivery({
+      action: "abandon",
+      date: "2026-06-12",
+      now,
+      studyPeriod: "FIRST"
+    });
+    await prismaClosedPeriodNotificationRepository.saveDelivery({
+      claimUpdatedAt: now,
+      date: "2026-06-12",
+      failureCode: null,
+      lastError: null,
+      messageIds: [],
+      nextAttemptAt: null,
+      status: "SENT",
+      studyPeriod: "FIRST"
+    });
+    await getDueClosedPeriodNotificationCandidates(now);
+    await getClosedPeriodNotificationBacklogSummary(now);
+    await getClosedPeriodNotificationReconciliationBacklog(now);
+
+    expect(databaseContextMocks.withDatabaseContext).toHaveBeenCalledTimes(9);
+    for (const [input] of databaseContextMocks.withDatabaseContext.mock.calls) {
+      expect(input).toEqual(expect.objectContaining({
+        actor: { id: null, role: "SYSTEM" },
+        client: prismaClient
+      }));
+    }
+  });
+
+  it("contains no raw protected model access or raw Prisma transaction boundary", () => {
+    const source = readFileSync(join(process.cwd(), "src/lib/prisma-notification-repository.ts"), "utf8");
+
+    expect(source).not.toMatch(/prisma\.(?:notificationDelivery|periodSetting|reservation)\b/u);
+    expect(source).not.toContain("prisma.$transaction");
+  });
 });
 
 describe("Prisma closed-period notification periods", () => {

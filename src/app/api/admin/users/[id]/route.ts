@@ -5,6 +5,7 @@ import { summarizeUserSessions } from "@/lib/admin-session-control";
 import { orderAdminUserReservations, summarizeAdminUserReservations } from "@/lib/admin-user-detail";
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { jsonError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { getMockAdminUserDetail } from "@/lib/mock-reservation-data";
@@ -12,7 +13,7 @@ import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@
 
 export async function GET(_request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
     const params = await context.params;
     if (isNoDatabaseMockMode()) {
       const detail = getMockAdminUserDetail(params.id);
@@ -22,31 +23,36 @@ export async function GET(_request: Request, context: { readonly params: Promise
       return NextResponse.json(detail);
     }
 
-    const user = await prisma.user.findUnique({
-      include: {
-        auditLogs: {
-          orderBy: { createdAt: "desc" },
-          take: 20
-        },
-        adminActionsTargeted: {
-          orderBy: { createdAt: "desc" },
-          take: 30
-        },
-        reservations: {
-          orderBy: [{ date: "desc" }, { createdAt: "asc" }],
-          take: 100
-        },
-        sessions: {
-          select: {
-            expiresAt: true
-          }
-        },
-        sanctions: {
-          orderBy: { createdAt: "desc" },
-          take: 30
-        }
-      },
-      where: { id: params.id }
+    const user = await withDatabaseContext({
+      actor: databaseActorFromSessionUser(admin),
+      client: prisma,
+      operation: (transaction) =>
+        transaction.user.findUnique({
+          include: {
+            auditLogs: {
+              orderBy: { createdAt: "desc" },
+              take: 20
+            },
+            adminActionsTargeted: {
+              orderBy: { createdAt: "desc" },
+              take: 30
+            },
+            reservations: {
+              orderBy: [{ date: "desc" }, { createdAt: "asc" }],
+              take: 100
+            },
+            sessions: {
+              select: {
+                expiresAt: true
+              }
+            },
+            sanctions: {
+              orderBy: { createdAt: "desc" },
+              take: 30
+            }
+          },
+          where: { id: params.id }
+        })
     });
     if (!user) {
       return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");

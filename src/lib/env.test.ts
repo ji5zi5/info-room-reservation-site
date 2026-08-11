@@ -11,6 +11,85 @@ import {
 } from "./env";
 
 describe("server environment guards", () => {
+  const productionEnvWithApplicationOrigin = {
+    ADMIN_STUDENT_NUMBERS: "test-admin-student",
+    APP_ORIGIN: "https://example.test",
+    CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
+    DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
+    DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
+    DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/token",
+    MAINTENANCE_CRON_SECRET: "maintenance-secret-with-enough-length",
+    NODE_ENV: "production",
+    SESSION_SECRET: "session-secret-with-enough-length",
+    TRUST_FORWARDED_IP_HEADERS: "true"
+  } as const;
+
+  it("normalizes an HTTPS application origin to its origin", () => {
+    // Given
+    const raw = { APP_ORIGIN: " https://example.test/ " } as const;
+
+    // When
+    const env = parseServerEnv(raw);
+
+    // Then
+    expect(env).toMatchObject({ appOrigin: "https://example.test" });
+  });
+
+  it.each(["development", "test"] as const)(
+    "accepts an explicitly configured HTTP localhost application origin in %s",
+    (nodeEnv) => {
+      // Given
+      const raw = { APP_ORIGIN: "http://localhost:3000/", NODE_ENV: nodeEnv } as const;
+
+      // When
+      const env = parseServerEnv(raw);
+
+      // Then
+      expect(env).toMatchObject({ appOrigin: "http://localhost:3000" });
+    }
+  );
+
+  it("does not derive a development application origin when it is absent", () => {
+    // Given
+    const raw = { NODE_ENV: "development" } as const;
+
+    // When
+    const env = parseServerEnv(raw);
+
+    // Then
+    expect(env).toMatchObject({ appOrigin: null });
+  });
+
+  it.each([
+    ["path", "development", "https://example.test/admin"],
+    ["query", "test", "https://example.test/?next=%2Fadmin"],
+    ["credentials", "development", "https://user:password@example.test"],
+    ["non-local HTTP development origin", "development", "http://example.test"],
+    ["non-local HTTP test origin", "test", "http://example.test"]
+  ] as const)("rejects an application origin with %s", (_caseName, nodeEnv, appOrigin) => {
+    // Given
+    const raw = { APP_ORIGIN: appOrigin, NODE_ENV: nodeEnv };
+
+    // When / Then
+    expect(() => parseServerEnv(raw)).toThrow("APP_ORIGIN");
+  });
+
+  it("requires an application origin in production", () => {
+    // Given
+    const { APP_ORIGIN: _appOrigin, ...withoutApplicationOrigin } = productionEnvWithApplicationOrigin;
+
+    // When / Then
+    expect(() => assertProductionEnvSafe(withoutApplicationOrigin)).toThrow("APP_ORIGIN");
+  });
+
+  it("requires an HTTPS application origin in production", () => {
+    // Given
+    const productionEnv = { ...productionEnvWithApplicationOrigin, APP_ORIGIN: "http://localhost:3000" };
+
+    // When / Then
+    expect(() => assertProductionEnvSafe(productionEnv)).toThrow("APP_ORIGIN");
+  });
+
   it("rejects mock login in production", () => {
     expect(() =>
       assertProductionEnvSafe({
@@ -45,6 +124,7 @@ describe("server environment guards", () => {
   it("allows an explicit production local student fallback without the generic local toggle", () => {
     const productionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      APP_ORIGIN: "https://example.test",
       CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
@@ -67,6 +147,7 @@ describe("server environment guards", () => {
     // Given
     const productionEnv = {
       ADMIN_STUDENT_NUMBERS: "91001",
+      APP_ORIGIN: "https://example.test",
       CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
@@ -89,6 +170,7 @@ describe("server environment guards", () => {
     expect(() =>
       assertProductionEnvSafe({
         ADMIN_STUDENT_NUMBERS: "test-admin-student",
+        APP_ORIGIN: "https://example.test",
         CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
         DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
         DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
@@ -124,6 +206,7 @@ describe("server environment guards", () => {
   it("requires trusted forwarded IP headers in production", () => {
     const productionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      APP_ORIGIN: "https://example.test",
       CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:5432/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
@@ -146,6 +229,7 @@ describe("server environment guards", () => {
   it("requires all production deployment secrets at the runtime guard boundary", () => {
     const baseProductionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      APP_ORIGIN: "https://example.test",
       CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
@@ -174,6 +258,7 @@ describe("server environment guards", () => {
   it("rejects weak production shared secrets", () => {
     const baseProductionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      APP_ORIGIN: "https://example.test",
       CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
@@ -198,6 +283,7 @@ describe("server environment guards", () => {
   it("requires separate scoped cron secrets and rejects the legacy shared secret", () => {
     const productionEnv = {
       ADMIN_STUDENT_NUMBERS: "test-admin-student",
+      APP_ORIGIN: "https://example.test",
       CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
       DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
       DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
@@ -262,6 +348,7 @@ describe("server environment guards", () => {
     expect(() =>
       assertProductionEnvSafe({
         ADMIN_STUDENT_NUMBERS: "test-admin-student",
+        APP_ORIGIN: "https://example.test",
         CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
         DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
         DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",
@@ -294,6 +381,7 @@ describe("server environment guards", () => {
     expect(() =>
       assertProductionEnvSafe({
         ADMIN_STUDENT_NUMBERS: "test-admin-student",
+        APP_ORIGIN: "https://example.test",
         CLOSED_PERIOD_CRON_SECRET: "closed-period-secret-with-enough-length",
         DATABASE_URL: "postgresql://user:pass@example.test:6543/info_room",
         DIRECT_URL: "postgresql://user:pass@example.test:5432/info_room",

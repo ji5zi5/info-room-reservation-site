@@ -70,8 +70,7 @@
   opacity: 1;
   transition:
     opacity var(--motion-fast),
-    transform var(--motion-panel),
-    visibility var(--motion-fast);
+    transform var(--motion-panel);
 }
 
 .login-panel[data-open="false"] .sidebar-content {

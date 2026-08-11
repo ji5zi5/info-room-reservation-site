@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DatabaseActor } from "@/lib/db-context";
 import type { PeriodSummary } from "@/lib/period-settings";
 import type { SessionUser } from "@/lib/session";
 
 type GetPeriodSummaries = (
   date: string,
-  options: { readonly currentUserId: string }
+  options: { readonly actor: DatabaseActor; readonly currentUserId: string }
 ) => Promise<readonly PeriodSummary[]>;
 
 type PeriodWeekPayload = {
@@ -26,7 +27,7 @@ type PeriodWeekPayload = {
 
 type GetPeriodWeekSummaries = (
   weekStart: string,
-  options: { readonly currentUserId: string }
+  options: { readonly actor: DatabaseActor; readonly currentUserId: string }
 ) => Promise<PeriodWeekPayload>;
 
 const routeMocks = vi.hoisted(() => ({
@@ -35,7 +36,12 @@ const routeMocks = vi.hoisted(() => ({
   isAllowedPeriodQueryDate: vi.fn<(date: string, now: Date) => boolean>(),
   isAllowedPeriodQueryWeekStart: vi.fn<(weekStart: string, now: Date) => boolean>(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
-  requireUser: vi.fn<() => Promise<SessionUser>>()
+  requireUser: vi.fn<() => Promise<SessionUser>>(),
+  systemDatabaseActor: vi.fn<() => DatabaseActor>()
+}));
+
+vi.mock("@/lib/db-context", () => ({
+  systemDatabaseActor: routeMocks.systemDatabaseActor
 }));
 
 vi.mock("@/lib/mock-dev-mode", () => ({
@@ -76,13 +82,13 @@ const periodWithPeerIdentity: PeriodSummary = {
   applicants: [{ name: "다른 학생", reservationId: "peer-reservation", studentNumber: "31002" }],
   capacity: 10,
   closeTime: "16:20",
-  confirmedCount: 1,
+  confirmedCount: 2,
   date: "2026-07-22",
   enabled: true,
   label: "8면학",
-  myReservationId: null,
+  myReservationId: "mine-reservation",
   openTime: "13:00",
-  remaining: 9,
+  remaining: 8,
   studyPeriod: "EIGHTH",
   windowState: "open"
 };
@@ -126,6 +132,7 @@ describe("student periods route privacy", () => {
     routeMocks.isAllowedPeriodQueryWeekStart.mockReset();
     routeMocks.isNoDatabaseMockMode.mockReset();
     routeMocks.requireUser.mockReset();
+    routeMocks.systemDatabaseActor.mockReset();
 
     routeMocks.getPeriodSummaries.mockResolvedValue([periodWithPeerIdentity]);
     routeMocks.getPeriodWeekSummaries.mockResolvedValue(createWeekPayload());
@@ -133,6 +140,7 @@ describe("student periods route privacy", () => {
     routeMocks.isAllowedPeriodQueryWeekStart.mockReturnValue(true);
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
     routeMocks.requireUser.mockResolvedValue(student);
+    routeMocks.systemDatabaseActor.mockReturnValue({ id: null, role: "SYSTEM" });
   });
 
   it("returns only aggregate period data and the current user's reservation identity", async () => {
@@ -143,19 +151,22 @@ describe("student periods route privacy", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, max-age=0, must-revalidate");
     expect(response.headers.get("ETag")).toMatch(/^"[a-f0-9]{64}"$/u);
-    expect(routeMocks.getPeriodSummaries).toHaveBeenCalledWith("2026-07-22", { currentUserId: student.id });
+    expect(routeMocks.getPeriodSummaries).toHaveBeenCalledWith("2026-07-22", {
+      actor: { id: null, role: "SYSTEM" },
+      currentUserId: student.id
+    });
     await expect(response.json()).resolves.toEqual({
       periods: [
         {
           capacity: 10,
           closeTime: "16:20",
-          confirmedCount: 1,
+          confirmedCount: 2,
           date: "2026-07-22",
           enabled: true,
           label: "8면학",
-          myReservationId: null,
+          myReservationId: "mine-reservation",
           openTime: "13:00",
-          remaining: 9,
+          remaining: 8,
           studyPeriod: "EIGHTH",
           windowState: "open"
         }
@@ -183,7 +194,10 @@ describe("student periods route privacy", () => {
 
     expect(response.status).toBe(200);
     expect(routeMocks.isAllowedPeriodQueryWeekStart).toHaveBeenCalledWith("2026-07-20", expect.any(Date));
-    expect(routeMocks.getPeriodWeekSummaries).toHaveBeenCalledWith("2026-07-20", { currentUserId: student.id });
+    expect(routeMocks.getPeriodWeekSummaries).toHaveBeenCalledWith("2026-07-20", {
+      actor: { id: null, role: "SYSTEM" },
+      currentUserId: student.id
+    });
     expect(routeMocks.getPeriodSummaries).not.toHaveBeenCalled();
     const payload = await response.json();
     expect(payload).toEqual(expected);

@@ -1,3 +1,5 @@
+import { STUDY_PERIODS, type StudyPeriod } from "./study-periods";
+
 export type StudentStatusUser = {
   readonly bookingStatus: string;
   readonly id: string;
@@ -9,6 +11,7 @@ export type StudentStatusUser = {
 type StudentStatusPeriod = {
   readonly label: string;
   readonly myReservationId: string | null;
+  readonly studyPeriod: StudyPeriod;
 };
 
 export type StudentCurrentReservation = {
@@ -29,11 +32,17 @@ export function collectStudentCurrentReservations(
           canCancel: true,
           date,
           label: period.label,
-          reservationId: period.myReservationId ?? ""
+          reservationId: period.myReservationId ?? "",
+          studyPeriod: period.studyPeriod
         }))
     )
     .filter((reservation) => reservation.reservationId)
-    .sort((left, right) => left.date.localeCompare(right.date) || left.label.localeCompare(right.label, "ko-KR"));
+    .sort(
+      (left, right) =>
+        left.date.localeCompare(right.date) ||
+        STUDY_PERIODS.indexOf(left.studyPeriod) - STUDY_PERIODS.indexOf(right.studyPeriod)
+    )
+    .map(({ studyPeriod: _studyPeriod, ...reservation }) => reservation);
 }
 
 export function isStudentRestrictionActive(user: StudentStatusUser, now = new Date()): boolean {

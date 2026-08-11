@@ -2,7 +2,8 @@ import {
   buildReservationCreatedDiscordPayload,
   redactDiscordWebhookTokens,
   type DiscordWebhookPayload,
-  type DiscordWebhookSendResult
+  type DiscordWebhookSendResult,
+  type ReservationCreatedNotificationInput
 } from "./discord-notifications";
 import type { NotificationSettings } from "./notification-settings";
 import type { Reservation } from "./reservation-service";
@@ -26,6 +27,8 @@ export type ReservationCreatedNotificationResult =
     };
 
 export async function sendReservationCreatedNotification(input: {
+  readonly applicant: ReservationCreatedNotificationInput["applicant"];
+  readonly embedTitleUrl?: string;
   readonly notificationSettings: NotificationSettings;
   readonly reservation: Reservation;
   readonly sender: ReservationCreatedNotificationSender;
@@ -41,8 +44,10 @@ export async function sendReservationCreatedNotification(input: {
   try {
     const sendResult = await input.sender(
       buildReservationCreatedDiscordPayload({
+        applicant: input.applicant,
         date: input.reservation.date,
-        reservationId: input.reservation.id,
+        ...(input.embedTitleUrl === undefined ? {} : { embedTitleUrl: input.embedTitleUrl }),
+        reason: input.reservation.reason,
         studyPeriod: input.reservation.studyPeriod
       })
     );

@@ -15,6 +15,7 @@ import type {
   AdminUserStatusFilter,
   StudyPeriod
 } from "./admin-types";
+import type { AdminMutationResult, ApplyRestrictionData, CancelReservationData, NoShowReservationData } from "./admin-api-client";
 import { DEFAULT_SHADOW_BAN_PROFILE, type ShadowBanProfile } from "@/lib/shadow-ban-profile";
 
 export type UserRestrictionDraft = {
@@ -38,14 +39,16 @@ export type AdminConsoleState = {
   readonly auditActionFilter: AdminAuditActionFilter;
   readonly auditActions: readonly AdminAuditAction[];
   readonly auditQuery: string;
-  readonly applyRestriction: (userId: string) => Promise<void>;
+  readonly applyRestriction: (userId: string) => Promise<AdminMutationResult<ApplyRestrictionData>>;
   readonly applyShadowBan: (userId: string) => Promise<void>;
-  readonly cancelReservation: (reservationId: string, reason: string) => Promise<void>;
+  readonly cancelReservation: (reservationId: string, reason: string) => Promise<AdminMutationResult<CancelReservationData>>;
   readonly clearSelectedUser: () => void;
   readonly copyReservationsCsv: () => Promise<void>;
   readonly dashboardPeriods: readonly AdminDashboardPeriod[];
   readonly date: string;
-  readonly markNoShow: (reservationId: string) => Promise<void>;
+  readonly deepLinkCancellation: AdminReservation | null;
+  readonly consumeDeepLinkCancellation: () => void;
+  readonly markNoShow: (reservationId: string) => Promise<AdminMutationResult<NoShowReservationData>>;
   readonly notificationBacklog: readonly AdminNotificationBacklogItem[];
   readonly notificationSettings: AdminNotificationSettings;
   readonly periods: readonly AdminPeriodSetting[];

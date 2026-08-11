@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DatabaseActor } from "./db-context";
 import type { StudyPeriod } from "./study-periods";
 
 type PeriodSettingRow = {
@@ -48,7 +49,7 @@ type ReservationFindMany = (input: unknown) => Promise<readonly (ReservationAppl
 
 type PeriodWeekReader = (
   weekStart: string,
-  options: { readonly currentUserId: string }
+  options: { readonly actor: DatabaseActor; readonly currentUserId: string }
 ) => Promise<{
   readonly dates: readonly {
     readonly date: string;
@@ -99,6 +100,10 @@ const prismaMocks = vi.hoisted(() => {
   });
   const reservationGroupBy = vi.fn<ReservationGroupBy>(async () => []);
   const reservationFindMany = vi.fn<ReservationFindMany>(async () => []);
+  const rawPeriodSettingFindMany = vi.fn<PeriodSettingFindMany>(async () => []);
+  const rawPeriodSettingUpsert = vi.fn<PeriodSettingUpsert>();
+  const rawReservationFindMany = vi.fn<ReservationFindMany>(async () => []);
+  const rawReservationGroupBy = vi.fn<ReservationGroupBy>(async () => []);
 
   return {
     periodSettingFindMany,
@@ -106,12 +111,20 @@ const prismaMocks = vi.hoisted(() => {
     periodSettingsStore,
     reservationFindMany,
     reservationGroupBy,
+    rawPeriodSettingFindMany,
+    rawPeriodSettingUpsert,
+    rawReservationFindMany,
+    rawReservationGroupBy,
     reset: () => {
       periodSettingsStore.length = 0;
       periodSettingFindMany.mockClear();
       periodSettingUpsert.mockClear();
       reservationFindMany.mockClear();
       reservationGroupBy.mockClear();
+      rawPeriodSettingFindMany.mockClear();
+      rawPeriodSettingUpsert.mockClear();
+      rawReservationFindMany.mockClear();
+      rawReservationGroupBy.mockClear();
     }
   };
 });
@@ -119,27 +132,51 @@ const prismaMocks = vi.hoisted(() => {
 vi.mock("./db", () => ({
   prisma: {
     periodSetting: {
-      findMany: prismaMocks.periodSettingFindMany,
-      upsert: prismaMocks.periodSettingUpsert
+      findMany: prismaMocks.rawPeriodSettingFindMany,
+      upsert: prismaMocks.rawPeriodSettingUpsert
     },
     reservation: {
-      findMany: prismaMocks.reservationFindMany,
-      groupBy: prismaMocks.reservationGroupBy
+      findMany: prismaMocks.rawReservationFindMany,
+      groupBy: prismaMocks.rawReservationGroupBy
     }
   }
+}));
+
+const contextMocks = vi.hoisted(() => ({
+  withDatabaseContext: vi.fn()
+}));
+
+vi.mock("./db-context", () => ({
+  withDatabaseContext: contextMocks.withDatabaseContext
 }));
 
 import {
   DEFAULT_PERIOD_CLOSE_TIME,
   DEFAULT_PERIOD_OPEN_TIME,
   GLOBAL_PERIOD_SETTINGS_DATE,
+  ensurePeriodSettings,
   getPeriodSummaries,
   findMyReservationId
 } from "./period-settings";
 
 beforeEach(() => {
   prismaMocks.reset();
+  contextMocks.withDatabaseContext.mockReset();
+  contextMocks.withDatabaseContext.mockImplementation(async (input) =>
+    input.operation({
+      periodSetting: {
+        findMany: prismaMocks.periodSettingFindMany,
+        upsert: prismaMocks.periodSettingUpsert
+      },
+      reservation: {
+        findMany: prismaMocks.reservationFindMany,
+        groupBy: prismaMocks.reservationGroupBy
+      }
+    })
+  );
 });
+
+const systemActor = { id: null, role: "SYSTEM" } satisfies DatabaseActor;
 
 describe("period summary my reservation marker", () => {
   it("returns only the current user's reservation for the matching period", () => {
@@ -201,8 +238,19 @@ describe("period summaries", () => {
       return;
     }
 
-    const week = await getPeriodWeekSummaries("2026-07-20", { currentUserId: "me" });
+    const week = await getPeriodWeekSummaries("2026-07-20", {
+      actor: systemActor,
+      currentUserId: "me"
+    });
 
+    expect(contextMocks.withDatabaseContext).toHaveBeenCalledWith({
+      actor: systemActor,
+      client: expect.any(Object),
+      operation: expect.any(Function)
+    });
+    expect(prismaMocks.rawPeriodSettingFindMany).not.toHaveBeenCalled();
+    expect(prismaMocks.rawReservationGroupBy).not.toHaveBeenCalled();
+    expect(prismaMocks.rawReservationFindMany).not.toHaveBeenCalled();
     expect(prismaMocks.periodSettingFindMany).toHaveBeenCalledTimes(1);
     expect(prismaMocks.reservationGroupBy).toHaveBeenCalledTimes(1);
     expect(prismaMocks.reservationFindMany).toHaveBeenCalledTimes(1);
@@ -302,6 +350,7 @@ describe("period summaries", () => {
 
     try {
       const periods = await getPeriodSummaries("2026-06-14", {
+        actor: systemActor,
         currentUserId: "me",
         now: new Date("2026-06-14T00:30:00.000Z")
       });
@@ -329,6 +378,7 @@ describe("period summaries", () => {
     prismaMocks.reservationFindMany.mockImplementationOnce(() => applicantsDeferred.promise);
 
     const summariesPromise = getPeriodSummaries("2026-06-14", {
+      actor: { id: "admin-summary", role: "ADMIN" },
       currentUserId: "me",
       includeApplicants: true,
       now: new Date("2026-06-14T00:30:00.000Z")
@@ -371,7 +421,10 @@ describe("period summaries", () => {
   it("returns default settings without creating missing period setting rows", async () => {
     const rowCountBeforeRead = prismaMocks.periodSettingsStore.length;
 
-    const periods = await getPeriodSummaries("2026-06-14", { now: new Date("2026-06-13T23:00:00.000Z") });
+    const periods = await getPeriodSummaries("2026-06-14", {
+      actor: systemActor,
+      now: new Date("2026-06-13T23:00:00.000Z")
+    });
 
     expect(periods.map((period) => period.studyPeriod)).toEqual(["EIGHTH", "FIRST"]);
     expect(
@@ -415,7 +468,10 @@ describe("period summaries", () => {
       studyPeriod: "FIRST"
     });
 
-    const periods = await getPeriodSummaries("2026-06-14", { now: new Date("2026-06-14T00:30:00.000Z") });
+    const periods = await getPeriodSummaries("2026-06-14", {
+      actor: systemActor,
+      now: new Date("2026-06-14T00:30:00.000Z")
+    });
 
     expect(
       periods.map((period) => ({
@@ -461,7 +517,10 @@ describe("period summaries", () => {
       studyPeriod: "EIGHTH"
     });
 
-    const periods = await getPeriodSummaries("2026-06-17", { now: new Date("2026-06-17T00:30:00.000Z") });
+    const periods = await getPeriodSummaries("2026-06-17", {
+      actor: systemActor,
+      now: new Date("2026-06-17T00:30:00.000Z")
+    });
 
     expect(
       periods.map((period) => ({
@@ -510,7 +569,10 @@ describe("period summaries", () => {
       }
     );
 
-    const [eighth] = await getPeriodSummaries("2026-06-17", { now: new Date("2026-06-17T00:30:00.000Z") });
+    const [eighth] = await getPeriodSummaries("2026-06-17", {
+      actor: systemActor,
+      now: new Date("2026-06-17T00:30:00.000Z")
+    });
 
     expect(eighth).toMatchObject({
       capacity: 3,
@@ -519,5 +581,21 @@ describe("period summaries", () => {
       openTime: "07:00",
       studyPeriod: "EIGHTH"
     });
+  });
+
+  it("contextualizes setting reads and writes with the exact trusted actor", async () => {
+    const actor = { id: "admin-settings", role: "ADMIN" } satisfies DatabaseActor;
+
+    await ensurePeriodSettings("2026-06-18", actor);
+
+    expect(contextMocks.withDatabaseContext).toHaveBeenCalledWith({
+      actor,
+      client: expect.any(Object),
+      operation: expect.any(Function)
+    });
+    expect(prismaMocks.periodSettingFindMany).toHaveBeenCalledOnce();
+    expect(prismaMocks.periodSettingUpsert).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.rawPeriodSettingFindMany).not.toHaveBeenCalled();
+    expect(prismaMocks.rawPeriodSettingUpsert).not.toHaveBeenCalled();
   });
 });

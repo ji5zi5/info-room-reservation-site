@@ -2,8 +2,9 @@
 
 import { AlertCircle, CalendarCheck, History, RefreshCw, ShieldAlert, UserRound, X } from "lucide-react";
 import type { ReactElement } from "react";
-import { useId } from "react";
+import { useId, useRef } from "react";
 
+import { useDialogFocus } from "@/components/use-dialog-focus";
 import type { StudentProfilePayload } from "@/lib/student-profile";
 import { getStudyPeriodLabel } from "@/lib/study-periods";
 
@@ -33,14 +34,24 @@ export function StudentProfilePanel({
   onRetry
 }: StudentProfilePanelProps): ReactElement | null {
   const titleId = useId();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const initialFocusRef = !loading && errorMessage ? retryRef : closeRef;
+  const focusState = loading ? "loading" : errorMessage ? "error" : profile ? "loaded" : "empty";
+  useDialogFocus({ canDismiss: !loading, dialogRef, initialFocusKey: focusState, initialFocusRef, onDismiss: onClose, open });
 
   if (!open) {
     return null;
   }
 
   return (
-    <div className="student-profile-backdrop" role="presentation">
-      <aside aria-labelledby={titleId} aria-modal="true" className="student-profile-panel" role="dialog">
+    <div className="student-profile-backdrop" role="presentation" onClick={(event) => {
+      if (!loading && event.target === event.currentTarget) {
+        onClose();
+      }
+    }}>
+      <aside aria-busy={loading} aria-labelledby={titleId} aria-modal="true" className="student-profile-panel" ref={dialogRef} role="dialog">
         <header className="student-profile-head">
           <span className="student-profile-mark" aria-hidden="true">
             <UserRound size={20} />
@@ -49,13 +60,15 @@ export function StudentProfilePanel({
             <h2 id={titleId}>프로필</h2>
             {profile ? <p className="muted">{profile.user.name} {profile.user.studentNumber}</p> : null}
           </div>
-          <button aria-label="닫기" className="icon-button" type="button" onClick={onClose}>
+          <button aria-label="닫기" className="icon-button" disabled={loading} ref={closeRef} type="button" onClick={onClose}>
             <X size={18} />
           </button>
         </header>
 
         {loading ? <StudentProfileLoading /> : null}
-        {!loading && errorMessage ? <StudentProfileError message={errorMessage} onRetry={onRetry} /> : null}
+        {!loading && errorMessage ? (
+          <StudentProfileError message={errorMessage} retryRef={retryRef} onRetry={onRetry} />
+        ) : null}
         {!loading && !errorMessage && profile ? <StudentProfileContent profile={profile} /> : null}
       </aside>
     </div>
@@ -75,16 +88,18 @@ function StudentProfileLoading(): ReactElement {
 
 function StudentProfileError({
   message,
+  retryRef,
   onRetry
 }: {
   readonly message: string;
+  readonly retryRef: React.RefObject<HTMLButtonElement | null>;
   readonly onRetry: () => void;
 }): ReactElement {
   return (
     <div className="student-profile-error">
       <AlertCircle aria-hidden="true" size={20} />
       <p>{message}</p>
-      <button className="ghost-button" type="button" onClick={onRetry}>
+      <button className="ghost-button" ref={retryRef} type="button" onClick={onRetry}>
         <RefreshCw aria-hidden="true" size={16} />
         다시 시도
       </button>

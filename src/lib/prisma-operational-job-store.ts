@@ -1,7 +1,7 @@
 import type { OperationalJob } from "@prisma/client";
 
 import { prisma } from "./db";
-import { systemDatabaseActor, withDatabaseMutation } from "./db-context";
+import { systemDatabaseActor, withDatabaseContext, withDatabaseMutation } from "./db-context";
 import type { OperationalJobName, OperationalJobStatus } from "./operational-jobs";
 import type { OperationalJobRecord, OperationalJobStore } from "./operational-job-runner";
 
@@ -75,7 +75,12 @@ export const prismaOperationalJobStore: OperationalJobStore = {
 };
 
 export async function getPrismaOperationalJobs(): Promise<readonly OperationalJobRecord[]> {
-  return (await prisma.operationalJob.findMany()).map(toOperationalJobRecord);
+  const records = await withDatabaseContext({
+    actor: systemDatabaseActor(),
+    client: prisma,
+    operation: (transaction) => transaction.operationalJob.findMany()
+  });
+  return records.map(toOperationalJobRecord);
 }
 
 function toOperationalJobRecord(record: OperationalJob): OperationalJobRecord {

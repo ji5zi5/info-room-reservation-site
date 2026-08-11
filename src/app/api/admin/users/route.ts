@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { ADMIN_USER_LIST_SELECT, toAdminUserDto } from "@/lib/admin-api-dto";
 import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { jsonError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { getMockAdminUsers } from "@/lib/mock-reservation-data";
@@ -12,7 +13,7 @@ import { requireAdmin, ForbiddenSessionError, UnauthorizedSessionError } from "@
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
     const url = new URL(request.url);
     const bookingStatus = parseAdminUserStatusFilter(url.searchParams.get("bookingStatus"));
     const query = url.searchParams.get("query") ?? "";
@@ -30,11 +31,16 @@ export async function GET(request: Request): Promise<NextResponse> {
     } satisfies Prisma.UserWhereInput;
     const users = isNoDatabaseMockMode()
       ? getMockAdminUsers({ bookingStatus, query })
-      : await prisma.user.findMany({
-          orderBy: [{ bookingStatus: "desc" }, { studentNumber: "asc" }],
-          select: ADMIN_USER_LIST_SELECT,
-          take: 100,
-          where
+      : await withDatabaseContext({
+          actor: databaseActorFromSessionUser(admin),
+          client: prisma,
+          operation: (transaction) =>
+            transaction.user.findMany({
+              orderBy: [{ bookingStatus: "desc" }, { studentNumber: "asc" }],
+              select: ADMIN_USER_LIST_SELECT,
+              take: 100,
+              where
+            })
         });
     const response = NextResponse.json({ users: users.map(toAdminUserDto) });
     response.headers.set("Cache-Control", "no-store");

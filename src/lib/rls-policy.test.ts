@@ -21,6 +21,9 @@ const RETENTION_MIGRATION_PATH = join(
 
 const PRISMA_MIGRATION_ROOT = join(process.cwd(), "prisma", "migrations");
 const PRISMA_SCHEMA_PATH = join(process.cwd(), "prisma", "schema.prisma");
+const BAD_RUNTIME_ROLE_MIGRATION = "20260729060000_add_limited_runtime_role";
+const CORRECTIVE_RUNTIME_ROLE_MIGRATION =
+  "20260810010000_drop_unconditional_runtime_policies";
 
 function readRlsMigration(): string {
   return readFileSync(RLS_MIGRATION_PATH, "utf8");
@@ -31,6 +34,17 @@ function readAllMigrations(): string {
     .filter((entry) => entry.isDirectory())
     .map((entry) => readFileSync(join(PRISMA_MIGRATION_ROOT, entry.name, "migration.sql"), "utf8"))
     .join("\n");
+}
+
+function orderedMigrations(): readonly { readonly name: string; readonly sql: string }[] {
+  return readdirSync(PRISMA_MIGRATION_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .map((name) => ({
+      name,
+      sql: readFileSync(join(PRISMA_MIGRATION_ROOT, name, "migration.sql"), "utf8")
+    }));
 }
 
 function prismaTableNames(): readonly string[] {
@@ -72,5 +86,75 @@ describe("Postgres row level security policy migration", () => {
     expect(sql).toContain('ALTER TABLE "RetentionPolicy" ENABLE ROW LEVEL SECURITY;');
     expect(sql).toContain('CREATE POLICY "retention_policy_admin_system_all"');
     expect(sql).toContain("app_private.is_admin_or_system()");
+  });
+
+  it("removes every unconditional runtime policy in a later additive migration", () => {
+    const migrations = orderedMigrations();
+    const badMigrationIndex = migrations.findIndex(({ name }) => name === BAD_RUNTIME_ROLE_MIGRATION);
+    const badMigration = migrations[badMigrationIndex];
+
+    expect(badMigrationIndex).toBeGreaterThanOrEqual(0);
+    expect(badMigration).toBeDefined();
+
+    const runtimePolicies = Array.from(
+      badMigration?.sql.matchAll(
+        /CREATE POLICY\s+"([^"]+_runtime_all)"\s+ON\s+"([^"]+)"\s+FOR ALL TO info_room_runtime USING \(true\) WITH CHECK \(true\);/gmu
+      ) ?? [],
+      (match) => ({ policy: match[1], table: match[2] })
+    );
+
+    expect(runtimePolicies).toHaveLength(13);
+
+    const expectedDrops = runtimePolicies.map(
+      ({ policy, table }) => `DROP POLICY IF EXISTS "${policy}" ON "${table}"`
+    );
+    const correction = migrations.slice(badMigrationIndex + 1).find(({ sql }) =>
+      expectedDrops.every((drop) => sql.includes(`${drop};`))
+    );
+
+    expect(correction?.name.localeCompare(BAD_RUNTIME_ROLE_MIGRATION)).toBeGreaterThan(0);
+    expect(
+      correction?.sql
+        .split(";")
+        .map((statement) => statement.trim())
+        .filter((statement) => statement.startsWith("DROP POLICY"))
+    ).toEqual(expectedDrops);
+  });
+
+  it("hardens the existing runtime role in the corrective migration", () => {
+    const correction = orderedMigrations().find(
+      ({ name }) => name === CORRECTIVE_RUNTIME_ROLE_MIGRATION
+    );
+
+    expect(correction?.sql).toMatch(
+      /ALTER ROLE info_room_runtime WITH\s+NOSUPERUSER\s+NOCREATEDB\s+NOCREATEROLE\s+NOREPLICATION\s+NOBYPASSRLS\s*;/mu
+    );
+  });
+
+  it("does not recreate unconditional runtime policies after the flawed migration", () => {
+    const migrations = orderedMigrations();
+    const badMigrationIndex = migrations.findIndex(({ name }) => name === BAD_RUNTIME_ROLE_MIGRATION);
+    const laterSql = migrations
+      .slice(badMigrationIndex + 1)
+      .map(({ sql }) => sql)
+      .join("\n");
+
+    expect(badMigrationIndex).toBeGreaterThanOrEqual(0);
+    expect(laterSql).not.toMatch(
+      /CREATE\s+POLICY\s+(?:"[^"]+_runtime_all"|[A-Za-z_][A-Za-z0-9_]*_runtime_all)\s+ON\b/imu
+    );
+  });
+
+  it("does not weaken RLS or grant BYPASSRLS in later migrations", () => {
+    const migrations = orderedMigrations();
+    const badMigrationIndex = migrations.findIndex(({ name }) => name === BAD_RUNTIME_ROLE_MIGRATION);
+    const laterSql = migrations
+      .slice(badMigrationIndex + 1)
+      .map(({ sql }) => sql)
+      .join("\n");
+
+    expect(badMigrationIndex).toBeGreaterThanOrEqual(0);
+    expect(laterSql).not.toMatch(/(?<!NO)\bBYPASSRLS\b/imu);
+    expect(laterSql).not.toMatch(/\bDISABLE\s+ROW\s+LEVEL\s+SECURITY\b/imu);
   });
 });

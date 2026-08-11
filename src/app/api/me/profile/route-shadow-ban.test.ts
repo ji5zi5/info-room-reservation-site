@@ -8,6 +8,13 @@ type IsNoDatabaseMockMode = () => boolean;
 type GetMockStudentProfile = (userId: string, now: Date) => unknown;
 type DbFindUnique = (query: unknown) => Promise<unknown>;
 type DbFindMany = (query: unknown) => Promise<readonly unknown[]>;
+type DatabaseTransaction = {
+  readonly reservation: { readonly findMany: DbFindMany; readonly groupBy: DbFindMany };
+  readonly user: { readonly findUnique: DbFindUnique };
+  readonly userSanction: { readonly findMany: DbFindMany };
+};
+type WithDatabaseContextInput = { readonly operation: (transaction: DatabaseTransaction) => Promise<unknown> };
+type WithDatabaseContext = (input: WithDatabaseContextInput) => Promise<unknown>;
 
 const routeMocks = vi.hoisted(() => {
   class UnauthorizedSessionError extends Error {}
@@ -19,7 +26,8 @@ const routeMocks = vi.hoisted(() => {
     reservationGroupBy: vi.fn<DbFindMany>(),
     sanctionFindMany: vi.fn<DbFindMany>(),
     requireUser: vi.fn<RequireUser>(),
-    userFindUnique: vi.fn<DbFindUnique>()
+    userFindUnique: vi.fn<DbFindUnique>(),
+    withDatabaseContext: vi.fn<WithDatabaseContext>()
   };
 });
 
@@ -29,6 +37,11 @@ vi.mock("@/lib/db", () => ({
     user: { findUnique: routeMocks.userFindUnique },
     userSanction: { findMany: routeMocks.sanctionFindMany }
   }
+}));
+
+vi.mock("@/lib/db-context", () => ({
+  databaseActorFromSessionUser: (user: SessionUser) => ({ id: user.id, role: "STUDENT" }),
+  withDatabaseContext: routeMocks.withDatabaseContext
 }));
 
 vi.mock("@/lib/mock-dev-mode", () => ({ isNoDatabaseMockMode: routeMocks.isNoDatabaseMockMode }));
@@ -57,6 +70,13 @@ describe("student profile route shadow-ban masking", () => {
     routeMocks.requireUser.mockResolvedValue(studentUser);
     routeMocks.reservationFindMany.mockResolvedValue([]);
     routeMocks.reservationGroupBy.mockResolvedValue([]);
+    routeMocks.withDatabaseContext.mockImplementation(async (input) =>
+      input.operation({
+        reservation: { findMany: routeMocks.reservationFindMany, groupBy: routeMocks.reservationGroupBy },
+        user: { findUnique: routeMocks.userFindUnique },
+        userSanction: { findMany: routeMocks.sanctionFindMany }
+      })
+    );
   });
 
   it("masks shadow-banned database profiles as unrestricted student-facing payloads", async () => {

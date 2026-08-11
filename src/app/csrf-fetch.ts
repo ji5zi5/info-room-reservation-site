@@ -13,20 +13,40 @@ type CsrfTokenResult =
       readonly status: number;
     };
 
+type CsrfRequestAuthorization = {
+  readonly isAuthorized: () => boolean;
+  readonly unauthorizedMessage: string;
+};
+
 const CsrfTokenPayloadSchema = z.object({
   csrfToken: z.string().min(1)
 });
 
 let csrfTokenPromise: Promise<CsrfTokenResult> | null = null;
 
-export async function csrfFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+const authorizationBlockedResponses = new WeakSet<Response>();
+
+export async function csrfFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  authorization?: CsrfRequestAuthorization
+): Promise<Response> {
   const tokenResult = await getCsrfToken();
   if (tokenResult.kind === "error") {
     return jsonClientError(tokenResult.status, tokenResult.message);
   }
+  if (authorization && !authorization.isAuthorized()) {
+    const response = jsonClientError(409, authorization.unauthorizedMessage, "stale_client_state");
+    authorizationBlockedResponses.add(response);
+    return response;
+  }
   const headers = new Headers(init.headers);
   headers.set("x-csrf-token", tokenResult.token);
   return fetch(input, { ...init, headers });
+}
+
+export function isCsrfRequestAuthorizationBlocked(response: Response): boolean {
+  return authorizationBlockedResponses.has(response);
 }
 
 export function resetCsrfToken(): void {
@@ -74,8 +94,12 @@ function parseCsrfBody(body: string): CsrfTokenResult {
   }
 }
 
-function jsonClientError(status: number, message: string): Response {
-  return new Response(JSON.stringify({ error: { code: "csrf_unavailable", message } }), {
+function jsonClientError(
+  status: number,
+  message: string,
+  code = "csrf_unavailable"
+): Response {
+  return new Response(JSON.stringify({ error: { code, message } }), {
     headers: { "content-type": "application/json" },
     status
   });

@@ -79,7 +79,7 @@ export function AdminBlacklistPanel({
       <div className="bl-section">
         <div className="bl-section-head">
           <Ban size={15} />
-          <h3>학생 검색하여 추가</h3>
+          <h3>학생 검색하여 추가 · 검색 결과 최대 20명 표시 · 요청당 최대 100명 조회</h3>
         </div>
         <label className="field">
           <span>이름 또는 학번</span>

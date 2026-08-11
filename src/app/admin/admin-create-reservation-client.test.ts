@@ -55,4 +55,17 @@ describe("admin create reservation client", () => {
       })
     ).resolves.toEqual({ kind: "error", message: "학생을 찾을 수 없습니다." });
   });
+
+  it("returns a retryable message when the request cannot reach the server", async () => {
+    csrfFetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(
+      createAdminReservation({
+        date: "2026-06-16",
+        reason: "관리자 수동 추가",
+        studentNumber: "25001",
+        studyPeriod: "EIGHTH"
+      })
+    ).resolves.toEqual({ kind: "error", message: "네트워크 연결을 확인하고 다시 시도해주세요." });
+  });
 });

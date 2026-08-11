@@ -9,6 +9,7 @@ const BooleanFlagSchema = z.union([z.literal("true"), z.literal("false")]).optio
 const MIN_PRODUCTION_SECRET_LENGTH = 24;
 const REQUIRED_PRODUCTION_KEYS = [
   "ADMIN_STUDENT_NUMBERS",
+  "APP_ORIGIN",
   "CLOSED_PERIOD_CRON_SECRET",
   "DATABASE_URL",
   "DIRECT_URL",
@@ -20,6 +21,7 @@ const ServerEnvSchema = z.object({
   ADMIN_LOGIN_ID: z.string().optional(),
   ADMIN_LOGIN_PASSWORD: z.string().optional(),
   ADMIN_STUDENT_NUMBERS: z.string().optional(),
+  APP_ORIGIN: z.string().optional(),
   CLOSED_PERIOD_CRON_SECRET: z.string().optional(),
   CRON_SECRET: z.string().optional(),
   DATABASE_URL: z.string().optional(),
@@ -43,6 +45,7 @@ export type ServerEnv = {
   readonly adminLoginId: string | null;
   readonly adminLoginPassword: string | null;
   readonly adminStudentNumbers: string | null;
+  readonly appOrigin: string | null;
   readonly closedPeriodCronSecret: string | null;
   readonly cronSecret: string | null;
   readonly databaseUrl: string | null;
@@ -72,6 +75,7 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
     adminLoginId: normalizeOptional(parsed.data.ADMIN_LOGIN_ID),
     adminLoginPassword: normalizeOptional(raw.ADMIN_LOGIN_PASSWORD),
     adminStudentNumbers: normalizeOptional(parsed.data.ADMIN_STUDENT_NUMBERS),
+    appOrigin: parseApplicationOrigin(normalizeOptional(parsed.data.APP_ORIGIN), parsed.data.NODE_ENV ?? "development"),
     closedPeriodCronSecret: normalizeOptional(parsed.data.CLOSED_PERIOD_CRON_SECRET),
     cronSecret: normalizeOptional(parsed.data.CRON_SECRET),
     databaseUrl: normalizeOptional(parsed.data.DATABASE_URL),
@@ -207,6 +211,32 @@ function normalizeOptional(value: string | undefined): string | null {
   return normalized ? normalized : null;
 }
 
+function parseApplicationOrigin(value: string | null, nodeEnv: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ServerEnvError(["APP_ORIGIN"]);
+  }
+  const isOriginOnly =
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === "" &&
+    url.username === "" &&
+    url.password === "";
+  const allowsLocalHttp =
+    (nodeEnv === "development" || nodeEnv === "test") &&
+    url.protocol === "http:" &&
+    (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  if (!isOriginOnly || (url.protocol !== "https:" && !allowsLocalHttp)) {
+    throw new ServerEnvError(["APP_ORIGIN"]);
+  }
+  return url.origin;
+}
+
 function splitEnvList(value: string | null): readonly string[] {
   if (value === null) {
     return [];
@@ -221,6 +251,7 @@ function isAnyLocalStudentLoginEnabled(env: ServerEnv): boolean {
 function missingProductionKeys(env: ServerEnv): readonly string[] {
   const values = {
     ADMIN_STUDENT_NUMBERS: env.adminStudentNumbers,
+    APP_ORIGIN: env.appOrigin,
     CLOSED_PERIOD_CRON_SECRET: env.closedPeriodCronSecret,
     DATABASE_URL: env.databaseUrl,
     DIRECT_URL: env.directUrl,

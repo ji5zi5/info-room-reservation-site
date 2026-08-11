@@ -63,7 +63,7 @@ export function ReservationSidebar({
         <span className="brand-mark">
           <DoorOpen size={22} />
         </span>
-        <span className="auth-mark" aria-label="인증 완료">
+        <span aria-hidden="true" className="auth-mark">
           <BadgeCheck size={18} />
         </span>
         <button
@@ -77,7 +77,7 @@ export function ReservationSidebar({
           <span className="sidebar-toggle-label">내 정보</span>
         </button>
       </div>
-      <div aria-hidden={!sidebarOpen} className="sidebar-content stack">
+      <div aria-hidden={!sidebarOpen} className="sidebar-content stack" inert={!sidebarOpen}>
         <div className="stack">
           <h1>정보실 예약</h1>
         </div>
@@ -116,11 +116,16 @@ export function ReservationSidebar({
           >
             <label className="field">
               <span>리로스쿨 ID</span>
-              <input value={id} onChange={(event) => onIdChange(event.currentTarget.value)} />
+              <input autoComplete="username" value={id} onChange={(event) => onIdChange(event.currentTarget.value)} />
             </label>
             <label className="field">
               <span>리로스쿨 PW</span>
-              <input type="password" value={password} onChange={(event) => onPasswordChange(event.currentTarget.value)} />
+              <input
+                autoComplete="current-password"
+                type="password"
+                value={password}
+                onChange={(event) => onPasswordChange(event.currentTarget.value)}
+              />
             </label>
             <button className="primary-button" disabled={loading} type="submit">
               <Sparkles size={18} />

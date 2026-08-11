@@ -12,6 +12,13 @@ type GetMockStudentProfile = (userId: string, now: Date) => typeof safeStudentPr
 type DbFindUnique = (query: unknown) => Promise<unknown>;
 type DbFindMany = (query: unknown) => Promise<readonly unknown[]>;
 type DbCount = (query: unknown) => Promise<number>;
+type DatabaseTransaction = {
+  readonly reservation: { readonly findMany: DbFindMany; readonly groupBy: DbFindMany };
+  readonly user: { readonly findUnique: DbFindUnique };
+  readonly userSanction: { readonly findMany: DbFindMany };
+};
+type WithDatabaseContextInput = { readonly operation: (transaction: DatabaseTransaction) => Promise<unknown> };
+type WithDatabaseContext = (input: WithDatabaseContextInput) => Promise<unknown>;
 
 const forbiddenSerializedKeys = [
   "userId",
@@ -41,11 +48,17 @@ const routeMocks = vi.hoisted(() => {
     sanctionCount: vi.fn<DbCount>(),
     sanctionFindMany: vi.fn<DbFindMany>(),
     requireUser: vi.fn<RequireUser>(),
-    userFindUnique: vi.fn<DbFindUnique>()
+    userFindUnique: vi.fn<DbFindUnique>(),
+    withDatabaseContext: vi.fn<WithDatabaseContext>()
   };
 });
 
 vi.mock("@/lib/db", () => ({ prisma: { reservation: { findMany: routeMocks.reservationFindMany, groupBy: routeMocks.reservationGroupBy }, user: { findUnique: routeMocks.userFindUnique }, userSanction: { count: routeMocks.sanctionCount, findMany: routeMocks.sanctionFindMany } } }));
+
+vi.mock("@/lib/db-context", () => ({
+  databaseActorFromSessionUser: (user: SessionUser) => ({ id: user.id, role: "STUDENT" }),
+  withDatabaseContext: routeMocks.withDatabaseContext
+}));
 
 vi.mock("@/lib/mock-dev-mode", () => ({
   isNoDatabaseMockMode: routeMocks.isNoDatabaseMockMode
@@ -158,6 +171,13 @@ describe("student profile route", () => {
     routeMocks.sanctionFindMany.mockResolvedValue([]);
     routeMocks.requireUser.mockResolvedValue(studentUser);
     routeMocks.userFindUnique.mockResolvedValue(dbStudentUser);
+    routeMocks.withDatabaseContext.mockImplementation(async (input) =>
+      input.operation({
+        reservation: { findMany: routeMocks.reservationFindMany, groupBy: routeMocks.reservationGroupBy },
+        user: { findUnique: routeMocks.userFindUnique },
+        userSanction: { findMany: routeMocks.sanctionFindMany }
+      })
+    );
   });
 
   it("returns unauthorized JSON when no student session exists", async () => {

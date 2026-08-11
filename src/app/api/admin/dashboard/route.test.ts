@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DatabaseActor } from "@/lib/db-context";
+import type { SessionUser } from "@/lib/session";
+
 const routeMocks = vi.hoisted(() => ({
   getAdminDashboard: vi.fn(),
   getMockAdminDashboard: vi.fn(),
+  databaseActorFromSessionUser: vi.fn<(user: SessionUser) => DatabaseActor>(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
   requireAdmin: vi.fn()
+}));
+
+vi.mock("@/lib/db-context", () => ({
+  databaseActorFromSessionUser: routeMocks.databaseActorFromSessionUser
 }));
 
 vi.mock("@/lib/admin-dashboard", () => ({
@@ -30,7 +38,8 @@ import { GET } from "./route";
 describe("admin dashboard route", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    routeMocks.requireAdmin.mockResolvedValue({});
+    routeMocks.requireAdmin.mockResolvedValue(admin);
+    routeMocks.databaseActorFromSessionUser.mockReturnValue({ id: admin.id, role: "ADMIN" });
     routeMocks.getMockAdminDashboard.mockReturnValue([period]);
   });
 
@@ -54,12 +63,28 @@ describe("admin dashboard route", () => {
 
     const response = await GET(new Request("http://localhost/api/admin/dashboard?date=2026-06-12"));
 
+    expect(routeMocks.getAdminDashboard).toHaveBeenCalledWith(
+      "2026-06-12",
+      expect.any(Date),
+      { id: admin.id, role: "ADMIN" }
+    );
     await expect(response.json()).resolves.toEqual({
       notificationBacklog: [backlogItem],
       periods: [period]
     });
   });
 });
+
+const admin = {
+  bookingStatus: "ACTIVE",
+  generation: 31,
+  id: "admin-dashboard-actor",
+  name: "관리자",
+  restrictionReason: null,
+  restrictedUntil: null,
+  role: "ADMIN",
+  studentNumber: "90000"
+} satisfies SessionUser;
 
 const period = {
   applicants: [],

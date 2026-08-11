@@ -39,6 +39,7 @@ type ReservationCreate = (input: unknown) => Promise<ReservationRow>;
 type ReservationFindMany = (input: unknown) => Promise<readonly unknown[]>;
 type ReservationFindUnique = (input: unknown) => Promise<ReservationRow | null>;
 type UserFindUnique = (input: unknown) => Promise<UserRow | null>;
+type GetMockAdminReservations = (input: unknown) => readonly unknown[];
 
 type TransactionClient = {
   readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
@@ -48,6 +49,7 @@ type TransactionClient = {
   readonly reservation: {
     readonly count: ReservationCount;
     readonly create: ReservationCreate;
+    readonly findMany: ReservationFindMany;
     readonly findUnique: ReservationFindUnique;
   };
   readonly user: { readonly findUnique: UserFindUnique };
@@ -62,6 +64,7 @@ const routeMocks = vi.hoisted(() => ({
   adminActionCreate: vi.fn<AdminActionCreate>(),
   auditLogCreate: vi.fn<AuditLogCreate>(),
   enforceAdminMutationRateLimit: vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
+  getMockAdminReservations: vi.fn<GetMockAdminReservations>(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
   periodSettingFindMany: vi.fn<PeriodSettingFindMany>(),
   rawCalls: [] as Array<{ readonly strings: readonly string[]; readonly values: readonly unknown[] }>,
@@ -94,7 +97,7 @@ vi.mock("@/lib/mock-admin-reservation-create", () => ({
 }));
 
 vi.mock("@/lib/mock-reservation-data", () => ({
-  getMockAdminReservations: vi.fn(() => [])
+  getMockAdminReservations: routeMocks.getMockAdminReservations
 }));
 
 vi.mock("@/lib/request-csrf", () => ({
@@ -164,6 +167,7 @@ describe("admin reservations route", () => {
     routeMocks.requireAdminSession.mockResolvedValue({ id: "session-admin", user: adminUser });
     routeMocks.validateRequestCsrf.mockResolvedValue({ kind: "ok" });
     routeMocks.enforceAdminMutationRateLimit.mockResolvedValue(allowedRateLimit);
+    routeMocks.getMockAdminReservations.mockReturnValue([]);
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
     routeMocks.userFindUnique.mockResolvedValue(targetUser);
     routeMocks.periodSettingFindMany.mockResolvedValue([
@@ -244,6 +248,151 @@ describe("admin reservations route", () => {
         }
       ]
     });
+  });
+
+  it("returns one confirmed deep-link target outside a 100-plus general fixture Given unrelated filters When reservationId is valid Then Prisma uses its exact id/date/status lookup", async () => {
+    const generalFixture = createGeneralReservationFixture();
+    const target = reservationListRow({
+      id: "deep-link-target-101",
+      status: "CONFIRMED",
+      studyPeriod: "EIGHTH",
+      userId: "target-student"
+    });
+    routeMocks.reservationFindMany.mockImplementation(async (input) =>
+      isConfirmedReservationLookup(input, target.id) ? [target] : generalFixture
+    );
+
+    const response = await GET(
+      createReadRequest({
+        query: "cannot-find-target",
+        reservationId: target.id,
+        status: "NO_SHOW",
+        studyPeriod: "FIRST",
+        userId: "other-student"
+      })
+    );
+
+    expect(generalFixture).toHaveLength(101);
+    expect(response.status).toBe(200);
+    expect(routeMocks.reservationFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 1,
+        where: { date: "2026-06-16", id: target.id, status: "CONFIRMED" }
+      })
+    );
+    await expect(response.json()).resolves.toEqual({ reservations: [reservationDto(target)] });
+  });
+
+  it("returns the same one confirmed deep-link target in mock mode Given unrelated filters When reservationId is valid Then mock filtering bypasses the general fixture", async () => {
+    const generalFixture = createGeneralReservationFixture();
+    const target = reservationListRow({
+      id: "mock-deep-link-target-101",
+      status: "CONFIRMED",
+      studyPeriod: "EIGHTH",
+      userId: "target-student"
+    });
+    routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
+    routeMocks.getMockAdminReservations.mockImplementation((input) =>
+      isMockConfirmedReservationLookup(input, target.id) ? [target] : generalFixture
+    );
+
+    const response = await GET(
+      createReadRequest({
+        query: "cannot-find-target",
+        reservationId: target.id,
+        status: "NO_SHOW",
+        studyPeriod: "FIRST",
+        userId: "other-student"
+      })
+    );
+
+    expect(generalFixture).toHaveLength(101);
+    expect(response.status).toBe(200);
+    expect(routeMocks.getMockAdminReservations).toHaveBeenCalledWith(
+      expect.objectContaining({ date: "2026-06-16", reservationId: target.id })
+    );
+    await expect(response.json()).resolves.toEqual({ reservations: [reservationDto(target)] });
+  });
+
+  it("returns no target Given reservationId names a cancelled reservation When the exact confirmed lookup runs Then cancellation cannot be opened", async () => {
+    const generalFixture = createGeneralReservationFixture();
+    const cancelled = reservationListRow({
+      id: "cancelled-deep-link-target",
+      status: "CANCELLED",
+      studyPeriod: "EIGHTH",
+      userId: "cancelled-student"
+    });
+    routeMocks.reservationFindMany.mockImplementation(async (input) =>
+      isConfirmedReservationLookup(input, cancelled.id) ? [] : [...generalFixture, cancelled]
+    );
+
+    const response = await GET(
+      createReadRequest({
+        query: "",
+        reservationId: cancelled.id,
+        status: "ALL",
+        studyPeriod: "ALL",
+        userId: null
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.reservationFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 1,
+        where: { date: "2026-06-16", id: cancelled.id, status: "CONFIRMED" }
+      })
+    );
+    await expect(response.json()).resolves.toEqual({ reservations: [] });
+  });
+
+  it("returns no target Given reservationId does not exist When the exact confirmed lookup runs Then the general fixture is not substituted", async () => {
+    const generalFixture = createGeneralReservationFixture();
+    const missingReservationId = "missing-deep-link-target";
+    routeMocks.reservationFindMany.mockImplementation(async (input) =>
+      isConfirmedReservationLookup(input, missingReservationId) ? [] : generalFixture
+    );
+
+    const response = await GET(
+      createReadRequest({
+        query: "",
+        reservationId: missingReservationId,
+        status: "ALL",
+        studyPeriod: "ALL",
+        userId: null
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.reservationFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 1,
+        where: { date: "2026-06-16", id: missingReservationId, status: "CONFIRMED" }
+      })
+    );
+    await expect(response.json()).resolves.toEqual({ reservations: [] });
+  });
+
+  it("returns no target Given reservationId is malformed When the list route reads the request Then the invalid id is never used as an exact lookup", async () => {
+    const malformedReservationId = "invalid/reservation-id";
+    routeMocks.reservationFindMany.mockResolvedValue([]);
+
+    const response = await GET(
+      createReadRequest({
+        query: "",
+        reservationId: malformedReservationId,
+        status: "CONFIRMED",
+        studyPeriod: "ALL",
+        userId: null
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.reservationFindMany).not.toHaveBeenCalled();
+    expect(routeMocks.reservationFindMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: malformedReservationId }) })
+    );
+    await expect(response.json()).resolves.toEqual({ reservations: [] });
   });
 
   it("creates a confirmed reservation for the requested student and records admin audit", async () => {
@@ -338,6 +487,7 @@ function transactionClient(): TransactionClient {
     reservation: {
       count: routeMocks.reservationCount,
       create: routeMocks.reservationCreate,
+      findMany: routeMocks.reservationFindMany,
       findUnique: routeMocks.reservationFindUnique
     },
     user: { findUnique: routeMocks.userFindUnique }
@@ -369,5 +519,109 @@ function periodRow(input: { readonly date: string; readonly studyPeriod: StudyPe
     enabled: true,
     openTime: "00:00",
     studyPeriod: input.studyPeriod
+  };
+}
+
+type ReservationListRow = ReservationRow & {
+  readonly createdAt: Date;
+  readonly user: {
+    readonly bookingStatus: string;
+    readonly id: string;
+    readonly name: string;
+    readonly role: string;
+    readonly studentNumber: string;
+  };
+};
+
+type ReadRequestInput = {
+  readonly query: string;
+  readonly reservationId: string;
+  readonly status: string;
+  readonly studyPeriod: string;
+  readonly userId: string | null;
+};
+
+function createGeneralReservationFixture(): readonly ReservationListRow[] {
+  return Array.from({ length: 101 }, (_unused, index) =>
+    reservationListRow({
+      id: `general-reservation-${index + 1}`,
+      status: "NO_SHOW",
+      studyPeriod: "FIRST",
+      userId: `general-student-${index + 1}`
+    })
+  );
+}
+
+function reservationListRow(input: {
+  readonly id: string;
+  readonly status: string;
+  readonly studyPeriod: StudyPeriod;
+  readonly userId: string;
+}): ReservationListRow {
+  return {
+    createdAt: new Date("2026-06-16T05:00:00.000Z"),
+    date: "2026-06-16",
+    id: input.id,
+    reason: null,
+    status: input.status,
+    studyPeriod: input.studyPeriod,
+    user: {
+      bookingStatus: "ACTIVE",
+      id: input.userId,
+      name: `학생 ${input.userId}`,
+      role: "STUDENT",
+      studentNumber: `3${input.userId.slice(-4).padStart(4, "0")}`
+    },
+    userId: input.userId
+  };
+}
+
+function createReadRequest(input: ReadRequestInput): Request {
+  const params = new URLSearchParams({
+    date: "2026-06-16",
+    query: input.query,
+    reservationId: input.reservationId,
+    status: input.status,
+    studyPeriod: input.studyPeriod
+  });
+  if (input.userId !== null) {
+    params.set("userId", input.userId);
+  }
+  return new Request(`https://example.test/api/admin/reservations?${params.toString()}`);
+}
+
+function isConfirmedReservationLookup(input: unknown, reservationId: string): boolean {
+  if (typeof input !== "object" || input === null || !("where" in input)) {
+    return false;
+  }
+  const where = input.where;
+  if (
+    typeof where !== "object" ||
+    where === null ||
+    !("date" in where) ||
+    !("id" in where) ||
+    !("status" in where)
+  ) {
+    return false;
+  }
+  return where.date === "2026-06-16" && where.id === reservationId && where.status === "CONFIRMED";
+}
+
+function isMockConfirmedReservationLookup(input: unknown, reservationId: string): boolean {
+  if (typeof input !== "object" || input === null || !("date" in input) || !("reservationId" in input)) {
+    return false;
+  }
+  return input.date === "2026-06-16" && input.reservationId === reservationId;
+}
+
+function reservationDto(reservation: ReservationListRow): object {
+  return {
+    createdAt: reservation.createdAt.toISOString(),
+    date: reservation.date,
+    id: reservation.id,
+    reason: reservation.reason,
+    status: reservation.status,
+    studyPeriod: reservation.studyPeriod,
+    user: reservation.user
   };
 }

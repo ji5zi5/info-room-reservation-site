@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { assertRestrictableUser } from "@/lib/admin-users";
 import { summarizeUserSessions } from "@/lib/admin-session-control";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { prisma } from "@/lib/db";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
@@ -46,42 +47,46 @@ export async function POST(
     }
     const ipHash = hashRequestClientIp(request);
 
-    const result = await prisma.$transaction(async (transaction) => {
-      const target = await transaction.user.findUnique({ where: { id: params.id } });
-      if (!target) {
-        return { kind: "not_found" } as const;
-      }
-      const guard = assertRestrictableUser({ actorId: admin.id, target });
-      if (guard.kind === "error") {
-        return { kind: "forbidden", reason: guard.reason } as const;
-      }
+    const result = await withDatabaseContext({
+      actor: databaseActorFromSessionUser(admin),
+      client: prisma,
+      operation: async (transaction) => {
+        const target = await transaction.user.findUnique({ where: { id: params.id } });
+        if (!target) {
+          return { kind: "not_found" } as const;
+        }
+        const guard = assertRestrictableUser({ actorId: admin.id, target });
+        if (guard.kind === "error") {
+          return { kind: "forbidden", reason: guard.reason } as const;
+        }
 
-      const targetSessions = await transaction.session.findMany({
-        select: { expiresAt: true },
-        where: { userId: target.id }
-      });
-      const before = summarizeUserSessions(targetSessions, new Date());
-      const deleted = await transaction.session.deleteMany({ where: { userId: target.id } });
-      const action = await transaction.adminAction.create({
-        data: {
-          action: "USER_SESSIONS_REVOKE",
-          actorId: admin.id,
-          after: JSON.stringify({ revokedSessionCount: deleted.count }),
-          before: JSON.stringify(before),
-          ipHash,
-          reason: parsed.data.reason,
-          targetUserId: target.id
-        }
-      });
-      await transaction.auditLog.create({
-        data: {
-          action: "USER_SESSIONS_REVOKE",
-          actorId: admin.id,
-          detail: JSON.stringify({ actionId: action.id, reason: parsed.data.reason, revokedSessionCount: deleted.count }),
-          userId: target.id
-        }
-      });
-      return { kind: "ok", sessionSummary: before, revokedSessionCount: deleted.count } as const;
+        const targetSessions = await transaction.session.findMany({
+          select: { expiresAt: true },
+          where: { userId: target.id }
+        });
+        const before = summarizeUserSessions(targetSessions, new Date());
+        const deleted = await transaction.session.deleteMany({ where: { userId: target.id } });
+        const action = await transaction.adminAction.create({
+          data: {
+            action: "USER_SESSIONS_REVOKE",
+            actorId: admin.id,
+            after: JSON.stringify({ revokedSessionCount: deleted.count }),
+            before: JSON.stringify(before),
+            ipHash,
+            reason: parsed.data.reason,
+            targetUserId: target.id
+          }
+        });
+        await transaction.auditLog.create({
+          data: {
+            action: "USER_SESSIONS_REVOKE",
+            actorId: admin.id,
+            detail: JSON.stringify({ actionId: action.id, reason: parsed.data.reason, revokedSessionCount: deleted.count }),
+            userId: target.id
+          }
+        });
+        return { kind: "ok", sessionSummary: before, revokedSessionCount: deleted.count } as const;
+      }
     });
 
     if (result.kind === "not_found") {

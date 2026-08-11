@@ -1,21 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DatabaseActor } from "@/lib/db-context";
 import type { SessionUser } from "@/lib/session";
 
 type RequireAdmin = () => Promise<SessionUser>;
 type IsNoDatabaseMockMode = () => boolean;
 type UserFindMany = (input: unknown) => Promise<readonly unknown[]>;
+type ScopedClient = { readonly user: { readonly findMany: UserFindMany } };
+type WithDatabaseContext = <T>(input: {
+  readonly actor: DatabaseActor;
+  readonly client: unknown;
+  readonly operation: (transaction: ScopedClient) => Promise<T>;
+}) => Promise<T>;
 
-const routeMocks = vi.hoisted(() => ({
-  isNoDatabaseMockMode: vi.fn<IsNoDatabaseMockMode>(),
-  requireAdmin: vi.fn<RequireAdmin>(),
-  userFindMany: vi.fn<UserFindMany>()
-}));
+const routeMocks = vi.hoisted(() => {
+  const rawUserFindMany = vi.fn<UserFindMany>();
+  const prismaClient = { user: { findMany: rawUserFindMany } };
+  return {
+    ForbiddenSessionError: class ForbiddenSessionError extends Error {},
+    UnauthorizedSessionError: class UnauthorizedSessionError extends Error {},
+    databaseActorFromSessionUser: vi.fn<(user: SessionUser) => DatabaseActor>(),
+    isNoDatabaseMockMode: vi.fn<IsNoDatabaseMockMode>(),
+    prismaClient,
+    rawUserFindMany,
+    requireAdmin: vi.fn<RequireAdmin>(),
+    scopedUserFindMany: vi.fn<UserFindMany>(),
+    withDatabaseContext: vi.fn<WithDatabaseContext>()
+  };
+});
 
 vi.mock("@/lib/db", () => ({
-  prisma: {
-    user: { findMany: routeMocks.userFindMany }
-  }
+  prisma: routeMocks.prismaClient
+}));
+
+vi.mock("@/lib/db-context", () => ({
+  databaseActorFromSessionUser: routeMocks.databaseActorFromSessionUser,
+  withDatabaseContext: routeMocks.withDatabaseContext
 }));
 
 vi.mock("@/lib/mock-dev-mode", () => ({
@@ -27,8 +47,8 @@ vi.mock("@/lib/mock-reservation-data", () => ({
 }));
 
 vi.mock("@/lib/session", () => ({
-  ForbiddenSessionError: class ForbiddenSessionError extends Error {},
-  UnauthorizedSessionError: class UnauthorizedSessionError extends Error {},
+  ForbiddenSessionError: routeMocks.ForbiddenSessionError,
+  UnauthorizedSessionError: routeMocks.UnauthorizedSessionError,
   requireAdmin: routeMocks.requireAdmin
 }));
 
@@ -46,17 +66,25 @@ const adminUser: SessionUser = {
 describe("admin users route", () => {
   beforeEach(() => {
     vi.resetModules();
+    routeMocks.databaseActorFromSessionUser.mockReset();
     routeMocks.isNoDatabaseMockMode.mockReset();
+    routeMocks.rawUserFindMany.mockReset();
     routeMocks.requireAdmin.mockReset();
-    routeMocks.userFindMany.mockReset();
+    routeMocks.scopedUserFindMany.mockReset();
+    routeMocks.withDatabaseContext.mockReset();
 
+    routeMocks.databaseActorFromSessionUser.mockReturnValue({ id: adminUser.id, role: "ADMIN" });
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
     routeMocks.requireAdmin.mockResolvedValue(adminUser);
-    routeMocks.userFindMany.mockResolvedValue([]);
+    routeMocks.rawUserFindMany.mockResolvedValue([]);
+    routeMocks.scopedUserFindMany.mockResolvedValue([]);
+    routeMocks.withDatabaseContext.mockImplementation(async (input) =>
+      input.operation({ user: { findMany: routeMocks.scopedUserFindMany } })
+    );
   });
 
-  it("pushes status and search filters into the Prisma query before the take limit", async () => {
-    routeMocks.userFindMany.mockResolvedValue([
+  it("reads and maps filtered users inside the authenticated ADMIN database context", async () => {
+    routeMocks.scopedUserFindMany.mockResolvedValue([
       {
         bookingStatus: "SHADOW_BANNED",
         createdAt: new Date("2026-06-01T00:00:00.000Z"),
@@ -78,7 +106,13 @@ describe("admin users route", () => {
 
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(response.status).toBe(200);
-    expect(routeMocks.userFindMany).toHaveBeenCalledWith({
+    expect(routeMocks.databaseActorFromSessionUser).toHaveBeenCalledWith(adminUser);
+    expect(routeMocks.withDatabaseContext).toHaveBeenCalledWith({
+      actor: { id: adminUser.id, role: "ADMIN" },
+      client: routeMocks.prismaClient,
+      operation: expect.any(Function)
+    });
+    expect(routeMocks.scopedUserFindMany).toHaveBeenCalledWith({
       orderBy: [{ bookingStatus: "desc" }, { studentNumber: "asc" }],
       select: {
         bookingStatus: true,
@@ -100,6 +134,7 @@ describe("admin users route", () => {
         ]
       }
     });
+    expect(routeMocks.rawUserFindMany).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       users: [
         {
@@ -115,6 +150,40 @@ describe("admin users route", () => {
         }
       ]
     });
+  });
+
+  it("returns an empty list from an empty contextual user read", async () => {
+    const { GET } = await import("./route");
+
+    const response = await GET(adminUsersRequest(""));
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.withDatabaseContext).toHaveBeenCalledOnce();
+    expect(routeMocks.scopedUserFindMany).toHaveBeenCalledOnce();
+    expect(routeMocks.rawUserFindMany).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({ users: [] });
+  });
+
+  it.each([
+    { code: "unauthorized", error: new routeMocks.UnauthorizedSessionError(), status: 401 },
+    { code: "forbidden", error: new routeMocks.ForbiddenSessionError(), status: 403 }
+  ])("preserves the $status admin session error response", async ({ code, error, status }) => {
+    routeMocks.requireAdmin.mockRejectedValue(error);
+    const { GET } = await import("./route");
+
+    const response = await GET(adminUsersRequest(""));
+
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toMatchObject({ error: { code } });
+    expect(routeMocks.withDatabaseContext).not.toHaveBeenCalled();
+  });
+
+  it("rethrows an unexpected contextual user read error", async () => {
+    routeMocks.scopedUserFindMany.mockRejectedValue(new Error("user read failed"));
+    const { GET } = await import("./route");
+
+    await expect(GET(adminUsersRequest(""))).rejects.toThrow("user read failed");
+    expect(routeMocks.rawUserFindMany).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,7 @@
 import { Prisma, type NotificationDelivery, type PeriodSetting } from "@prisma/client";
 
 import { prisma } from "./db";
+import { systemDatabaseActor, withDatabaseContext } from "./db-context";
 import { CLOSED_LIST_NOTIFICATION_KIND, isClosedPeriodForNotification, selectClosedPeriodNotificationCandidates, staleSendingDeliveryCutoff, type ClosedPeriodCandidate, type ClosedPeriodDeliverySnapshot, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
 import type {
   ClosedPeriodNotificationDeliveryRecord,
@@ -34,166 +35,173 @@ export type ClosedPeriodNotificationBacklogItem = {
 
 export const prismaClosedPeriodNotificationRepository: ClosedPeriodNotificationRepository = {
   async getDelivery(input) {
-    return findDeliveryRecord(input);
+    return withSystemNotificationContext((transaction) => findDeliveryRecord(transaction, input));
   },
 
   async getPeriod(input) {
-    const settings = await prisma.periodSetting.findMany({
-      where: {
-        date: { in: [...periodSettingReadDates(input.date)] },
-        studyPeriod: input.studyPeriod
-      }
-    });
-    const reservations = await prisma.reservation.findMany({
-      orderBy: { createdAt: "asc" },
-      select: {
-        reason: true,
-        user: { select: { name: true, studentNumber: true } }
-      },
-      where: {
-        date: input.date,
-        status: "CONFIRMED",
-        studyPeriod: input.studyPeriod
-      }
-    });
-    return toNotificationPeriod(
-      resolveEffectivePeriodSetting(input.date, input.studyPeriod, settings),
-      reservations.map((reservation) => ({
-        name: reservation.user.name,
-        reason: reservation.reason,
-        studentNumber: reservation.user.studentNumber
-      }))
-    );
-  },
-
-  async claimDelivery(input) {
-    const claimedExistingDelivery = await claimExistingDelivery(
-      input,
-      input.force === true ? FORCE_CLAIMABLE_STATUSES : NON_FORCE_CLAIMABLE_STATUSES
-    );
-    if (claimedExistingDelivery) {
-      return claimedExistingDelivery;
-    }
-
-    try {
-      const delivery = await prisma.notificationDelivery.create({
-        data: {
-          attempts: 1,
-          date: input.date,
-          kind: CLOSED_LIST_NOTIFICATION_KIND,
-          lastError: null,
-          messageIds: "[]",
-          sentAt: null,
-          status: "SENDING",
+    return withSystemNotificationContext(async (transaction) => {
+      const settings = await transaction.periodSetting.findMany({
+        where: {
+          date: { in: [...periodSettingReadDates(input.date)] },
           studyPeriod: input.studyPeriod
         }
       });
-      return toDeliveryRecord(delivery);
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        return null;
+      const reservations = await transaction.reservation.findMany({
+        orderBy: { createdAt: "asc" },
+        select: {
+          reason: true,
+          user: { select: { name: true, studentNumber: true } }
+        },
+        where: {
+          date: input.date,
+          status: "CONFIRMED",
+          studyPeriod: input.studyPeriod
+        }
+      });
+      return toNotificationPeriod(
+        resolveEffectivePeriodSetting(input.date, input.studyPeriod, settings),
+        reservations.map((reservation) => ({
+          name: reservation.user.name,
+          reason: reservation.reason,
+          studentNumber: reservation.user.studentNumber
+        }))
+      );
+    });
+  },
+
+  async claimDelivery(input) {
+    return withSystemNotificationContext(async (transaction) => {
+      const claimedExistingDelivery = await claimExistingDelivery(
+        transaction,
+        input,
+        input.force === true ? FORCE_CLAIMABLE_STATUSES : NON_FORCE_CLAIMABLE_STATUSES
+      );
+      if (claimedExistingDelivery) {
+        return claimedExistingDelivery;
       }
-      throw error;
-    }
+
+      try {
+        const delivery = await transaction.notificationDelivery.create({
+          data: {
+            attempts: 1,
+            date: input.date,
+            kind: CLOSED_LIST_NOTIFICATION_KIND,
+            lastError: null,
+            messageIds: "[]",
+            sentAt: null,
+            status: "SENDING",
+            studyPeriod: input.studyPeriod
+          }
+        });
+        return toDeliveryRecord(delivery);
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          return null;
+        }
+        throw error;
+      }
+    });
   },
 
   async claimDeliveryForReconciliation(input) {
-    const existingDelivery = await findDeliveryRecord(input);
-    if (!existingDelivery || !isReconciliationStatus(existingDelivery.status) || !existingDelivery.updatedAt) {
-      return null;
-    }
-    const result = await prisma.notificationDelivery.updateMany({
-      data: {
-        attempts: { increment: 1 },
-        failureCode: null,
-        lastError: null,
-        messageIds: "[]",
-        nextAttemptAt: null,
-        sentAt: null,
-        status: "SENDING"
-      },
-      where: {
-        date: input.date,
-        kind: CLOSED_LIST_NOTIFICATION_KIND,
-        status: existingDelivery.status,
-        studyPeriod: input.studyPeriod,
-        updatedAt: existingDelivery.updatedAt
+    return withSystemNotificationContext(async (transaction) => {
+      const existingDelivery = await findDeliveryRecord(transaction, input);
+      if (!existingDelivery || !isReconciliationStatus(existingDelivery.status) || !existingDelivery.updatedAt) {
+        return null;
       }
+      const result = await transaction.notificationDelivery.updateMany({
+        data: {
+          attempts: { increment: 1 },
+          failureCode: null,
+          lastError: null,
+          messageIds: "[]",
+          nextAttemptAt: null,
+          sentAt: null,
+          status: "SENDING"
+        },
+        where: {
+          date: input.date,
+          kind: CLOSED_LIST_NOTIFICATION_KIND,
+          status: existingDelivery.status,
+          studyPeriod: input.studyPeriod,
+          updatedAt: existingDelivery.updatedAt
+        }
+      });
+      if (result.count !== 1) {
+        return null;
+      }
+      const delivery = await findDeliveryRecord(transaction, input);
+      return delivery ? { delivery, previousStatus: existingDelivery.status } : null;
     });
-    if (result.count !== 1) {
-      return null;
-    }
-    const delivery = await findDeliveryRecord(input);
-    return delivery
-      ? { delivery, previousStatus: existingDelivery.status }
-      : null;
   },
 
   async resolveDelivery(input) {
-    const existingDelivery = await findDeliveryRecord(input);
-    if (
-      !existingDelivery ||
-      !isReconciliationStatus(existingDelivery.status) ||
-      !existingDelivery.updatedAt ||
-      (input.action === "confirm_sent" && existingDelivery.status !== "UNKNOWN")
-    ) {
-      return null;
-    }
-    const result = await prisma.notificationDelivery.updateMany({
-      data:
-        input.action === "confirm_sent"
-          ? {
-              failureCode: null,
-              lastError: null,
-              nextAttemptAt: null,
-              sentAt: input.now,
-              status: "SENT"
-            }
-          : {
-              nextAttemptAt: null,
-              sentAt: null,
-              status: "ABANDONED"
-            },
-      where: {
-        date: input.date,
-        kind: CLOSED_LIST_NOTIFICATION_KIND,
-        status: existingDelivery.status,
-        studyPeriod: input.studyPeriod,
-        updatedAt: existingDelivery.updatedAt
+    return withSystemNotificationContext(async (transaction) => {
+      const existingDelivery = await findDeliveryRecord(transaction, input);
+      if (
+        !existingDelivery ||
+        !isReconciliationStatus(existingDelivery.status) ||
+        !existingDelivery.updatedAt ||
+        (input.action === "confirm_sent" && existingDelivery.status !== "UNKNOWN")
+      ) {
+        return null;
       }
+      const result = await transaction.notificationDelivery.updateMany({
+        data:
+          input.action === "confirm_sent"
+            ? {
+                failureCode: null,
+                lastError: null,
+                nextAttemptAt: null,
+                sentAt: input.now,
+                status: "SENT"
+              }
+            : {
+                nextAttemptAt: null,
+                sentAt: null,
+                status: "ABANDONED"
+              },
+        where: {
+          date: input.date,
+          kind: CLOSED_LIST_NOTIFICATION_KIND,
+          status: existingDelivery.status,
+          studyPeriod: input.studyPeriod,
+          updatedAt: existingDelivery.updatedAt
+        }
+      });
+      if (result.count !== 1) {
+        return null;
+      }
+      const delivery = await findDeliveryRecord(transaction, input);
+      return delivery ? { delivery, previousStatus: existingDelivery.status } : null;
     });
-    if (result.count !== 1) {
-      return null;
-    }
-    const delivery = await findDeliveryRecord(input);
-    return delivery
-      ? { delivery, previousStatus: existingDelivery.status }
-      : null;
   },
 
   async saveDelivery(write) {
-    const result = await prisma.notificationDelivery.updateMany({
-      data: {
-        failureCode: write.failureCode,
-        lastError: write.lastError,
-        messageIds: JSON.stringify(write.messageIds),
-        nextAttemptAt: write.nextAttemptAt,
-        sentAt: write.status === "SENT" ? new Date() : null,
-        status: write.status
-      },
-      where: {
-        date: write.date,
-        kind: CLOSED_LIST_NOTIFICATION_KIND,
-        status: "SENDING",
-        studyPeriod: write.studyPeriod,
-        updatedAt: write.claimUpdatedAt
+    return withSystemNotificationContext(async (transaction) => {
+      const result = await transaction.notificationDelivery.updateMany({
+        data: {
+          failureCode: write.failureCode,
+          lastError: write.lastError,
+          messageIds: JSON.stringify(write.messageIds),
+          nextAttemptAt: write.nextAttemptAt,
+          sentAt: write.status === "SENT" ? new Date() : null,
+          status: write.status
+        },
+        where: {
+          date: write.date,
+          kind: CLOSED_LIST_NOTIFICATION_KIND,
+          status: "SENDING",
+          studyPeriod: write.studyPeriod,
+          updatedAt: write.claimUpdatedAt
+        }
+      });
+      if (result.count !== 1) {
+        return null;
       }
+      const delivery = await findDeliveryRecord(transaction, write);
+      return delivery ? { ...delivery, status: write.status } : null;
     });
-    if (result.count !== 1) {
-      return null;
-    }
-    const delivery = await findDeliveryRecord(write);
-    return delivery ? { ...delivery, status: write.status } : null;
   }
 };
 
@@ -201,41 +209,43 @@ export async function getDueClosedPeriodNotificationCandidates(now: Date): Promi
   const today = toKstDate(now);
   const lookbackStart = addDays(today, -(CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS - 1));
   const staleSendingBefore = staleSendingDeliveryCutoff(now);
-  const [settings, deliveries] = await Promise.all([
-    prisma.periodSetting.findMany({
-      where: {
-        OR: [
-          { date: GLOBAL_PERIOD_SETTINGS_DATE },
-          { date: { gte: lookbackStart, lte: today } }
-        ]
-      }
-    }),
-    prisma.notificationDelivery.findMany({
-      where: { date: { gte: lookbackStart, lte: today }, kind: CLOSED_LIST_NOTIFICATION_KIND }
-    })
-  ]);
+  return withSystemNotificationContext(async (transaction) => {
+    const [settings, deliveries] = await Promise.all([
+      transaction.periodSetting.findMany({
+        where: {
+          OR: [
+            { date: GLOBAL_PERIOD_SETTINGS_DATE },
+            { date: { gte: lookbackStart, lte: today } }
+          ]
+        }
+      }),
+      transaction.notificationDelivery.findMany({
+        where: { date: { gte: lookbackStart, lte: today }, kind: CLOSED_LIST_NOTIFICATION_KIND }
+      })
+    ]);
 
-  const candidates = buildLookbackCandidates({ lookbackStart, now, settings, today });
-  await materializeMissingDeliveries({ candidates, deliveries, today });
-  await prisma.notificationDelivery.updateMany({
-    data: {
-      lastError: "Discord 전송 결과 확인이 필요합니다.",
-      status: "UNKNOWN"
-    },
-    where: {
-      date: { gte: lookbackStart, lte: today },
-      kind: CLOSED_LIST_NOTIFICATION_KIND,
-      status: "SENDING",
-      updatedAt: { lte: staleSendingBefore }
-    }
-  });
-  const currentDeliveries = await prisma.notificationDelivery.findMany({
-    where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND }
-  });
-  return selectClosedPeriodNotificationCandidates({
-    deliveries: currentDeliveries.map(toDeliverySnapshot),
-    now,
-    settings: candidates.filter((candidate) => candidate.date === today)
+    const candidates = buildLookbackCandidates({ lookbackStart, now, settings, today });
+    await materializeMissingDeliveries(transaction, { candidates, deliveries, today });
+    await transaction.notificationDelivery.updateMany({
+      data: {
+        lastError: "Discord 전송 결과 확인이 필요합니다.",
+        status: "UNKNOWN"
+      },
+      where: {
+        date: { gte: lookbackStart, lte: today },
+        kind: CLOSED_LIST_NOTIFICATION_KIND,
+        status: "SENDING",
+        updatedAt: { lte: staleSendingBefore }
+      }
+    });
+    const currentDeliveries = await transaction.notificationDelivery.findMany({
+      where: { date: today, kind: CLOSED_LIST_NOTIFICATION_KIND }
+    });
+    return selectClosedPeriodNotificationCandidates({
+      deliveries: currentDeliveries.map(toDeliverySnapshot),
+      now,
+      settings: candidates.filter((candidate) => candidate.date === today)
+    });
   });
 }
 
@@ -245,22 +255,24 @@ export async function getClosedPeriodNotificationBacklogSummary(now: Date): Prom
 }> {
   const today = toKstDate(now);
   const lookbackStart = addDays(today, -(CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS - 1));
-  const deliveries = await prisma.notificationDelivery.findMany({
-    orderBy: { createdAt: "asc" },
-    take: CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS * STUDY_PERIODS.length,
-    where: {
-      date: { gte: lookbackStart, lte: today },
-      kind: CLOSED_LIST_NOTIFICATION_KIND,
-      status: { in: [...UNRESOLVED_DELIVERY_STATUSES] }
-    }
+  return withSystemNotificationContext(async (transaction) => {
+    const deliveries = await transaction.notificationDelivery.findMany({
+      orderBy: { createdAt: "asc" },
+      take: CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS * STUDY_PERIODS.length,
+      where: {
+        date: { gte: lookbackStart, lte: today },
+        kind: CLOSED_LIST_NOTIFICATION_KIND,
+        status: { in: [...UNRESOLVED_DELIVERY_STATUSES] }
+      }
+    });
+    return {
+      count: deliveries.length,
+      oldestAt: deliveries.reduce<Date | null>(
+        (oldest, delivery) => !oldest || delivery.createdAt < oldest ? delivery.createdAt : oldest,
+        null
+      )
+    };
   });
-  return {
-    count: deliveries.length,
-    oldestAt: deliveries.reduce<Date | null>(
-      (oldest, delivery) => !oldest || delivery.createdAt < oldest ? delivery.createdAt : oldest,
-      null
-    )
-  };
 }
 
 export async function getClosedPeriodNotificationReconciliationBacklog(
@@ -268,34 +280,36 @@ export async function getClosedPeriodNotificationReconciliationBacklog(
 ): Promise<readonly ClosedPeriodNotificationBacklogItem[]> {
   const today = toKstDate(now);
   const lookbackStart = addDays(today, -(CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS - 1));
-  const deliveries = await prisma.notificationDelivery.findMany({
-    orderBy: [{ date: "asc" }, { studyPeriod: "asc" }],
-    take: CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS * STUDY_PERIODS.length,
-    where: {
-      date: { gte: lookbackStart, lte: today },
-      kind: CLOSED_LIST_NOTIFICATION_KIND,
-      status: { in: [...UNRESOLVED_DELIVERY_STATUSES] }
-    }
+  return withSystemNotificationContext(async (transaction) => {
+    const deliveries = await transaction.notificationDelivery.findMany({
+      orderBy: [{ date: "asc" }, { studyPeriod: "asc" }],
+      take: CLOSED_PERIOD_BACKLOG_LOOKBACK_DAYS * STUDY_PERIODS.length,
+      where: {
+        date: { gte: lookbackStart, lte: today },
+        kind: CLOSED_LIST_NOTIFICATION_KIND,
+        status: { in: [...UNRESOLVED_DELIVERY_STATUSES] }
+      }
+    });
+    return deliveries
+      .filter(
+        (
+          delivery
+        ): delivery is typeof delivery & {
+          readonly status: ClosedPeriodNotificationReconciliationStatus;
+        } => isReconciliationStatus(parseDeliveryStatus(delivery.status))
+      )
+      .map((delivery) => ({
+        attempts: delivery.attempts,
+        date: delivery.date,
+        failureCode: delivery.failureCode,
+        lastError: delivery.lastError,
+        nextAttemptAt: delivery.nextAttemptAt,
+        status: parseDeliveryStatus(delivery.status) as ClosedPeriodNotificationReconciliationStatus,
+        studyPeriod: parseStudyPeriod(delivery.studyPeriod),
+        updatedAt: delivery.updatedAt
+      }))
+      .sort(compareBacklogItems);
   });
-  return deliveries
-    .filter(
-      (
-        delivery
-      ): delivery is typeof delivery & {
-        readonly status: ClosedPeriodNotificationReconciliationStatus;
-      } => isReconciliationStatus(parseDeliveryStatus(delivery.status))
-    )
-    .map((delivery) => ({
-      attempts: delivery.attempts,
-      date: delivery.date,
-      failureCode: delivery.failureCode,
-      lastError: delivery.lastError,
-      nextAttemptAt: delivery.nextAttemptAt,
-      status: parseDeliveryStatus(delivery.status) as ClosedPeriodNotificationReconciliationStatus,
-      studyPeriod: parseStudyPeriod(delivery.studyPeriod),
-      updatedAt: delivery.updatedAt
-    }))
-    .sort(compareBacklogItems);
 }
 
 function buildLookbackCandidates(input: {
@@ -317,7 +331,7 @@ function buildLookbackCandidates(input: {
   return candidates;
 }
 
-async function materializeMissingDeliveries(input: {
+async function materializeMissingDeliveries(transaction: Prisma.TransactionClient, input: {
   readonly candidates: readonly ClosedPeriodCandidate[];
   readonly deliveries: readonly NotificationDelivery[];
   readonly today: string;
@@ -328,7 +342,7 @@ async function materializeMissingDeliveries(input: {
       continue;
     }
     try {
-      await prisma.notificationDelivery.create({
+      await transaction.notificationDelivery.create({
         data: {
           attempts: 0,
           date: candidate.date,
@@ -351,10 +365,11 @@ async function materializeMissingDeliveries(input: {
 const candidateKey = (date: string, studyPeriod: StudyPeriod): string => `${date}:${studyPeriod}`;
 
 async function claimExistingDelivery(
+  transaction: Prisma.TransactionClient,
   input: { readonly date: string; readonly staleSendingBefore: Date; readonly studyPeriod: StudyPeriod },
   claimableStatuses: readonly ClosedPeriodNotificationStatus[]
 ): Promise<ClosedPeriodNotificationDeliveryRecord | null> {
-  const result = await prisma.notificationDelivery.updateMany({
+  const result = await transaction.notificationDelivery.updateMany({
     data: {
       attempts: { increment: 1 },
       lastError: null,
@@ -372,11 +387,14 @@ async function claimExistingDelivery(
   if (result.count !== 1) {
     return null;
   }
-  return findDeliveryRecord(input);
+  return findDeliveryRecord(transaction, input);
 }
 
-async function findDeliveryRecord(input: { readonly date: string; readonly studyPeriod: StudyPeriod }): Promise<ClosedPeriodNotificationDeliveryRecord | null> {
-  const delivery = await prisma.notificationDelivery.findUnique({
+async function findDeliveryRecord(
+  transaction: Prisma.TransactionClient,
+  input: { readonly date: string; readonly studyPeriod: StudyPeriod }
+): Promise<ClosedPeriodNotificationDeliveryRecord | null> {
+  const delivery = await transaction.notificationDelivery.findUnique({
     where: {
       date_studyPeriod_kind: {
         date: input.date,
@@ -453,6 +471,12 @@ function parseDeliveryStatus(value: string): ClosedPeriodNotificationStatus {
     default:
       return "FAILED";
   }
+}
+
+function withSystemNotificationContext<TResult>(
+  operation: (transaction: Prisma.TransactionClient) => Promise<TResult>
+): Promise<TResult> {
+  return withDatabaseContext({ actor: systemDatabaseActor(), client: prisma, operation });
 }
 
 function isReconciliationStatus(value: ClosedPeriodNotificationStatus): value is ClosedPeriodNotificationReconciliationStatus {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DatabaseActor } from "@/lib/db-context";
 import type { RateLimitResult } from "@/lib/rate-limit";
 import type { CurrentSession, SessionUser } from "@/lib/session";
 import type { StudyPeriod } from "@/lib/study-periods";
@@ -31,11 +32,18 @@ type PrismaTransaction = <T>(operation: (transaction: TransactionClient) => Prom
 type RequireAdmin = () => Promise<SessionUser>;
 type RequireAdminSession = () => Promise<CurrentSession>;
 type ValidateRequestCsrf = (request: Request, sessionId: string) => Promise<{ readonly kind: "ok" }>;
+type WithDatabaseContext = <T>(input: {
+  readonly actor: DatabaseActor;
+  readonly client: unknown;
+  readonly operation: (transaction: TransactionClient) => Promise<T>;
+}) => Promise<T>;
 
 const routeMocks = vi.hoisted(() => ({
   adminActionCreate: vi.fn<AdminActionCreate>(),
   auditLogCreate: vi.fn<AuditLogCreate>(),
+  databaseActorFromSessionUser: vi.fn<(user: SessionUser) => DatabaseActor>(),
   enforceAdminMutationRateLimit: vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
+  getPeriodSummaries: vi.fn(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
   periodSettingFindMany: vi.fn<PeriodSettingFindMany>(),
   periodSettingUpdateMany: vi.fn<PeriodSettingUpdateMany>(),
@@ -46,7 +54,13 @@ const routeMocks = vi.hoisted(() => ({
   reservationGroupBy: vi.fn<() => Promise<readonly unknown[]>>(),
   summaryPeriodSettingFindMany: vi.fn<PeriodSettingFindMany>(),
   transaction: vi.fn<PrismaTransaction>(),
-  validateRequestCsrf: vi.fn<ValidateRequestCsrf>()
+  validateRequestCsrf: vi.fn<ValidateRequestCsrf>(),
+  withDatabaseContext: vi.fn<WithDatabaseContext>()
+}));
+
+vi.mock("@/lib/db-context", () => ({
+  databaseActorFromSessionUser: routeMocks.databaseActorFromSessionUser,
+  withDatabaseContext: routeMocks.withDatabaseContext
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -63,6 +77,10 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/mock-dev-mode", () => ({
   isNoDatabaseMockMode: routeMocks.isNoDatabaseMockMode
+}));
+
+vi.mock("@/lib/period-settings", () => ({
+  getPeriodSummaries: routeMocks.getPeriodSummaries
 }));
 
 vi.mock("@/lib/request-csrf", () => ({
@@ -85,7 +103,7 @@ vi.mock("@/lib/session", () => ({
   UnauthorizedSessionError: class UnauthorizedSessionError extends Error {}
 }));
 
-import { PATCH } from "./route";
+import { GET, PATCH } from "./route";
 
 const adminUser: SessionUser = {
   bookingStatus: "ACTIVE",
@@ -108,11 +126,13 @@ describe("admin period settings route", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     routeMocks.requireMutatingRequestSafety.mockReturnValue(null);
+    routeMocks.databaseActorFromSessionUser.mockReturnValue({ id: adminUser.id, role: "ADMIN" });
     routeMocks.requireAdmin.mockResolvedValue(adminUser);
     routeMocks.requireAdminSession.mockResolvedValue({ id: "session-admin", user: adminUser });
     routeMocks.validateRequestCsrf.mockResolvedValue({ kind: "ok" });
     routeMocks.enforceAdminMutationRateLimit.mockResolvedValue(allowedRateLimit);
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
+    routeMocks.getPeriodSummaries.mockResolvedValue([]);
     routeMocks.periodSettingFindMany.mockResolvedValue([
       periodRow({ date: GLOBAL_PERIOD_SETTINGS_DATE, studyPeriod: "EIGHTH" }),
       periodRow({ date: GLOBAL_PERIOD_SETTINGS_DATE, studyPeriod: "FIRST" })
@@ -124,12 +144,34 @@ describe("admin period settings route", () => {
     routeMocks.summaryPeriodSettingFindMany.mockResolvedValue([]);
     routeMocks.reservationGroupBy.mockResolvedValue([]);
     routeMocks.transaction.mockImplementation(async (operation) => operation(transactionClient()));
+    routeMocks.withDatabaseContext.mockImplementation(async (input) => input.operation(transactionClient()));
+  });
+
+  it("reads settings using the exact authenticated ADMIN actor", async () => {
+    const response = await GET(
+      new Request("https://example.test/api/admin/period-settings?date=2026-06-16")
+    );
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.databaseActorFromSessionUser).toHaveBeenCalledWith(adminUser);
+    expect(routeMocks.getPeriodSummaries).toHaveBeenCalledWith("2026-06-16", {
+      actor: { id: adminUser.id, role: "ADMIN" }
+    });
   });
 
   it("updates existing settings for every date and stores a global default for future dates", async () => {
     const response = await PATCH(periodPatchRequest());
 
     expect(response.status).toBe(200);
+    expect(routeMocks.withDatabaseContext).toHaveBeenCalledWith({
+      actor: { id: adminUser.id, role: "ADMIN" },
+      client: expect.any(Object),
+      operation: expect.any(Function)
+    });
+    expect(routeMocks.transaction).not.toHaveBeenCalled();
+    expect(routeMocks.getPeriodSummaries).toHaveBeenCalledWith("2026-06-16", {
+      actor: { id: adminUser.id, role: "ADMIN" }
+    });
     expect(routeMocks.periodSettingFindMany).toHaveBeenCalledWith({
       select: {
         capacity: true,

@@ -65,6 +65,7 @@ export function AdminDashboardPanel({
           <span>확정 {statistics.totals.confirmedCount}건</span>
           <span>취소 {statistics.totals.cancelledCount}건</span>
           <span>노쇼 {statistics.totals.noShowCount}건</span>
+          <span>최근 최대 100건 기준</span>
           <span>
             <Users size={16} />
             {statistics.totals.uniqueStudentCount}명
@@ -75,7 +76,7 @@ export function AdminDashboardPanel({
         <section className="admin-notification-review" aria-label="확인이 필요한 Discord 알림">
           <div className="period-top">
             <h3>알림 확인 필요</h3>
-            <span className="period-badge">{notificationBacklog.length}건</span>
+            <span className="period-badge">최근 7일 · 최대 14건</span>
           </div>
           <div className="admin-notification-review-list">
             {notificationBacklog.map((item) => (
@@ -132,7 +133,7 @@ export function AdminDashboardPanel({
           <article className="metric-card" key={period.studyPeriod}>
             <div className="period-top">
               <h3>{period.label}</h3>
-              <span className="period-badge">{period.isClosed ? "마감됨" : "진행 전/진행 중"}</span>
+              <span className="period-badge">{periodWindowLabel(period.windowState)}</span>
             </div>
             <div className="metric-grid">
               <span>신청 {period.confirmedCount}명</span>
@@ -181,14 +182,14 @@ export function AdminDashboardPanel({
       {statistics ? (
         <section className="admin-offender-panel" aria-label="반복 취소 및 노쇼 학생">
           <div className="period-top">
-            <h3>반복 취소 · 노쇼</h3>
+            <h3>반복 취소 · 노쇼 · 반복 기록 상위 10명</h3>
             <AlertTriangle size={18} />
           </div>
           {statistics.repeatedOffenders.length === 0 ? (
             <p className="muted">반복 기록 없음</p>
           ) : (
             <div className="detail-lines">
-              {statistics.repeatedOffenders.map((offender) => (
+              {statistics.repeatedOffenders.slice(0, 10).map((offender) => (
                 <div className="detail-line" key={offender.userId}>
                   <span>
                     {offender.name} ({offender.studentNumber})
@@ -208,6 +209,10 @@ export function AdminDashboardPanel({
 
 function shouldOfferManualSend(period: AdminDashboardPeriod): boolean {
   return period.notification === null || period.notification.status === "PENDING";
+}
+
+function periodWindowLabel(windowState: AdminDashboardPeriod["windowState"]): string {
+  return windowState === "not_open_yet" ? "오픈 전" : windowState === "open" ? "진행 중" : "마감됨";
 }
 
 function notificationLabel(period: AdminDashboardPeriod): string {

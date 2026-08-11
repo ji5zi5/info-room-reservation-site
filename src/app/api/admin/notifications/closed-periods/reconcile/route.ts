@@ -4,6 +4,7 @@ import { z } from "zod";
 import { buildClosedListNotificationReconciliationAdminAction } from "@/lib/admin-operation-audit";
 import { createClosedPeriodNotificationService } from "@/lib/closed-period-notification-service";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { sendDiscordWebhook } from "@/lib/discord-notifications";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { prismaClosedPeriodNotificationRepository } from "@/lib/prisma-notification-repository";
@@ -82,20 +83,24 @@ export async function POST(request: Request): Promise<NextResponse> {
       result,
       studyPeriod: parsed.data.studyPeriod
     });
-    await prisma.$transaction(async (transaction) => {
-      const action = await transaction.adminAction.create({ data: actionData });
-      await transaction.auditLog.create({
-        data: {
-          action: "CLOSED_LIST_NOTIFICATION_RECONCILE",
-          actorId: session.user.id,
-          detail: JSON.stringify({
-            actionId: action.id,
-            date: parsed.data.date,
-            operation: parsed.data.action,
-            studyPeriod: parsed.data.studyPeriod
-          })
-        }
-      });
+    await withDatabaseContext({
+      actor: databaseActorFromSessionUser(session.user),
+      client: prisma,
+      operation: async (transaction) => {
+        const action = await transaction.adminAction.create({ data: actionData });
+        await transaction.auditLog.create({
+          data: {
+            action: "CLOSED_LIST_NOTIFICATION_RECONCILE",
+            actorId: session.user.id,
+            detail: JSON.stringify({
+              actionId: action.id,
+              date: parsed.data.date,
+              operation: parsed.data.action,
+              studyPeriod: parsed.data.studyPeriod
+            })
+          }
+        });
+      }
     });
     return NextResponse.json(result);
   } catch (error) {

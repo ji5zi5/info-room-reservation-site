@@ -24,8 +24,13 @@ export type ClosedPeriodNotificationInput = {
 };
 
 export type ReservationCreatedNotificationInput = {
+  readonly applicant: {
+    readonly name: string;
+    readonly studentNumber: string;
+  };
   readonly date: string;
-  readonly reservationId: string;
+  readonly embedTitleUrl?: string;
+  readonly reason: string | null;
   readonly studyPeriod: StudyPeriod;
 };
 
@@ -42,6 +47,7 @@ type DiscordEmbed = {
   readonly description: string;
   readonly fields: readonly DiscordEmbedField[];
   readonly title: string;
+  readonly url?: string;
 };
 
 type DiscordEmbedField = {
@@ -105,12 +111,18 @@ export function buildReservationCreatedDiscordPayload(
         description: `${input.date} · ${label}`,
         fields: [
           {
+            inline: true,
+            name: "신청자",
+            value: `${input.applicant.studentNumber} ${input.applicant.name}`
+          },
+          {
             inline: false,
-            name: "예약 ID",
-            value: input.reservationId
+            name: "신청 사유",
+            value: reservationReasonLabel(input.reason)
           }
         ],
-        title: "신청 알림"
+        title: "신청 알림",
+        ...(input.embedTitleUrl === undefined ? {} : { url: input.embedTitleUrl })
       }
     ],
     username: "정보실 예약"

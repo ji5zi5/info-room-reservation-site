@@ -6,6 +6,7 @@ import type { ReactElement } from "react";
 import {
   ReservationActionDialog,
   type ReservationActionConfirmInput,
+  type ReservationActionOutcome,
   type ReservationPendingAction
 } from "@/components/reservation-action-dialog";
 import { ReservationCalendar } from "@/components/reservation-calendar";
@@ -31,6 +32,7 @@ export type ReservationHomeProfileState = {
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
 
 type ReservationHomeViewProps = {
+  readonly authenticationGeneration?: number;
   readonly advancePolicy: AdvanceReservationPolicy | null;
   readonly advanceUnavailable: boolean;
   readonly currentReservations: readonly StudentCurrentReservation[];
@@ -40,13 +42,14 @@ type ReservationHomeViewProps = {
   readonly onCancel: (reservationId: string) => void;
   readonly onClosePendingAction: () => void;
   readonly onCloseProfile: () => void;
-  readonly onConfirmPendingAction: (input: ReservationActionConfirmInput) => void;
+  readonly onConfirmPendingAction: (input: ReservationActionConfirmInput) => Promise<ReservationActionOutcome>;
   readonly onIdChange: (value: string) => void;
   readonly onLogin: () => void;
   readonly onLogout: () => void;
   readonly onOpenProfile: () => void;
   readonly onPasswordChange: (value: string) => void;
   readonly onProfileRetry: () => void;
+  readonly onRefreshRetry?: () => void;
   readonly onReserve: (studyPeriod: "EIGHTH" | "FIRST") => void;
   readonly onSelectCalendarDate: (date: string) => void;
   readonly onSidebarToggle: () => void;
@@ -54,6 +57,8 @@ type ReservationHomeViewProps = {
   readonly password: string;
   readonly pendingAction: ReservationPendingAction | null;
   readonly periods: readonly PeriodSummary[];
+  readonly refreshError?: boolean;
+  readonly resourcesFresh?: boolean;
   readonly periodsRefreshing: boolean;
   readonly profileState: ReservationHomeProfileState;
   readonly reservationSubmitting: boolean;
@@ -65,6 +70,7 @@ type ReservationHomeViewProps = {
 };
 
 export function ReservationHomeView({
+  authenticationGeneration = 0,
   advancePolicy,
   advanceUnavailable,
   currentReservations,
@@ -81,6 +87,7 @@ export function ReservationHomeView({
   onOpenProfile,
   onPasswordChange,
   onProfileRetry,
+  onRefreshRetry,
   onReserve,
   onSelectCalendarDate,
   onSidebarToggle,
@@ -88,6 +95,8 @@ export function ReservationHomeView({
   password,
   pendingAction,
   periods,
+  refreshError = false,
+  resourcesFresh = true,
   periodsRefreshing,
   profileState,
   reservationSubmitting,
@@ -97,6 +106,10 @@ export function ReservationHomeView({
   toast,
   user
 }: ReservationHomeViewProps): ReactElement {
+  const dialogRefreshProps = refreshError && onRefreshRetry
+    ? { onRefreshRetry, refreshRetrying: periodsRefreshing }
+    : {};
+
   return (
     <main className="app-shell">
       <div className="workspace" data-sidebar={sidebarOpen ? "open" : "closed"}>
@@ -104,7 +117,7 @@ export function ReservationHomeView({
           currentReservations={currentReservations}
           id={id}
           loading={loading}
-          message={toast}
+          message={pendingAction ? null : toast}
           password={password}
           sidebarOpen={sidebarOpen}
           user={user}
@@ -131,14 +144,27 @@ export function ReservationHomeView({
                   <span>
                     {periodsRefreshing
                       ? "갱신 중"
+                      : refreshError
+                        ? "최신 정보를 확인하지 못했습니다."
                       : lastRefreshedAt
                         ? `마지막 갱신 ${formatKstTime(lastRefreshedAt)}`
                         : "갱신 대기"}
                   </span>
+                  {refreshError && onRefreshRetry ? (
+                    <button
+                      aria-busy={periodsRefreshing}
+                      className="ghost-button"
+                      disabled={periodsRefreshing}
+                      type="button"
+                      onClick={onRefreshRetry}
+                    >
+                      {periodsRefreshing ? "다시 불러오는 중" : "다시 불러오기"}
+                    </button>
+                  ) : null}
                 </p>
               ) : null}
             </div>
-            <StudentNotificationPanel user={user} />
+            <StudentNotificationPanel authenticationGeneration={authenticationGeneration} user={user} />
           </div>
           <div className="reservation-mode-row">
             <div className="tabbar" aria-label="예약 종류">
@@ -170,6 +196,7 @@ export function ReservationHomeView({
                   key={period.studyPeriod}
                   loading={loading}
                   period={period}
+                  actionsReady={resourcesFresh}
                   userReady={user !== null}
                   onCancel={onCancel}
                   onReserve={onReserve}
@@ -204,9 +231,11 @@ export function ReservationHomeView({
       />
       <ReservationActionDialog
         action={pendingAction}
+        errorMessage={pendingAction ? toast : null}
         loading={loading}
         onClose={onClosePendingAction}
         onConfirm={onConfirmPendingAction}
+        {...dialogRefreshProps}
       />
     </main>
   );

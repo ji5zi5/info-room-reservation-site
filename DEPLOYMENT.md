@@ -7,6 +7,7 @@ Target platform: Vercel with managed Postgres.
 - `DATABASE_URL`: `info_room_runtime` runtime connection string. On Supabase, use the transaction pooler.
 - `DIRECT_URL`: owner-only migration connection string. On Supabase, use the `postgres` session pooler.
 - `SESSION_SECRET`: long random secret for session signing.
+- `APP_ORIGIN`: canonical HTTPS production origin only, for example `https://info-room.example`; do not include a path, query, fragment, or credentials.
 - `ADMIN_STUDENT_NUMBERS`: comma-separated student numbers with admin access.
 - `CLOSED_PERIOD_CRON_SECRET`: bearer token used only by the closed-period notification cron.
 - `MAINTENANCE_CRON_SECRET`: a different bearer token used only by the maintenance cron.

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import {
@@ -18,10 +20,15 @@ import { cancelMockReservation } from "@/lib/mock-reservation-data";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
-import { buildStudentCancellationRestriction } from "@/lib/reservation-service";
 import { enforceReservationRateLimit } from "@/lib/route-rate-limit";
 import { createMockSessionToken, requireSession, setSessionCookie, UnauthorizedSessionError } from "@/lib/session";
 import { maskStudentFacingSessionUser } from "@/lib/student-facing-session";
+
+type StudentCancellationCapabilityOutcome = "CANCELLED" | "FORBIDDEN" | "NOT_CANCELLABLE" | "NOT_FOUND";
+
+type StudentCancellationCapabilityRow = {
+  readonly outcome: string;
+};
 
 export async function DELETE(request: Request, context: { readonly params: Promise<{ readonly id: string }> }): Promise<NextResponse> {
   const requestSafetyError = requireMutatingRequestSafety(request);
@@ -69,87 +76,30 @@ export async function DELETE(request: Request, context: { readonly params: Promi
       client: prisma,
       lockKeys: [userMutationLockKey(user.id)],
       operation: async (transaction) => {
-      const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
-      if (!reservation) {
-        return { kind: "not_found" } as const;
-      }
-      if (reservation.userId !== user.id && user.role !== "ADMIN") {
-        return { kind: "forbidden" } as const;
-      }
-      if (reservation.status === "CANCELLED") {
+        const rows = await transaction.$queryRaw<readonly StudentCancellationCapabilityRow[]>`
+          SELECT app_private.cancel_owned_student_reservation(
+            ${params.id},
+            ${ipHash},
+            ${randomUUID()},
+            ${randomUUID()},
+            ${randomUUID()}
+          ) AS outcome
+        `;
+        const outcome = parseStudentCancellationCapabilityOutcome(rows[0]?.outcome);
+        if (outcome === "NOT_FOUND") {
+          return { kind: "not_found" } as const;
+        }
+        if (outcome === "FORBIDDEN") {
+          return { kind: "forbidden" } as const;
+        }
+        if (outcome === "NOT_CANCELLABLE") {
+          return { kind: "not_cancellable" } as const;
+        }
+        const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
+        if (!reservation) {
+          throw new InvalidStudentCancellationCapabilityResultError("cancelled reservation was not visible to its actor");
+        }
         return { kind: "cancelled", reservation } as const;
-      }
-      if (reservation.status !== "CONFIRMED") {
-        return { kind: "not_cancellable" } as const;
-      }
-
-      const transition = await transaction.reservation.updateMany({
-        data: { status: "CANCELLED" },
-        where: { id: reservation.id, status: "CONFIRMED" }
-      });
-      if (transition.count !== 1) {
-        return { kind: "not_cancellable" } as const;
-      }
-      const updated = { ...reservation, status: "CANCELLED" } as const;
-
-      if (reservation.userId === user.id && user.role !== "ADMIN" && user.bookingStatus !== "SHADOW_BANNED") {
-        const restriction = buildStudentCancellationRestriction(new Date());
-        const updatedUser = await transaction.user.update({
-          data: restriction,
-          where: { id: user.id }
-        });
-        const action = await transaction.adminAction.create({
-          data: {
-            action: "STUDENT_RESERVATION_CANCEL_RESTRICTION",
-            actorId: user.id,
-            after: JSON.stringify({
-              bookingStatus: updatedUser.bookingStatus,
-              reservationStatus: updated.status,
-              restrictionReason: updatedUser.restrictionReason,
-              restrictedUntil: updatedUser.restrictedUntil
-            }),
-            before: JSON.stringify({ reservationStatus: reservation.status }),
-            ipHash,
-            reason: updatedUser.restrictionReason,
-            reservationId: reservation.id,
-            targetUserId: user.id
-          }
-        });
-        await transaction.userSanction.updateMany({
-          data: {
-            revokedAt: new Date(),
-            revokedById: user.id,
-            revokedReason: "새 예약 취소 제한으로 대체",
-            status: "REVOKED"
-          },
-          where: {
-            status: "ACTIVE",
-            type: "CANCELLATION_RESTRICTION",
-            userId: user.id
-          }
-        });
-        await transaction.userSanction.create({
-          data: {
-            actorId: user.id,
-            endsAt: restriction.restrictedUntil,
-            reason: updatedUser.restrictionReason ?? "예약 취소 제한",
-            sourceActionId: action.id,
-            status: "ACTIVE",
-            type: "CANCELLATION_RESTRICTION",
-            userId: user.id
-          }
-        });
-        await transaction.auditLog.create({
-          data: {
-            action: "STUDENT_RESERVATION_CANCEL_RESTRICTION",
-            actorId: user.id,
-            detail: JSON.stringify({ actionId: action.id, reservationId: reservation.id, restrictedUntil: restriction.restrictedUntil }),
-            userId: user.id
-          }
-        });
-      }
-
-      return { kind: "cancelled", reservation: updated } as const;
       }
     });
 
@@ -171,5 +121,24 @@ export async function DELETE(request: Request, context: { readonly params: Promi
       return jsonTransactionRetryExhaustedError();
     }
     throw error;
+  }
+}
+
+function parseStudentCancellationCapabilityOutcome(value: string | undefined): StudentCancellationCapabilityOutcome {
+  switch (value) {
+    case "CANCELLED":
+    case "FORBIDDEN":
+    case "NOT_CANCELLABLE":
+    case "NOT_FOUND":
+      return value;
+    default:
+      throw new InvalidStudentCancellationCapabilityResultError(value ?? "missing outcome");
+  }
+}
+
+class InvalidStudentCancellationCapabilityResultError extends Error {
+  public constructor(detail: string) {
+    super(`Invalid student cancellation capability result: ${detail}`);
+    this.name = "InvalidStudentCancellationCapabilityResultError";
   }
 }

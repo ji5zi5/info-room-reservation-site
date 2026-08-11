@@ -91,6 +91,50 @@ describe("reservation service", () => {
     ).resolves.toMatchObject({ kind: "error", reason: "duplicate" });
   });
 
+  it.each(["CANCELLED", "NO_SHOW"] as const)(
+    "returns duplicate before full capacity for an existing %s identity",
+    async (status) => {
+      // Given
+      const innerStore = {
+        countConfirmedReservations: async () => 1,
+        createReservation: async () => { throw new Error("Historical reservation identities must not create reservations."); },
+        findReservation: async () => ({
+          date: "2026-06-11",
+          id: "historical-reservation",
+          reason: "이전 예약",
+          status,
+          studyPeriod: "EIGHTH" as const,
+          userId: "user-1"
+        }),
+        getPeriodSetting: async () => ({
+          capacity: 1,
+          closeTime: "23:00",
+          date: "2026-06-11",
+          enabled: true,
+          openTime: "08:00",
+          studyPeriod: "EIGHTH" as const
+        }),
+        getUserBookingState: async () => ({ bookingStatus: "ACTIVE" as const, restrictedUntil: null })
+      } satisfies ReservationStore;
+
+      // When
+      const result = await reserveStudyPeriod({
+        date: "2026-06-11",
+        now: new Date("2026-06-11T09:00:00+09:00"),
+        reason: "다시 예약",
+        store: {
+          transaction: async <T>(_lockKeys: readonly string[], operation: (store: ReservationStore) => Promise<T>) =>
+            operation(innerStore)
+        } satisfies TransactionalReservationStore,
+        studyPeriod: "EIGHTH",
+        userId: "user-1"
+      });
+
+      // Then
+      expect(result).toEqual({ kind: "error", reason: "duplicate" });
+    }
+  );
+
   it("allows advance reservations after the daily configured open time", async () => {
     const store = createMemoryReservationStore({
       capacity: 10,

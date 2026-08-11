@@ -12,15 +12,26 @@ describe("student reservation status", () => {
     expect(
       collectStudentCurrentReservations({
         "2026-06-15": [
-          { label: "8면학", myReservationId: "reservation-1" },
-          { label: "1면학", myReservationId: null }
+          { label: "8면학", myReservationId: "reservation-1", studyPeriod: "EIGHTH" },
+          { label: "1면학", myReservationId: null, studyPeriod: "FIRST" }
         ],
-        "2026-06-16": [{ label: "1면학", myReservationId: "reservation-2" }]
+        "2026-06-16": [{ label: "1면학", myReservationId: "reservation-2", studyPeriod: "FIRST" }]
       })
     ).toEqual([
       { canCancel: true, date: "2026-06-15", label: "8면학", reservationId: "reservation-1" },
       { canCancel: true, date: "2026-06-16", label: "1면학", reservationId: "reservation-2" }
     ]);
+  });
+
+  it("orders same-day reservations as 8면학 then 1면학", () => {
+    const reservations = collectStudentCurrentReservations({
+      "2026-06-15": [
+        { label: "1면학", myReservationId: "reservation-2", studyPeriod: "FIRST" },
+        { label: "8면학", myReservationId: "reservation-1", studyPeriod: "EIGHTH" }
+      ]
+    });
+
+    expect(reservations.map(({ label }) => label)).toEqual(["8면학", "1면학"]);
   });
 
   it("shows active cancellation restrictions and the next available time", () => {

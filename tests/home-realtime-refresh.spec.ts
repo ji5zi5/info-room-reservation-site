@@ -135,7 +135,7 @@ test("background refresh shows progress without removing current period cards", 
   await expect(page.locator(".refresh-status")).not.toContainText("갱신 중");
 });
 
-test("failed background refresh keeps the last visible period status", async ({ page }) => {
+test("failed background refresh keeps stale period status visible but blocks actions", async ({ page }) => {
   let failRefresh = false;
   await mockPeriodRoutes(page, () => false, () => failRefresh);
   await login(page, `failed-refresh-${Date.now()}`);
@@ -146,7 +146,8 @@ test("failed background refresh keeps the last visible period status", async ({ 
   await expect(page.locator(".period-card")).toHaveCount(2);
   await expect(
     page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: "8면학 예약" })
-  ).toBeVisible();
+  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "다시 불러오기" })).toBeVisible();
 });
 
 test("reservation click rechecks the server before opening the confirmation dialog", async ({ page }) => {

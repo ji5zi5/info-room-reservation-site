@@ -147,7 +147,10 @@ export async function retrySerializableMutationTransaction<T>(operation: () => P
 }
 
 export function isSerializableTransactionConflict(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    (error.code === "P2034" || (error.code === "P2010" && error.meta?.code === "40001"))
+  );
 }
 
 export function periodMutationLockKey(date: string, studyPeriod: StudyPeriod): string {

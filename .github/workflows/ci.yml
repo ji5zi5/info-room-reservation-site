@@ -15,6 +15,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/info_room_build
       DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/info_room_build
+      APP_ORIGIN: https://example.test
       SESSION_SECRET: ci-session-secret-replace-in-runtime
       RIRO_MOCK_LOGIN: "false"
       ENABLE_LOCAL_ADMIN: "false"
@@ -51,7 +52,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/info_room_test
       DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5432/info_room_test
-      INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/info_room_test
       RETENTION_PURGE_ENABLED: "false"
     services:
       postgres:
@@ -76,7 +76,14 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npx prisma migrate deploy
-      - run: npm run test:integration
+      - name: Configure CI runtime role
+        run: >-
+          psql "$DATABASE_URL" --set=ON_ERROR_STOP=1
+          --command "ALTER ROLE info_room_runtime WITH LOGIN PASSWORD 'ci-runtime-password';"
+      - name: Run integration tests as runtime role
+        run: npm run test:integration
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://info_room_runtime:ci-runtime-password@127.0.0.1:5432/info_room_test
 
   browser-smoke:
     runs-on: ubuntu-latest

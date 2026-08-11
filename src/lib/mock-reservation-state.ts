@@ -13,11 +13,13 @@ declare global {
 
 export type MockReservation = Reservation & {
   readonly createdAt: Date;
+  readonly updatedAt: Date;
   readonly user: Pick<MockUser, "bookingStatus" | "id" | "name" | "role" | "studentNumber">;
 };
 
 export type MockCancelResult =
   | { readonly kind: "cancelled"; readonly reservation: MockReservation; readonly user: SessionUser }
+  | { readonly kind: "not_cancellable"; readonly reservation: MockReservation; readonly user: SessionUser }
   | { readonly kind: "forbidden" }
   | { readonly kind: "not_found" };
 

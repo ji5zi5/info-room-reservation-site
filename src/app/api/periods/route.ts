@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { addDays, toKstDate } from "@/lib/date";
+import { systemDatabaseActor } from "@/lib/db-context";
 import { jsonError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { getMockPeriodSummaries } from "@/lib/mock-period-summaries";
@@ -53,7 +54,10 @@ export async function GET(request: Request): Promise<NextResponse> {
               }))
           })
         : StudentPeriodWeekPayloadSchema.parse(
-            await getPeriodWeekSummaries(weekStart, { currentUserId: user.id })
+            await getPeriodWeekSummaries(weekStart, {
+              actor: systemDatabaseActor(),
+              currentUserId: user.id
+            })
           );
       return revalidatedJsonResponse(request, user.id, payload);
     }
@@ -64,7 +68,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     }
     const periods = isNoDatabaseMockMode()
       ? getMockPeriodSummaries(date, { currentUserId: user.id })
-      : await getPeriodSummaries(date, { currentUserId: user.id });
+      : await getPeriodSummaries(date, { actor: systemDatabaseActor(), currentUserId: user.id });
     return revalidatedJsonResponse(request, user.id, { periods: periods.map(toStudentPeriodSummary) });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {

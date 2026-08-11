@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { buildPeriodSettingsPatchAdminAction } from "@/lib/admin-operation-audit";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
@@ -36,12 +37,14 @@ const PeriodPatchSchema = z.object({
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
     const date = new URL(request.url).searchParams.get("date") ?? toKstDate(new Date());
     if (isNoDatabaseMockMode()) {
       return NextResponse.json({ periods: getMockAdminPeriodSettings(date) });
     }
-    return NextResponse.json({ periods: await getPeriodSummaries(date) });
+    return NextResponse.json({
+      periods: await getPeriodSummaries(date, { actor: databaseActorFromSessionUser(admin) })
+    });
   } catch (error) {
     return adminBoundaryError(error);
   }
@@ -70,77 +73,84 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       return NextResponse.json({ periods: updateMockAdminPeriodSettings(parsed.data.date, parsed.data.periods) });
     }
     const admin = session.user;
+    const actor = databaseActorFromSessionUser(admin);
     const rateLimitResult = await enforceAdminMutationRateLimit(request, admin.id);
     if (rateLimitResult.kind === "blocked") {
       return jsonRateLimitError(rateLimitResult);
     }
     const ipHash = hashRequestClientIp(request);
 
-    await prisma.$transaction(async (transaction) => {
-      const beforeRows = await transaction.periodSetting.findMany({
-        select: {
-          capacity: true,
-          closeTime: true,
-          date: true,
-          enabled: true,
-          openTime: true,
-          studyPeriod: true
-        },
-        where: { date: { in: [...periodSettingReadDates(parsed.data.date)] } }
-      });
-      const before = STUDY_PERIODS.map((studyPeriod) =>
-        resolveEffectivePeriodSetting(parsed.data.date, studyPeriod, beforeRows)
-      );
-      for (const period of parsed.data.periods) {
-        const periodData = {
-          capacity: period.capacity,
-          closeTime: period.closeTime,
-          enabled: period.enabled,
-          openTime: period.openTime
-        };
-        await transaction.periodSetting.updateMany({
-          data: periodData,
-          where: { studyPeriod: period.studyPeriod }
-        });
-        await transaction.periodSetting.upsert({
-          create: {
-            ...periodData,
-            date: GLOBAL_PERIOD_SETTINGS_DATE,
-            studyPeriod: period.studyPeriod
+    await withDatabaseContext({
+      actor,
+      client: prisma,
+      operation: async (transaction) => {
+        const beforeRows = await transaction.periodSetting.findMany({
+          select: {
+            capacity: true,
+            closeTime: true,
+            date: true,
+            enabled: true,
+            openTime: true,
+            studyPeriod: true
           },
-          update: periodData,
-          where: {
-            date_studyPeriod: {
+          where: { date: { in: [...periodSettingReadDates(parsed.data.date)] } }
+        });
+        const before = STUDY_PERIODS.map((studyPeriod) =>
+          resolveEffectivePeriodSetting(parsed.data.date, studyPeriod, beforeRows)
+        );
+        for (const period of parsed.data.periods) {
+          const periodData = {
+            capacity: period.capacity,
+            closeTime: period.closeTime,
+            enabled: period.enabled,
+            openTime: period.openTime
+          };
+          await transaction.periodSetting.updateMany({
+            data: periodData,
+            where: { studyPeriod: period.studyPeriod }
+          });
+          await transaction.periodSetting.upsert({
+            create: {
+              ...periodData,
               date: GLOBAL_PERIOD_SETTINGS_DATE,
               studyPeriod: period.studyPeriod
+            },
+            update: periodData,
+            where: {
+              date_studyPeriod: {
+                date: GLOBAL_PERIOD_SETTINGS_DATE,
+                studyPeriod: period.studyPeriod
+              }
             }
+          });
+        }
+        const action = await transaction.adminAction.create({
+          data: buildPeriodSettingsPatchAdminAction({
+            actorId: admin.id,
+            after: parsed.data.periods,
+            before,
+            date: parsed.data.date,
+            ipHash
+          })
+        });
+        await transaction.auditLog.create({
+          data: {
+            action: "PERIOD_SETTINGS_PATCH",
+            actorId: admin.id,
+            detail: JSON.stringify({
+              actionId: action.id,
+              date: parsed.data.date,
+              periods: parsed.data.periods.length,
+              scope: "ALL_DATES"
+            })
           }
         });
       }
-      const action = await transaction.adminAction.create({
-        data: buildPeriodSettingsPatchAdminAction({
-          actorId: admin.id,
-          after: parsed.data.periods,
-          before,
-          date: parsed.data.date,
-          ipHash
-        })
-      });
-      await transaction.auditLog.create({
-        data: {
-          action: "PERIOD_SETTINGS_PATCH",
-          actorId: admin.id,
-          detail: JSON.stringify({
-            actionId: action.id,
-            date: parsed.data.date,
-            periods: parsed.data.periods.length,
-            scope: "ALL_DATES"
-          })
-        }
-      });
     });
 
-    return NextResponse.json({ periods: await getPeriodSummaries(parsed.data.date) });
+    return NextResponse.json({
+      periods: await getPeriodSummaries(parsed.data.date, { actor })
+    });
   } catch (error) {
     return adminBoundaryError(error);
   }

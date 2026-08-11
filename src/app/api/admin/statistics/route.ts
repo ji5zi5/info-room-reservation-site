@@ -4,6 +4,7 @@ import { z } from "zod";
 import { buildAdminStatistics } from "@/lib/admin-statistics";
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { jsonError } from "@/lib/http";
 import { getMockAdminStatistics } from "@/lib/mock-admin-data";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
@@ -28,7 +29,7 @@ const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
     const url = new URL(request.url);
     const parsed = StatisticsQuerySchema.safeParse({
       from: url.searchParams.get("from") ?? undefined,
@@ -55,30 +56,35 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json({ statistics: getMockAdminStatistics({ from, to }) });
     }
 
-    const [reservations, settings] = await Promise.all([
-      prisma.reservation.findMany({
-        include: {
-          user: {
+    const [reservations, settings] = await withDatabaseContext({
+      actor: databaseActorFromSessionUser(admin),
+      client: prisma,
+      operation: (transaction) =>
+        Promise.all([
+          transaction.reservation.findMany({
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  studentNumber: true
+                }
+              }
+            },
+            where: { date: { gte: from, lte: to } }
+          }),
+          transaction.periodSetting.findMany({
             select: {
-              id: true,
-              name: true,
-              studentNumber: true
+              capacity: true,
+              date: true,
+              studyPeriod: true
+            },
+            where: {
+              OR: [{ date: GLOBAL_PERIOD_SETTINGS_DATE }, { date: { gte: from, lte: to } }]
             }
-          }
-        },
-        where: { date: { gte: from, lte: to } }
-      }),
-      prisma.periodSetting.findMany({
-        select: {
-          capacity: true,
-          date: true,
-          studyPeriod: true
-        },
-        where: {
-          OR: [{ date: GLOBAL_PERIOD_SETTINGS_DATE }, { date: { gte: from, lte: to } }]
-        }
-      })
-    ]);
+          })
+        ])
+    });
 
     return NextResponse.json({
       statistics: buildAdminStatistics({ from, reservations, settings, to })

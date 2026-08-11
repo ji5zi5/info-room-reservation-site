@@ -19,6 +19,12 @@ body {
   overflow-x: hidden;
 }
 
+@media (max-width: 767px) {
+  html {
+    scrollbar-gutter: auto;
+  }
+}
+
 button,
 input,
 select {

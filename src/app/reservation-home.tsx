@@ -3,25 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getAdvanceReservationPolicy, isSelectableAdvanceDate } from "@/lib/advance-reservation-policy";
-import { collectStudentCurrentReservations, previewCancellationRestrictedUntil } from "@/lib/student-reservation-status";
-import type { ReservationActionConfirmInput, ReservationPendingAction } from "@/components/reservation-action-dialog";
+import { collectStudentCurrentReservations } from "@/lib/student-reservation-status";
 import { AdminConsole } from "./admin/admin-console";
-import { readApiErrorMessage, readCurrentUser, readLoginPayload, readStudentProfilePayload } from "./client-api-response";
-import { csrfFetch, resetCsrfToken } from "./csrf-fetch";
-import { consumeAdminRedirectMessage, reservationRestrictionMessage } from "./reservation-home-helpers";
-import { canReservePeriod } from "./reservation-home-reservation-rules";
+import { consumeAdminRedirectMessage } from "./reservation-home-helpers";
 import { useReservationPeriodRefresh } from "./reservation-home-period-refresh";
-import { ReservationHomeView, type ReservationHomeProfileState, type ReservationHomeTab } from "./reservation-home-view";
+import type { ReservationActionAuthorization } from "./reservation-home-period-contracts";
+import { ReservationHomeView, type ReservationHomeTab } from "./reservation-home-view";
 import { isCompactReservationView } from "./reservation-viewport";
-import type { ReservationSidebarUser } from "./reservation-sidebar";
-import { useReservationSubmit } from "./use-reservation-submit";
+import { useStudentReservationActions } from "./use-student-reservation-actions";
+import { useStudentSessionProfileResource } from "./use-student-session-profile-resource";
 
 type AdvanceReservationPolicy = ReturnType<typeof getAdvanceReservationPolicy>;
 
-const EMPTY_PROFILE_STATE: ReservationHomeProfileState = { errorMessage: null, loading: false, open: false, profile: null };
-
 export function ReservationHomePage(): React.ReactElement {
-  const [user, setUser] = useState<ReservationSidebarUser | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [tab, setTab] = useState<ReservationHomeTab>("today");
   const [advancePolicy, setAdvancePolicy] = useState<AdvanceReservationPolicy | null>(null);
@@ -29,37 +23,91 @@ export function ReservationHomePage(): React.ReactElement {
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [pendingAction, setPendingAction] = useState<ReservationPendingAction | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const profileRefreshPromiseRef = useRef<Promise<void> | null>(null);
-  const [profileState, setProfileState] = useState<ReservationHomeProfileState>(EMPTY_PROFILE_STATE);
-
-  const refreshMe = useCallback(async (): Promise<void> => {
-    const response = await fetch("/api/me");
-    setUser(await readCurrentUser(response));
-  }, []);
-
+  const clearPeriodsRef = useRef<() => void>(() => undefined);
+  const clearPendingActionRef = useRef<() => void>(() => undefined);
+  const {
+    authenticationGeneration,
+    closeProfile,
+    getAuthenticationOwner,
+    getSessionFreshness,
+    login,
+    logout,
+    openProfile,
+    profileOpen,
+    profileState,
+    refreshMe,
+    refreshProfile,
+    sessionError,
+    sessionFresh,
+    user
+  } = useStudentSessionProfileResource({
+    clearPendingActionRef,
+    clearPeriodsRef,
+    id,
+    password,
+    setLoading,
+    setSidebarOpen,
+    setToast
+  });
   const isAdmin = user?.role === "ADMIN";
   const advanceUnavailable = tab === "advance" && advancePolicy?.kind === "unavailable";
   const todayDate = advancePolicy?.today ?? "";
   const targetDate = tab === "advance" ? advanceDate : todayDate;
-  const { calendarPeriodsByDate, clearPeriods, lastRefreshedAt, periods, periodsRefreshing, refreshPeriods } =
-    useReservationPeriodRefresh({
-      advancePolicy,
-      advanceUnavailable,
-      refreshMe,
-      targetDate,
-      user
-    });
+  const {
+    calendarPeriodsByDate,
+    clearPeriods,
+    getPeriodFreshness,
+    lastRefreshedAt,
+    periodError,
+    periodFresh,
+    periods,
+    periodsRefreshing,
+    refreshPeriodWeek,
+    refreshPeriods
+  } = useReservationPeriodRefresh({
+    advancePolicy,
+    advanceUnavailable,
+    getAuthenticationOwner,
+    refreshMe,
+    targetDate,
+    user
+  });
+  clearPeriodsRef.current = clearPeriods;
+  const getReservationActionAuthorization = useCallback((): ReservationActionAuthorization => ({
+    ...getAuthenticationOwner(),
+    periodFresh: getPeriodFreshness(),
+    sessionFresh: getSessionFreshness()
+  }), [getAuthenticationOwner, getPeriodFreshness, getSessionFreshness]);
+  const {
+    clearPendingAction,
+    confirmPendingAction,
+    pendingAction,
+    requestCancel,
+    requestReserve,
+    reservationSubmitting
+  } = useStudentReservationActions({
+    clearPendingActionRef,
+    getReservationActionAuthorization,
+    periods,
+    profileOpen,
+    refreshMe,
+    refreshPeriods,
+    refreshProfile,
+    setLoading,
+    setToast,
+    targetDate,
+    user
+  });
+  const resourcesFresh = sessionFresh && periodFresh;
   const currentReservations = collectStudentCurrentReservations(calendarPeriodsByDate);
 
   useEffect(() => {
-    void refreshMe();
     const adminMessage = consumeAdminRedirectMessage();
     if (adminMessage) {
       setToast(adminMessage);
     }
-  }, [refreshMe]);
+  }, []);
 
   useEffect(() => {
     const policy = getAdvanceReservationPolicy(new Date());
@@ -72,98 +120,6 @@ export function ReservationHomePage(): React.ReactElement {
       setSidebarOpen(false);
     }
   }, [user?.id, user?.role]);
-
-  async function refreshProfile(): Promise<void> {
-    if (profileRefreshPromiseRef.current) {
-      await profileRefreshPromiseRef.current;
-      return;
-    }
-    const refresh = (async (): Promise<void> => {
-      setProfileState((current) => ({ ...current, errorMessage: null, loading: true }));
-      const result = await readStudentProfilePayload(await fetch("/api/me/profile"));
-      switch (result.kind) {
-        case "loaded":
-          setProfileState((current) => ({ ...current, errorMessage: null, loading: false, profile: result.profile }));
-          return;
-        case "error":
-          setProfileState((current) => ({ ...current, errorMessage: result.message, loading: false, profile: null }));
-          return;
-      }
-    })();
-    profileRefreshPromiseRef.current = refresh;
-    try {
-      await refresh;
-    } finally {
-      profileRefreshPromiseRef.current = null;
-    }
-  }
-
-  const { reservationSubmitting, reserve } = useReservationSubmit({
-    profileOpen: profileState.open,
-    refreshPeriods,
-    refreshProfile,
-    setLoading,
-    setToast,
-    targetDate
-  });
-
-  async function login(): Promise<void> {
-    setLoading(true);
-    setToast(null);
-    const response = await fetch("/api/auth/riro/login", {
-      body: JSON.stringify({ id, password }),
-      headers: { "content-type": "application/json" },
-      method: "POST"
-    });
-    const payload = await readLoginPayload(response);
-    setLoading(false);
-    if (!response.ok || !payload.user) {
-      setToast(payload.errorMessage ?? "로그인에 실패했습니다.");
-      return;
-    }
-    setUser(payload.user);
-    if (payload.user.role !== "ADMIN" && isCompactReservationView()) {
-      setSidebarOpen(false);
-    }
-    setToast(payload.user.role === "ADMIN" ? "관리자 화면을 불러옵니다." : `${payload.user.name}님, 예약 준비 완료`);
-  }
-
-  async function logout(): Promise<void> {
-    const response = await csrfFetch("/api/auth/logout", { method: "POST" });
-    if (!response.ok) {
-      setToast((await readApiErrorMessage(response)) ?? "로그아웃에 실패했습니다.");
-      return;
-    }
-    resetCsrfToken();
-    setUser(null);
-    clearPeriods();
-    setProfileState(EMPTY_PROFILE_STATE);
-    setToast("로그아웃되었습니다.");
-  }
-
-  async function requestReserve(studyPeriod: "EIGHTH" | "FIRST"): Promise<void> {
-    const restrictionMessage = reservationRestrictionMessage(user);
-    if (restrictionMessage) {
-      setToast(restrictionMessage);
-      return;
-    }
-    const period = (await refreshPeriods(targetDate)).find((candidate) => candidate.studyPeriod === studyPeriod);
-    if (!canReservePeriod(period)) {
-      setToast("최신 좌석 수를 반영했습니다. 다시 확인하세요.");
-      return;
-    }
-    setPendingAction({ kind: "reserve", label: period?.label ?? "예약", studyPeriod });
-  }
-
-  function requestCancel(reservationId: string): void {
-    const period = periods.find((candidate) => candidate.myReservationId === reservationId);
-    setPendingAction({
-      kind: "cancel",
-      label: period?.label ?? "예약",
-      reservationId,
-      restrictedUntilPreview: previewCancellationRestrictedUntil()
-    });
-  }
 
   function selectCalendarDate(date: string): void {
     if (!advancePolicy) {
@@ -179,41 +135,8 @@ export function ReservationHomePage(): React.ReactElement {
     }
   }
 
-  function confirmPendingAction(input: ReservationActionConfirmInput): void {
-    const action = pendingAction;
-    if (!action) {
-      return;
-    }
-    setPendingAction(null);
-    if (action.kind === "reserve") {
-      if (input.kind !== "reserve") {
-        return;
-      }
-      void reserve(action.studyPeriod, input.reason);
-      return;
-    }
-    if (input.kind !== "cancel") {
-      return;
-    }
-    void cancelReservation(action.reservationId);
-  }
-
-  async function cancelReservation(reservationId: string): Promise<void> {
-    setLoading(true);
-    const response = await csrfFetch(`/api/reservations/${reservationId}`, { method: "DELETE" });
-    const errorMessage = await readApiErrorMessage(response);
-    setLoading(false);
-    setToast(response.ok ? "예약이 취소되었습니다. 3일간 예약이 제한됩니다." : errorMessage ?? "예약 취소에 실패했습니다.");
-    await Promise.all([
-      refreshMe(),
-      refreshPeriods(targetDate),
-      ...(response.ok && profileState.open ? [refreshProfile()] : [])
-    ]);
-  }
-
-  function openProfile(): void {
-    setProfileState((current) => ({ ...current, open: true }));
-    void refreshProfile();
+  function retryRefresh(): void {
+    void Promise.all([refreshMe(), refreshPeriodWeek()]);
   }
 
   if (isAdmin) {
@@ -222,6 +145,7 @@ export function ReservationHomePage(): React.ReactElement {
 
   return (
     <ReservationHomeView
+      authenticationGeneration={authenticationGeneration}
       advancePolicy={advancePolicy}
       advanceUnavailable={advanceUnavailable}
       currentReservations={currentReservations}
@@ -233,6 +157,8 @@ export function ReservationHomePage(): React.ReactElement {
       periods={periods}
       periodsRefreshing={periodsRefreshing}
       profileState={profileState}
+      refreshError={sessionError || periodError}
+      resourcesFresh={resourcesFresh}
       reservationSubmitting={reservationSubmitting}
       sidebarOpen={sidebarOpen}
       tab={tab}
@@ -240,8 +166,8 @@ export function ReservationHomePage(): React.ReactElement {
       toast={toast}
       user={user}
       onCancel={requestCancel}
-      onClosePendingAction={() => setPendingAction(null)}
-      onCloseProfile={() => setProfileState((current) => ({ ...current, open: false }))}
+      onClosePendingAction={clearPendingAction}
+      onCloseProfile={closeProfile}
       onConfirmPendingAction={confirmPendingAction}
       onIdChange={setId}
       onLogin={() => void login()}
@@ -249,7 +175,8 @@ export function ReservationHomePage(): React.ReactElement {
       onOpenProfile={openProfile}
       onPasswordChange={setPassword}
       onProfileRetry={() => void refreshProfile()}
-      onReserve={requestReserve}
+      onRefreshRetry={retryRefresh}
+      onReserve={(studyPeriod) => void requestReserve(studyPeriod)}
       onSelectCalendarDate={selectCalendarDate}
       onSidebarToggle={() => setSidebarOpen((open) => !open)}
       onTabChange={setTab}

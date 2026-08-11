@@ -1,16 +1,18 @@
 "use client";
 
 import { Ban, CalendarCheck } from "lucide-react";
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { SHADOW_BAN_PROFILES, shadowBanProfileLabel } from "@/lib/shadow-ban-profile";
 import type { UserRestrictionDraft } from "./admin-console-state";
+import { AdminConfirmationDialog } from "./admin-confirmation-dialog";
+import type { AdminMutationResult, ApplyRestrictionData } from "./admin-api-client";
 
 const DAY_PRESETS = ["7", "14", "30"] as const;
 
 type AdminStudentRestrictionFormProps = {
   readonly draft: UserRestrictionDraft;
-  readonly onApply: () => void;
+  readonly onApply: () => Promise<AdminMutationResult<ApplyRestrictionData>>;
   readonly onSetDraft: (patch: Partial<UserRestrictionDraft>) => void;
 };
 
@@ -20,6 +22,15 @@ export function AdminStudentRestrictionForm({
   onSetDraft
 }: AdminStudentRestrictionFormProps): ReactElement {
   const reasonReady = draft.reason.trim().length > 0;
+  const [confirmingHardBan, setConfirmingHardBan] = useState(false);
+
+  function submit(): void {
+    if (draft.status === "BANNED") {
+      setConfirmingHardBan(true);
+      return;
+    }
+    void onApply();
+  }
 
   return (
     <section className="restriction-form" aria-label="학생 제재 적용">
@@ -81,10 +92,28 @@ export function AdminStudentRestrictionForm({
           ))}
         </fieldset>
       ) : null}
-      <button className="danger-button" disabled={!reasonReady} type="button" onClick={onApply}>
+      <button
+        aria-haspopup={draft.status === "BANNED" ? "dialog" : undefined}
+        className="danger-button"
+        disabled={!reasonReady}
+        type="button"
+        onClick={submit}
+      >
         <Ban size={16} />
         학생 제재 적용
       </button>
+      {confirmingHardBan ? (
+        <AdminConfirmationDialog
+          cancelLabel="돌아가기"
+          confirmLabel="영구 제한 적용"
+          onConfirm={onApply}
+          onDismiss={() => setConfirmingHardBan(false)}
+          title="영구 제한을 적용할까요?"
+        >
+          <p className="muted">영구 제한하면 미래의 확정 예약이 취소됩니다.</p>
+          <p className="muted">제재 사유: {draft.reason}</p>
+        </AdminConfirmationDialog>
+      ) : null}
     </section>
   );
 }

@@ -4,6 +4,7 @@ import type { User } from "@prisma/client";
 
 import { assertRestrictableUser } from "@/lib/admin-users";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
@@ -31,13 +32,17 @@ export async function prepareAdminRestrictionMutation(request: Request): Promise
   return session.user;
 }
 
-export async function findRestrictableTarget(actorId: string, targetUserId: string): Promise<NextResponse | User> {
-  const target = await prisma.user.findUnique({ where: { id: targetUserId } });
+export async function findRestrictableTarget(actor: SessionUser, targetUserId: string): Promise<NextResponse | User> {
+  const target = await withDatabaseContext({
+    actor: databaseActorFromSessionUser(actor),
+    client: prisma,
+    operation: (transaction) => transaction.user.findUnique({ where: { id: targetUserId } })
+  });
   if (!target) {
     return jsonError(404, "not_found", "사용자를 찾을 수 없습니다.");
   }
 
-  const guard = assertRestrictableUser({ actorId, target });
+  const guard = assertRestrictableUser({ actorId: actor.id, target });
   if (guard.kind === "error") {
     return jsonError(
       403,

@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
+import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { jsonError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { getMockStudentProfile } from "@/lib/mock-reservation-data";
 import type { BookingStatus, ReservationStatus } from "@/lib/reservation-service";
 import { requireUser, UnauthorizedSessionError } from "@/lib/session";
+import type { SessionUser } from "@/lib/session";
 import { buildStudentProfilePayload } from "@/lib/student-profile";
 import type { StudentProfilePayload, StudentProfileReservationRow, StudentProfileReservationSummary, StudentProfileSanctionRow, StudentProfileSanctionStatus, StudentProfileSanctionSummary, StudentProfileUserRow } from "@/lib/student-profile";
 import { shouldExposeStudentProfileSanctions } from "@/lib/student-profile-visibility";
@@ -36,7 +38,7 @@ export async function GET(): Promise<NextResponse> {
       return NextResponse.json(profile);
     }
 
-    const profile = await getDatabaseStudentProfile(user.id, now);
+    const profile = await getDatabaseStudentProfile(user, now);
     if (profile === null) {
       return jsonError(404, "not_found", "Student profile was not found.");
     }
@@ -49,69 +51,75 @@ export async function GET(): Promise<NextResponse> {
   }
 }
 
-async function getDatabaseStudentProfile(userId: string, now: Date): Promise<StudentProfilePayload | null> {
+async function getDatabaseStudentProfile(sessionUser: SessionUser, now: Date): Promise<StudentProfilePayload | null> {
   const kstToday = toKstDate(now);
-  const [
-    user,
-    currentReservations,
-    recentReservations,
-    reservationCounts,
-    recentSanctions,
-    sanctionSummaryRows
-  ] = await Promise.all([
-    prisma.user.findUnique({
-      select: {
-        bookingStatus: true,
-        generation: true,
-        name: true,
-        restrictedUntil: true,
-        restrictionReason: true,
-        role: true,
-        studentNumber: true
-      },
-      where: { id: userId }
-    }),
-    prisma.reservation.findMany({
-      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-      select: reservationSelect,
-      where: { date: { gte: kstToday }, status: "CONFIRMED", userId }
-    }),
-    prisma.reservation.findMany({
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-      select: reservationSelect,
-      take: 10,
-      where: { userId }
-    }),
-    prisma.reservation.groupBy({
-      by: ["status"],
-      where: { userId },
-      _count: { _all: true }
-    }),
-    prisma.userSanction.findMany({
-      orderBy: { createdAt: "desc" },
-      select: sanctionSelect,
-      take: 5,
-      where: { userId }
-    }),
-    prisma.userSanction.findMany({
-      select: sanctionSummarySelect,
-      where: { userId }
-    })
-  ]);
+  return withDatabaseContext({
+    actor: databaseActorFromSessionUser(sessionUser),
+    client: prisma,
+    operation: async (transaction) => {
+      const [
+        user,
+        currentReservations,
+        recentReservations,
+        reservationCounts,
+        recentSanctions,
+        sanctionSummaryRows
+      ] = await Promise.all([
+        transaction.user.findUnique({
+          select: {
+            bookingStatus: true,
+            generation: true,
+            name: true,
+            restrictedUntil: true,
+            restrictionReason: true,
+            role: true,
+            studentNumber: true
+          },
+          where: { id: sessionUser.id }
+        }),
+        transaction.reservation.findMany({
+          orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+          select: reservationSelect,
+          where: { date: { gte: kstToday }, status: "CONFIRMED", userId: sessionUser.id }
+        }),
+        transaction.reservation.findMany({
+          orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+          select: reservationSelect,
+          take: 10,
+          where: { userId: sessionUser.id }
+        }),
+        transaction.reservation.groupBy({
+          by: ["status"],
+          where: { userId: sessionUser.id },
+          _count: { _all: true }
+        }),
+        transaction.userSanction.findMany({
+          orderBy: { createdAt: "desc" },
+          select: sanctionSelect,
+          take: 5,
+          where: { userId: sessionUser.id }
+        }),
+        transaction.userSanction.findMany({
+          select: sanctionSummarySelect,
+          where: { userId: sessionUser.id }
+        })
+      ]);
 
-  if (user === null) {
-    return null;
-  }
+      if (user === null) {
+        return null;
+      }
 
-  return buildDatabaseStudentProfile({
-    currentReservations,
-    kstToday,
-    now,
-    recentReservations,
-    recentSanctions,
-    reservationSummary: summarizeReservationCounts(reservationCounts),
-    sanctionSummary: summarizeSanctionSummaryRows(sanctionSummaryRows),
-    user
+      return buildDatabaseStudentProfile({
+        currentReservations,
+        kstToday,
+        now,
+        recentReservations,
+        recentSanctions,
+        reservationSummary: summarizeReservationCounts(reservationCounts),
+        sanctionSummary: summarizeSanctionSummaryRows(sanctionSummaryRows),
+        user
+      });
+    }
   });
 }
 

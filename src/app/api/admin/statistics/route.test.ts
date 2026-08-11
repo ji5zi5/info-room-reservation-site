@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DatabaseActor } from "@/lib/db-context";
 import type { SessionUser } from "@/lib/session";
 import { GLOBAL_PERIOD_SETTINGS_DATE } from "@/lib/period-setting-values";
 
@@ -8,23 +9,41 @@ import { GET } from "./route";
 type RequireAdmin = () => Promise<SessionUser>;
 type IsNoDatabaseMockMode = () => boolean;
 type FindMany = (query: unknown) => Promise<readonly unknown[]>;
+type ScopedClient = {
+  readonly periodSetting: { readonly findMany: FindMany };
+  readonly reservation: { readonly findMany: FindMany };
+};
+type WithDatabaseContext = <T>(input: {
+  readonly actor: DatabaseActor;
+  readonly client: unknown;
+  readonly operation: (transaction: ScopedClient) => Promise<T>;
+}) => Promise<T>;
 
 const routeMocks = vi.hoisted(() => ({
+  databaseActorFromSessionUser: vi.fn<(user: SessionUser) => DatabaseActor>(),
   isNoDatabaseMockMode: vi.fn<IsNoDatabaseMockMode>(),
-  periodSettingFindMany: vi.fn<FindMany>(),
-  reservationFindMany: vi.fn<FindMany>(),
-  requireAdmin: vi.fn<RequireAdmin>()
+  rawPeriodSettingFindMany: vi.fn<FindMany>(),
+  rawReservationFindMany: vi.fn<FindMany>(),
+  requireAdmin: vi.fn<RequireAdmin>(),
+  scopedPeriodSettingFindMany: vi.fn<FindMany>(),
+  scopedReservationFindMany: vi.fn<FindMany>(),
+  withDatabaseContext: vi.fn<WithDatabaseContext>()
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     periodSetting: {
-      findMany: routeMocks.periodSettingFindMany
+      findMany: routeMocks.rawPeriodSettingFindMany
     },
     reservation: {
-      findMany: routeMocks.reservationFindMany
+      findMany: routeMocks.rawReservationFindMany
     }
   }
+}));
+
+vi.mock("@/lib/db-context", () => ({
+  databaseActorFromSessionUser: routeMocks.databaseActorFromSessionUser,
+  withDatabaseContext: routeMocks.withDatabaseContext
 }));
 
 vi.mock("@/lib/mock-dev-mode", () => ({
@@ -50,15 +69,28 @@ const adminUser: SessionUser = {
 
 describe("admin statistics route", () => {
   beforeEach(() => {
+    routeMocks.databaseActorFromSessionUser.mockReset();
     routeMocks.isNoDatabaseMockMode.mockReset();
-    routeMocks.periodSettingFindMany.mockReset();
-    routeMocks.reservationFindMany.mockReset();
+    routeMocks.rawPeriodSettingFindMany.mockReset();
+    routeMocks.rawReservationFindMany.mockReset();
     routeMocks.requireAdmin.mockReset();
+    routeMocks.scopedPeriodSettingFindMany.mockReset();
+    routeMocks.scopedReservationFindMany.mockReset();
+    routeMocks.withDatabaseContext.mockReset();
 
+    routeMocks.databaseActorFromSessionUser.mockReturnValue({ id: adminUser.id, role: "ADMIN" });
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
-    routeMocks.periodSettingFindMany.mockResolvedValue([]);
-    routeMocks.reservationFindMany.mockResolvedValue([]);
+    routeMocks.rawPeriodSettingFindMany.mockResolvedValue([]);
+    routeMocks.rawReservationFindMany.mockResolvedValue([]);
     routeMocks.requireAdmin.mockResolvedValue(adminUser);
+    routeMocks.scopedPeriodSettingFindMany.mockResolvedValue([]);
+    routeMocks.scopedReservationFindMany.mockResolvedValue([]);
+    routeMocks.withDatabaseContext.mockImplementation(async (input) =>
+      input.operation({
+        periodSetting: { findMany: routeMocks.scopedPeriodSettingFindMany },
+        reservation: { findMany: routeMocks.scopedReservationFindMany }
+      })
+    );
   });
 
   it("returns bad request without querying Prisma when from is after to", async () => {
@@ -66,8 +98,7 @@ describe("admin statistics route", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "bad_request" } });
-    expect(routeMocks.reservationFindMany).not.toHaveBeenCalled();
-    expect(routeMocks.periodSettingFindMany).not.toHaveBeenCalled();
+    expect(routeMocks.withDatabaseContext).not.toHaveBeenCalled();
   });
 
   it("returns bad request without querying Prisma when the range is oversized", async () => {
@@ -75,8 +106,7 @@ describe("admin statistics route", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "bad_request" } });
-    expect(routeMocks.reservationFindMany).not.toHaveBeenCalled();
-    expect(routeMocks.periodSettingFindMany).not.toHaveBeenCalled();
+    expect(routeMocks.withDatabaseContext).not.toHaveBeenCalled();
   });
 
   it("returns bad request without querying Prisma when a date is not calendar-valid", async () => {
@@ -84,15 +114,20 @@ describe("admin statistics route", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "bad_request" } });
-    expect(routeMocks.reservationFindMany).not.toHaveBeenCalled();
-    expect(routeMocks.periodSettingFindMany).not.toHaveBeenCalled();
+    expect(routeMocks.withDatabaseContext).not.toHaveBeenCalled();
   });
 
   it("includes global period settings when querying statistics capacity settings", async () => {
     const response = await GET(statisticsRequest("from=2026-06-16&to=2026-06-17"));
 
     expect(response.status).toBe(200);
-    expect(routeMocks.periodSettingFindMany).toHaveBeenCalledWith({
+    expect(routeMocks.databaseActorFromSessionUser).toHaveBeenCalledWith(adminUser);
+    expect(routeMocks.withDatabaseContext).toHaveBeenCalledWith({
+      actor: { id: adminUser.id, role: "ADMIN" },
+      client: expect.any(Object),
+      operation: expect.any(Function)
+    });
+    expect(routeMocks.scopedPeriodSettingFindMany).toHaveBeenCalledWith({
       select: {
         capacity: true,
         date: true,
@@ -102,6 +137,27 @@ describe("admin statistics route", () => {
         OR: [{ date: GLOBAL_PERIOD_SETTINGS_DATE }, { date: { gte: "2026-06-16", lte: "2026-06-17" } }]
       }
     });
+    expect(routeMocks.scopedReservationFindMany).toHaveBeenCalledOnce();
+    expect(routeMocks.rawReservationFindMany).not.toHaveBeenCalled();
+    expect(routeMocks.rawPeriodSettingFindMany).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      statistics: expect.objectContaining({
+        from: "2026-06-16",
+        to: "2026-06-17",
+        totals: expect.objectContaining({ totalCount: 0 })
+      })
+    });
+  });
+
+  it("calculates the empty statistics response from contextual protected reads", async () => {
+    const response = await GET(statisticsRequest("from=2026-06-16&to=2026-06-16"));
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.withDatabaseContext).toHaveBeenCalledOnce();
+    expect(routeMocks.scopedReservationFindMany).toHaveBeenCalledOnce();
+    expect(routeMocks.scopedPeriodSettingFindMany).toHaveBeenCalledOnce();
+    expect(routeMocks.rawReservationFindMany).not.toHaveBeenCalled();
+    expect(routeMocks.rawPeriodSettingFindMany).not.toHaveBeenCalled();
   });
 });
 

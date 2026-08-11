@@ -23,6 +23,63 @@ describe("AdminDashboardPanel notification reconciliation", () => {
     expect(markup).toContain("종료");
     expect(markup).not.toContain("재전송");
   });
+
+  it("shows distinct labels for periods before opening, open, and closed", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminDashboardPanel, {
+        notificationBacklog: [],
+        onReconcileNotification: vi.fn(),
+        onSendNotification: vi.fn(),
+        periods: [
+          { ...sentPeriod, isClosed: false, notification: null, windowState: "not_open_yet" },
+          { ...sentPeriod, isClosed: false, notification: null, windowState: "open" },
+          sentPeriod
+        ],
+        statistics: null
+      })
+    );
+
+    expect(markup).toContain("오픈 전");
+    expect(markup).toContain("진행 중");
+    expect(markup).toContain("마감됨");
+    expect(markup).not.toContain("진행 전/진행 중");
+  });
+
+  it("discloses the bounded reconciliation, offender, and reservation-metric sources", () => {
+    const statistics = {
+      dailyStats: [],
+      from: "2026-06-01",
+      periodStats: [],
+      repeatedOffenders: Array.from({ length: 11 }, (_, index) => ({
+        cancelledCount: 1,
+        name: `반복 학생 ${index}`,
+        noShowCount: 1,
+        studentNumber: `320${index}`,
+        totalIncidents: 2,
+        userId: `offender-${index}`
+      })),
+      to: "2026-06-16",
+      totals: { cancelledCount: 1, confirmedCount: 1, noShowCount: 1, totalCount: 3, uniqueStudentCount: 2 }
+    };
+    const markup = renderToStaticMarkup(
+      createElement(AdminDashboardPanel, {
+        notificationBacklog: Array.from({ length: 14 }, (_, index) => ({
+          ...unknownDelivery,
+          date: `2026-06-${String(index + 1).padStart(2, "0")}`
+        })),
+        onReconcileNotification: vi.fn(),
+        onSendNotification: vi.fn(),
+        periods: [sentPeriod],
+        statistics
+      })
+    );
+
+    expect(markup).toContain("최근 7일 · 최대 14건");
+    expect(markup).toContain("반복 기록 상위 10명");
+    expect(markup).toContain("최근 최대 100건 기준");
+    expect(markup).toContain("반복 학생 9");
+    expect(markup).not.toContain("반복 학생 10");
+  });
 });
 
 const sentPeriod = {

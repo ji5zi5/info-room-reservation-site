@@ -1,3 +1,5 @@
+import { parseServerEnv } from "./env";
+
 export type MutatingRequestSafetyError = {
   readonly code: "origin_forbidden" | "fetch_metadata_forbidden";
   readonly message: string;
@@ -15,12 +17,17 @@ export function requireMutatingRequestSafety(request: Request): MutatingRequestS
 }
 
 export function isSameOriginRequest(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (!origin) {
+  const requestOrigin = request.headers.get("origin");
+  if (!requestOrigin) {
     return true;
   }
 
-  return parseOrigin(origin) === parseOrigin(request.url);
+  const origin = parseOrigin(requestOrigin);
+  if (origin === null) {
+    return false;
+  }
+
+  return origin === parseOrigin(request.url) || origin === parseServerEnv().appOrigin;
 }
 
 export function isFetchMetadataAllowed(request: Request): boolean {

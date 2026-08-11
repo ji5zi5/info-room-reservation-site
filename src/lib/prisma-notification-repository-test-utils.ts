@@ -4,6 +4,12 @@ import { vi } from "vitest";
 import { CLOSED_LIST_NOTIFICATION_KIND, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
 import type { StudyPeriod } from "./study-periods";
 
+type DatabaseContextInput = {
+  readonly actor: { readonly id: string | null; readonly role: "SYSTEM" };
+  readonly client: unknown;
+  readonly operation: (transaction: TransactionClient) => Promise<unknown>;
+};
+
 type StringFilter = string | { readonly gt?: string; readonly gte?: string; readonly in?: readonly string[]; readonly lte?: string };
 type DateFilter = Date | { readonly gt?: Date; readonly lte?: Date };
 type PeriodSettingWhere = {
@@ -29,6 +35,24 @@ type NotificationDeliveryUpdateData = {
   readonly nextAttemptAt?: Date | null;
   readonly sentAt?: Date | null;
   readonly status?: ClosedPeriodNotificationStatus;
+};
+
+type TransactionClient = {
+  readonly $executeRaw: () => Promise<number>;
+  readonly notificationDelivery: {
+    readonly create: typeof prismaMocks.notificationDeliveryCreate;
+    readonly findMany: typeof prismaMocks.notificationDeliveryFindMany;
+    readonly findUnique: typeof prismaMocks.notificationDeliveryFindUnique;
+    readonly updateMany: typeof prismaMocks.notificationDeliveryUpdateMany;
+  };
+  readonly periodSetting: {
+    readonly findMany: typeof prismaMocks.periodSettingFindMany;
+    readonly findUnique: typeof prismaMocks.periodSettingFindUnique;
+  };
+  readonly reservation: {
+    readonly count: typeof prismaMocks.reservationCount;
+    readonly findMany: typeof prismaMocks.reservationFindMany;
+  };
 };
 
 export type PeriodSettingRow = {
@@ -134,25 +158,40 @@ const prismaMocks = vi.hoisted(() => {
   };
 });
 
-export { prismaMocks };
+const transactionClient = (): TransactionClient => ({
+  $executeRaw: vi.fn(async () => 0),
+  notificationDelivery: {
+    create: prismaMocks.notificationDeliveryCreate,
+    findMany: prismaMocks.notificationDeliveryFindMany,
+    findUnique: prismaMocks.notificationDeliveryFindUnique,
+    updateMany: prismaMocks.notificationDeliveryUpdateMany
+  },
+  periodSetting: {
+    findMany: prismaMocks.periodSettingFindMany,
+    findUnique: prismaMocks.periodSettingFindUnique
+  },
+  reservation: {
+    count: prismaMocks.reservationCount,
+    findMany: prismaMocks.reservationFindMany
+  }
+});
+
+const databaseContextMocks = vi.hoisted(() => ({
+  withDatabaseContext: vi.fn<(input: DatabaseContextInput) => Promise<unknown>>()
+}));
+
+const prismaClient = transactionClient();
+databaseContextMocks.withDatabaseContext.mockImplementation(async (input) => input.operation(prismaClient));
+
+export { databaseContextMocks, prismaClient, prismaMocks };
+
+vi.mock("./db-context", () => ({
+  systemDatabaseActor: () => ({ id: null, role: "SYSTEM" }),
+  withDatabaseContext: databaseContextMocks.withDatabaseContext
+}));
 
 vi.mock("./db", () => ({
-  prisma: {
-    notificationDelivery: {
-      create: prismaMocks.notificationDeliveryCreate,
-      findMany: prismaMocks.notificationDeliveryFindMany,
-      findUnique: prismaMocks.notificationDeliveryFindUnique,
-      updateMany: prismaMocks.notificationDeliveryUpdateMany
-    },
-    periodSetting: {
-      findMany: prismaMocks.periodSettingFindMany,
-      findUnique: prismaMocks.periodSettingFindUnique
-    },
-    reservation: {
-      count: prismaMocks.reservationCount,
-      findMany: prismaMocks.reservationFindMany
-    }
-  }
+  prisma: prismaClient
 }));
 
 export function periodSetting(input: {

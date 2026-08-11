@@ -14,8 +14,13 @@ type UserUpdate = (input: unknown) => Promise<unknown>;
 type AdminActionCreate = (input: unknown) => Promise<{ readonly id: string }>;
 type WriteMutation = (input: unknown) => Promise<unknown>;
 type RawDbCall = { readonly strings: readonly string[]; readonly values: readonly unknown[] };
+type CancellationCapability = (
+  strings: TemplateStringsArray,
+  ...values: readonly unknown[]
+) => Promise<readonly { readonly outcome: string }[]>;
 type TransactionClient = {
   readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
+  readonly $queryRaw: CancellationCapability;
   readonly adminAction: { readonly create: AdminActionCreate };
   readonly auditLog: { readonly create: WriteMutation };
   readonly reservation: {
@@ -44,12 +49,15 @@ const routeMocks = vi.hoisted(() => {
     }
   }
 
+  const capabilityCalls: RawDbCall[] = [];
   const rawCalls: RawDbCall[] = [];
 
   return {
     UnauthorizedSessionError,
     adminActionCreate: vi.fn<AdminActionCreate>(),
     auditLogCreate: vi.fn<WriteMutation>(),
+    cancellationCapability: vi.fn<CancellationCapability>(),
+    capabilityCalls,
     cancelMockReservation: vi.fn<CancelMockReservation>(),
     createMockSessionToken: vi.fn<CreateMockSessionToken>(),
     enforceReservationRateLimit: vi.fn<EnforceReservationRateLimit>(),
@@ -135,11 +143,13 @@ describe("student reservation cancellation shadow-ban handling", () => {
 
     routeMocks.requireMutatingRequestSafety.mockReturnValue(null);
     routeMocks.rawCalls.length = 0;
+    routeMocks.capabilityCalls.length = 0;
     routeMocks.requireSession.mockResolvedValue({ id: "session-shadow", user: shadowBannedStudent });
     routeMocks.validateRequestCsrf.mockResolvedValue({ kind: "ok" });
     routeMocks.enforceReservationRateLimit.mockResolvedValue(allowedRateLimit);
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
-    routeMocks.reservationFindUnique.mockResolvedValue(confirmedReservation);
+    routeMocks.cancellationCapability.mockResolvedValue([{ outcome: "CANCELLED" }]);
+    routeMocks.reservationFindUnique.mockResolvedValue(cancelledReservation);
     routeMocks.reservationUpdate.mockResolvedValue(cancelledReservation);
     routeMocks.reservationUpdateMany.mockResolvedValue({ count: 1 });
     routeMocks.userUpdate.mockResolvedValue({
@@ -162,23 +172,18 @@ describe("student reservation cancellation shadow-ban handling", () => {
     });
   });
 
-  it("does not downgrade a database shadow-ban when the student cancels an existing reservation", async () => {
+  it("delegates database cancellation to the owned-student capability and returns its cancelled reservation", async () => {
     const { DELETE } = await loadCancelRoute();
 
     const response = await DELETE(deleteRequest(), routeContext(confirmedReservation.id));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ reservation: { id: confirmedReservation.id, status: "CANCELLED" } });
-    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledWith({
-      data: { status: "CANCELLED" },
-      where: { id: confirmedReservation.id, status: "CONFIRMED" }
-    });
-    expect(routeMocks.reservationUpdate).not.toHaveBeenCalled();
-    expect(routeMocks.userUpdate).not.toHaveBeenCalled();
-    expect(routeMocks.adminActionCreate).not.toHaveBeenCalled();
-    expect(routeMocks.userSanctionCreate).not.toHaveBeenCalled();
-    expect(routeMocks.userSanctionUpdateMany).not.toHaveBeenCalled();
-    expect(routeMocks.auditLogCreate).not.toHaveBeenCalled();
+    expect(routeMocks.capabilityCalls).toHaveLength(1);
+    expect(routeMocks.capabilityCalls[0]?.strings.join("?")).toContain(
+      "app_private.cancel_owned_student_reservation"
+    );
+    expect(routeMocks.capabilityCalls[0]?.values[0]).toBe(confirmedReservation.id);
   });
 
   it("returns forbidden Given an admin session When deleting another student's reservation Then no cancellation mutations run", async () => {
@@ -204,12 +209,10 @@ describe("student reservation cancellation shadow-ban handling", () => {
     expect(routeMocks.userSanctionUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("allows only one cancellation transition and one sanction for stale concurrent reads", async () => {
-    routeMocks.requireSession.mockResolvedValue({
-      id: "session-active",
-      user: { ...shadowBannedStudent, bookingStatus: "ACTIVE", restrictionReason: null, restrictedUntil: null }
-    });
-    routeMocks.reservationUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+  it("maps serialized capability outcomes to one successful cancellation and one conflict", async () => {
+    routeMocks.cancellationCapability
+      .mockResolvedValueOnce([{ outcome: "CANCELLED" }])
+      .mockResolvedValueOnce([{ outcome: "NOT_CANCELLABLE" }]);
     const { DELETE } = await loadCancelRoute();
 
     const first = await DELETE(deleteRequest(), routeContext(confirmedReservation.id));
@@ -217,15 +220,7 @@ describe("student reservation cancellation shadow-ban handling", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(409);
-    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledTimes(2);
-    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledWith({
-      data: { status: "CANCELLED" },
-      where: { id: confirmedReservation.id, status: "CONFIRMED" }
-    });
-    expect(routeMocks.userUpdate).toHaveBeenCalledTimes(1);
-    expect(routeMocks.adminActionCreate).toHaveBeenCalledTimes(1);
-    expect(routeMocks.userSanctionCreate).toHaveBeenCalledTimes(1);
-    expect(routeMocks.auditLogCreate).toHaveBeenCalledTimes(1);
+    expect(routeMocks.capabilityCalls).toHaveLength(2);
     const lockValues = routeMocks.rawCalls
       .filter((call) => call.strings.join("?").includes("pg_advisory_xact_lock"))
       .map((call) => call.values);
@@ -277,6 +272,10 @@ function transactionClient(): TransactionClient {
       routeMocks.rawCalls.push({ strings: [...strings], values });
       return 1;
     },
+    async $queryRaw(strings: TemplateStringsArray, ...values: readonly unknown[]) {
+      routeMocks.capabilityCalls.push({ strings: [...strings], values });
+      return routeMocks.cancellationCapability(strings, ...values);
+    },
     adminAction: { create: routeMocks.adminActionCreate },
     auditLog: { create: routeMocks.auditLogCreate },
     reservation: {
@@ -311,6 +310,7 @@ function mockCancelledReservation(): MockReservation {
   return {
     ...cancelledReservation,
     createdAt: new Date("2026-06-16T00:00:00.000Z"),
+    updatedAt: new Date("2026-06-16T00:00:00.000Z"),
     user: {
       bookingStatus: "SHADOW_BANNED",
       id: shadowBannedStudent.id,

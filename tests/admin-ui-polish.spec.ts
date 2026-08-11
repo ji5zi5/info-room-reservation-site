@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { join } from "node:path";
 
 import { e2eNow, FIXED_FRIDAY_DATE, mockClientDate, mockOpenPeriodsForDates } from "./e2e-time";
 import { csrfRequest } from "./playwright-csrf";
@@ -137,7 +138,7 @@ async function mockAdminStudentManagement(page: Page, selectedStudentNumber: str
       await route.fulfill({
         contentType: "application/json",
         json: {
-          notificationBacklog: [],
+          notificationBacklog: mockNotificationBacklog(),
           periods: mockAdminPeriods().map((period) => ({
             ...period,
             applicants: [],
@@ -266,7 +267,14 @@ function mockAdminStatistics() {
     dailyStats: [],
     from: FIXED_FRIDAY_DATE,
     periodStats: [],
-    repeatedOffenders: [],
+    repeatedOffenders: Array.from({ length: 10 }, (_, index) => ({
+      cancelledCount: 1,
+      name: `반복 학생 ${index + 1}`,
+      noShowCount: 1,
+      studentNumber: `25-${String(41000 + index).padStart(5, "0")}`,
+      totalIncidents: 2,
+      userId: `mock-offender-${index}`
+    })),
     to: FIXED_FRIDAY_DATE,
     totals: {
       cancelledCount: 0,
@@ -276,6 +284,19 @@ function mockAdminStatistics() {
       uniqueStudentCount: 40
     }
   };
+}
+
+function mockNotificationBacklog() {
+  return Array.from({ length: 14 }, (_, index) => ({
+    attempts: 1,
+    date: `2026-06-${String(index + 1).padStart(2, "0")}`,
+    failureCode: "discord_timeout",
+    lastError: "Discord 응답 시간 초과",
+    nextAttemptAt: null,
+    status: "UNKNOWN",
+    studyPeriod: "EIGHTH",
+    updatedAt: "2026-06-12T12:00:00.000Z"
+  }));
 }
 
 function mockAdminAction(index: number, targetUserId: string, now: string) {
@@ -513,6 +534,28 @@ test("mobile admin student detail flows below the list without clipping", async 
   );
 });
 
+test("admin bounded labels produce desktop and mobile evidence", async ({ page }) => {
+  const evidenceDir = requiredEvidenceDir();
+  const studentNumber = "25-39000";
+  await mockAdminStudentManagement(page, studentNumber);
+
+  await page.setViewportSize({ height: 900, width: 1440 });
+  await openMockedAdminConsole(page);
+  await expect(page.getByText("최근 7일 · 최대 14건")).toBeVisible();
+  await expect(page.getByText("반복 기록 상위 10명")).toBeVisible();
+  await expect(page.getByText("최근 최대 100건 기준")).toBeVisible();
+  await page.screenshot({ fullPage: false, path: join(evidenceDir, "final-f3-admin-desktop-1440x900.png") });
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  await page.getByRole("button", { name: "학생" }).click();
+  const studentRow = page.locator(".user-line").filter({ hasText: studentNumber }).first();
+  await studentRow.getByRole("button", { name: "상세 보기" }).click();
+  await expect(page.getByText("최근 12건 표시 · 최대 30건 조회")).toBeVisible();
+  await expect(page.getByText("최근 최대 20건")).toBeVisible();
+  await expect(page.getByText("최근 최대 30건")).toBeVisible();
+  await page.screenshot({ fullPage: false, path: join(evidenceDir, "final-f3-admin-mobile-390x844.png") });
+});
+
 test("admin setting toggles keep visible checkbox targets comfortable", async ({ page }) => {
   await page.setViewportSize({ height: 900, width: 390 });
   await mockAdminStudentManagement(page, "25-39000");
@@ -544,4 +587,12 @@ async function expectBorderRadius(locator: Locator, label: string, expectedRadiu
     return view.getComputedStyle(element).borderRadius;
   });
   expect.soft(radius, `${label} border radius`).toBe(expectedRadius);
+}
+
+function requiredEvidenceDir(): string {
+  const value = process.env.EVIDENCE_DIR;
+  if (!value) {
+    throw new Error("EVIDENCE_DIR is required for final admin screenshots.");
+  }
+  return value;
 }

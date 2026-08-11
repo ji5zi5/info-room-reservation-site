@@ -2,19 +2,19 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { canMarkReservationNoShow } from "@/lib/admin-reservation-transition";
+import { selectCancellableConfirmedReservationIds } from "@/lib/admin-cancellable-reservations";
 import {
   databaseActorFromSessionUser,
+  isSerializableTransactionConflict,
   TransactionRetryExhaustedError,
   userMutationLockKey,
+  withDatabaseContext,
   withDatabaseMutation
 } from "@/lib/db-context";
 import { prisma } from "@/lib/db";
-import {
-  jsonError,
-  jsonMutatingRequestSafetyError,
-  jsonRateLimitError,
-  jsonTransactionRetryExhaustedError
-} from "@/lib/http";
+import { toKstDate } from "@/lib/date";
+import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
+import { periodSettingReadDates } from "@/lib/period-setting-values";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
@@ -53,10 +53,15 @@ export async function POST(request: Request, context: { readonly params: Promise
       return parsed.response;
     }
     const ipHash = hashRequestClientIp(request);
+    const now = new Date();
 
-    const targetReservation = await prisma.reservation.findUnique({
-      select: { userId: true },
-      where: { id: params.id }
+    const targetReservation = await withDatabaseContext({
+      actor: databaseActorFromSessionUser(admin),
+      client: prisma,
+      operation: (transaction) => transaction.reservation.findUnique({
+        select: { userId: true },
+        where: { id: params.id }
+      })
     });
     if (!targetReservation) {
       return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");
@@ -90,6 +95,32 @@ export async function POST(request: Request, context: { readonly params: Promise
         return { kind: "invalid_status" } as const;
       }
       const updatedReservation = { ...reservation, status: "NO_SHOW" } as const;
+      const today = toKstDate(now);
+      const candidates = await transaction.reservation.findMany({
+        where: {
+          date: { gte: today },
+          id: { not: reservation.id },
+          status: "CONFIRMED",
+          userId: reservation.userId
+        }
+      });
+      const settings = await transaction.periodSetting.findMany({
+        where: { date: { in: [...periodSettingReadDates(today)] } }
+      });
+      const cancellableReservationIds = selectCancellableConfirmedReservationIds({
+        now,
+        reservations: candidates,
+        settings
+      });
+      const cancelledFutureReservationCount =
+        cancellableReservationIds.length === 0
+          ? 0
+          : (
+              await transaction.reservation.updateMany({
+                data: { status: "CANCELLED" },
+                where: { id: { in: [...cancellableReservationIds] }, status: "CONFIRMED" }
+              })
+            ).count;
       const restriction = buildNoShowBan(parsed.data.reason);
       const user = await transaction.user.update({
         data: restriction,
@@ -101,6 +132,7 @@ export async function POST(request: Request, context: { readonly params: Promise
           actorId: admin.id,
           after: JSON.stringify({
             bookingStatus: user.bookingStatus,
+            cancelledFutureReservationCount,
             reservationStatus: updatedReservation.status,
             restrictionReason: user.restrictionReason,
             restrictedUntil: user.restrictedUntil
@@ -144,11 +176,16 @@ export async function POST(request: Request, context: { readonly params: Promise
         data: {
           action: "NO_SHOW_BAN",
           actorId: admin.id,
-          detail: JSON.stringify({ actionId: action.id, reason: parsed.data.reason, reservationId: reservation.id }),
+          detail: JSON.stringify({
+            actionId: action.id,
+            cancelledFutureReservationCount,
+            reason: parsed.data.reason,
+            reservationId: reservation.id
+          }),
           userId: user.id
         }
       });
-      return { kind: "ok", reservation: updatedReservation, user } as const;
+      return { cancelledFutureReservationCount, kind: "ok", reservation: updatedReservation, user } as const;
       }
     });
 
@@ -161,7 +198,11 @@ export async function POST(request: Request, context: { readonly params: Promise
     if (result.kind === "admin_target") {
       return jsonError(403, "admin_target", "관리자 계정은 노쇼 제재 대상이 아닙니다.");
     }
-    return NextResponse.json({ reservation: result.reservation, user: result.user });
+    return NextResponse.json({
+      cancelledFutureReservationCount: result.cancelledFutureReservationCount,
+      reservation: result.reservation,
+      user: result.user
+    });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);
@@ -169,9 +210,9 @@ export async function POST(request: Request, context: { readonly params: Promise
     if (error instanceof ForbiddenSessionError) {
       return jsonError(403, "forbidden", error.message);
     }
-    if (error instanceof TransactionRetryExhaustedError) {
-      return jsonTransactionRetryExhaustedError();
+    if (error instanceof TransactionRetryExhaustedError && isSerializableTransactionConflict(error.cause)) {
+      return jsonError(409, "bad_request", "확정 상태가 아닌 예약은 노쇼 처리할 수 없습니다.");
     }
-    throw error;
+    return jsonError(500, "server_error", "예약 노쇼 처리 중 오류가 발생했습니다.");
   }
 }

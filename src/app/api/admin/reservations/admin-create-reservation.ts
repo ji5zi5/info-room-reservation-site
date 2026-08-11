@@ -15,6 +15,7 @@ import {
   periodMutationLockKey,
   TransactionRetryExhaustedError,
   userMutationLockKey,
+  withDatabaseContext,
   withDatabaseMutation
 } from "@/lib/db-context";
 import { prisma } from "@/lib/db";
@@ -76,9 +77,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const ipHash = hashRequestClientIp(request);
-    const targetIdentity = await prisma.user.findUnique({
-      select: { id: true, role: true },
-      where: { studentNumber: parsed.data.studentNumber }
+    const databaseActor = databaseActorFromSessionUser(admin);
+    const targetIdentity = await withDatabaseContext({
+      actor: databaseActor,
+      client: prisma,
+      operation: (transaction) => transaction.user.findUnique({
+        select: { id: true, role: true },
+        where: { studentNumber: parsed.data.studentNumber }
+      })
     });
     if (!targetIdentity) {
       return buildAdminCreateReservationResponse(adminCreateError("not_found"));
@@ -88,7 +94,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const result = await withDatabaseMutation({
-      actor: databaseActorFromSessionUser(admin),
+      actor: databaseActor,
       client: prisma,
       lockKeys: [
         periodMutationLockKey(parsed.data.date, parsed.data.studyPeriod),

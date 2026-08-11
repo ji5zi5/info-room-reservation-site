@@ -81,6 +81,7 @@ export async function fetchAdminReservations(
   input: {
     readonly date: string;
     readonly query: string;
+    readonly reservationId?: string;
     readonly status: AdminReservationStatusFilter;
     readonly studyPeriod: AdminReservationStudyPeriodFilter;
     readonly userId?: string | null;
@@ -95,6 +96,9 @@ export async function fetchAdminReservations(
   });
   if (input.userId) {
     params.set("userId", input.userId);
+  }
+  if (input.reservationId) {
+    params.set("reservationId", input.reservationId);
   }
   const response = await fetch(`/api/admin/reservations?${params.toString()}`, options);
   const result = await readJsonResponse(response, AdminReservationsPayloadSchema);

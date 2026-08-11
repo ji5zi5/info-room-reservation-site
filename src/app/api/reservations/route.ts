@@ -1,9 +1,12 @@
 import { Prisma } from "@prisma/client";
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isReservableDate } from "@/lib/advance-reservation-policy";
 import { databaseActorFromSessionUser, TransactionRetryExhaustedError } from "@/lib/db-context";
+import { buildAdminReservationDeepLinkUrl } from "@/app/admin/admin-console-url";
+import { parseServerEnv } from "@/lib/env";
 import { reserveStudyPeriod } from "@/lib/reservation-service";
 import { createPrismaReservationStoreForActor } from "@/lib/prisma-reservation-store";
 import {
@@ -21,7 +24,7 @@ import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { sendDiscordWebhook } from "@/lib/discord-notifications";
 import { sendReservationCreatedNotification } from "@/lib/reservation-created-notification-service";
 import { enforceReservationRateLimit } from "@/lib/route-rate-limit";
-import { requireSession, UnauthorizedSessionError } from "@/lib/session";
+import { requireSession, type SessionUser, UnauthorizedSessionError } from "@/lib/session";
 
 const ReservationRequestSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
@@ -84,7 +87,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       userId: user.id
     });
     if (result.kind === "confirmed") {
-      await sendReservationCreatedNotificationBestEffort({ reservation: result.reservation });
+      const callbackInput = buildReservationCreatedNotificationCallbackInput(result.reservation, user);
+      after(async () => {
+        await notifyReservationCreatedBestEffort(callbackInput);
+      });
     }
 
     return buildReservationResponse(result);
@@ -102,17 +108,47 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 }
 
-async function sendReservationCreatedNotificationBestEffort(input: {
+type ReservationCreatedNotificationCallbackInput = {
+  readonly applicant: {
+    readonly name: string;
+    readonly studentNumber: string;
+  };
+  readonly embedTitleUrl?: string;
   readonly reservation: import("@/lib/reservation-service").Reservation;
-}): Promise<void> {
+  readonly webhookUrl: string | undefined;
+};
+
+function buildReservationCreatedNotificationCallbackInput(
+  reservation: import("@/lib/reservation-service").Reservation,
+  user: SessionUser
+): ReservationCreatedNotificationCallbackInput {
+  const env = parseServerEnv();
+  const embedTitleUrl = env.appOrigin === null
+    ? undefined
+    : buildAdminReservationDeepLinkUrl(env.appOrigin, { date: reservation.date, reservationId: reservation.id });
+  return {
+    applicant: {
+      name: user.name,
+      studentNumber: user.studentNumber
+    },
+    ...(embedTitleUrl === undefined ? {} : { embedTitleUrl }),
+    reservation,
+    webhookUrl: env.discordWebhookUrl ?? undefined
+  };
+}
+
+async function notifyReservationCreatedBestEffort(
+  input: ReservationCreatedNotificationCallbackInput
+): Promise<void> {
   try {
-    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     const notificationSettings = await getPrismaNotificationSettings();
     const notificationResult = await sendReservationCreatedNotification({
+      applicant: input.applicant,
+      ...(input.embedTitleUrl === undefined ? {} : { embedTitleUrl: input.embedTitleUrl }),
       notificationSettings,
       reservation: input.reservation,
-      sender: (payload) => sendDiscordWebhook({ payload, webhookUrl: webhookUrl ?? "" }),
-      webhookUrl
+      sender: (payload) => sendDiscordWebhook({ payload, webhookUrl: input.webhookUrl ?? "" }),
+      webhookUrl: input.webhookUrl
     });
     if (notificationResult.kind === "failed") {
       reportReservationCreatedNotificationFailure(input.reservation, "delivery_failed");

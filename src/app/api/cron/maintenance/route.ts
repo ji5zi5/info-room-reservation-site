@@ -19,12 +19,14 @@ export async function GET(request: Request): Promise<NextResponse> {
     job: "MAINTENANCE",
     now,
     operation: async () => {
+      const cleanup = await runMaintenanceCleanup({ now, store: prismaMaintenanceCleanupStore });
       const value = {
-        cleanup: await runMaintenanceCleanup({ now, store: prismaMaintenanceCleanupStore })
+        cleanup
       };
       return {
-        backlogCount: 0,
-        kind: "succeeded" as const,
+        backlogCount: cleanup.backlogCount,
+        ...(cleanup.backlogCount > 0 ? { failureCode: "maintenance_backlog_remaining" } : {}),
+        kind: cleanup.backlogCount > 0 ? "failed" as const : "succeeded" as const,
         oldestBacklogAt: null,
         result: value,
         value

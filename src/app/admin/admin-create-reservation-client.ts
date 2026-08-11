@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { NETWORK_ERROR_MESSAGE } from "../client-api-response";
 import { csrfFetch } from "../csrf-fetch";
 import type { StudyPeriod } from "./admin-types";
 
@@ -25,15 +26,19 @@ const ErrorPayloadSchema = z.object({
 export async function createAdminReservation(
   input: AdminCreateReservationInput
 ): Promise<AdminCreateReservationResult> {
-  const response = await csrfFetch("/api/admin/reservations", {
-    body: JSON.stringify(input),
-    headers: { "content-type": "application/json" },
-    method: "POST"
-  });
-  if (response.ok) {
-    return { kind: "ok" };
+  try {
+    const response = await csrfFetch("/api/admin/reservations", {
+      body: JSON.stringify(input),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    });
+    if (response.ok) {
+      return { kind: "ok" };
+    }
+    return { kind: "error", message: await readErrorMessage(response) };
+  } catch {
+    return { kind: "error", message: NETWORK_ERROR_MESSAGE };
   }
-  return { kind: "error", message: await readErrorMessage(response) };
 }
 
 async function readErrorMessage(response: Response): Promise<string> {

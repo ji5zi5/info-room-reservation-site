@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  getMockAdminReservations,
   getMockStudentProfile,
   reserveMockStudyPeriod,
   resetMockReservationDataForTests,
@@ -104,7 +105,78 @@ describe("mock user restrictions", () => {
       reservationSummary: { cancelledCount: 0, confirmedCount: 1, noShowCount: 0 }
     });
   });
+
+  it("cancels only still-open same-day reservations when applying a mock hard ban", () => {
+    updateMockAdminPeriodSettings(today, [
+      { capacity: 10, closeTime: "16:19", enabled: true, openTime: "13:00", studyPeriod: "EIGHTH" },
+      { capacity: 10, closeTime: "16:20", enabled: true, openTime: "13:00", studyPeriod: "FIRST" }
+    ]);
+    upsertMockReservationUser(adminUser);
+    upsertMockReservationUser(studentUser);
+    const reservationCreatedAt = new Date("2026-06-16T04:00:00.000Z");
+    const cancellationNow = new Date("2026-06-16T07:20:00.000Z");
+    for (const studyPeriod of ["EIGHTH", "FIRST"] as const) {
+      reserveMockStudyPeriod({
+        date: today,
+        now: reservationCreatedAt,
+        reason: "자습",
+        studyPeriod,
+        user: studentUser
+      });
+    }
+
+    const applied = applyMockUserRestriction({
+      actorId: adminUser.id,
+      bookingStatus: "BANNED",
+      now: cancellationNow,
+      restrictedUntil: null,
+      restrictionReason: "노쇼",
+      targetUserId: studentUser.id
+    });
+
+    expect(applied).toMatchObject({ cancelledFutureReservationCount: 1, kind: "ok" });
+    expect(getMockAdminReservations({ date: today, status: "ALL" })).toEqual([
+      expect.objectContaining({
+        createdAt: reservationCreatedAt,
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        updatedAt: reservationCreatedAt
+      }),
+      expect.objectContaining({
+        createdAt: reservationCreatedAt,
+        status: "CANCELLED",
+        studyPeriod: "FIRST",
+        updatedAt: cancellationNow
+      })
+    ]);
+    expect(getMockStudentProfile(studentUser.id, cancellationNow)).toMatchObject({
+      reservationSummary: { cancelledCount: 1, confirmedCount: 1, noShowCount: 0 }
+    });
+  });
+
+  it("returns an idempotent result for an identical repeated mock hard ban", () => {
+    upsertMockReservationUser(adminUser);
+    upsertMockReservationUser(studentUser);
+    const input = {
+      actorId: adminUser.id,
+      bookingStatus: "BANNED" as const,
+      now: new Date("2026-06-16T07:20:00.000Z"),
+      restrictedUntil: null,
+      restrictionReason: "같은 사유",
+      targetUserId: studentUser.id
+    };
+
+    applyMockUserRestriction(input);
+
+    expect(applyMockUserRestriction(input)).toMatchObject({
+      cancelledFutureReservationCount: 0,
+      idempotent: true,
+      kind: "ok"
+    });
+  });
 });
+
+const today = "2026-06-16";
 
 function openAllMockPeriods(date: string): void {
   updateMockAdminPeriodSettings(date, [

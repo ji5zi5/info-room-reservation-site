@@ -11,6 +11,8 @@ import type { StudentProfilePayload } from "@/lib/student-profile";
 import { PublicSessionUserSchema } from "@/lib/student-facing-session";
 import type { ReservationSidebarUser } from "./reservation-sidebar";
 
+export const NETWORK_ERROR_MESSAGE = "네트워크 연결을 확인하고 다시 시도해주세요.";
+
 type LoginPayload = {
   readonly errorMessage: string | null;
   readonly user: ReservationSidebarUser | null;
@@ -23,6 +25,15 @@ export type StudentProfilePayloadReadResult =
 export type StudentNotificationsReadResult =
   | { readonly kind: "loaded"; readonly notifications: readonly StudentNotification[] }
   | { readonly kind: "error"; readonly message: string };
+
+export type CurrentUserReadResult =
+  | { readonly kind: "loaded"; readonly user: ReservationSidebarUser | null }
+  | { readonly kind: "unauthorized" }
+  | { readonly kind: "error" };
+
+export type PeriodSummariesReadResult =
+  | { readonly kind: "loaded"; readonly periods: readonly PeriodSummary[] }
+  | { readonly kind: "error" };
 
 type JsonBodyReadResult =
   | { readonly kind: "empty" }
@@ -110,16 +121,25 @@ export async function readApiErrorMessage(response: Response): Promise<string | 
   return parsed.data.error?.message ?? null;
 }
 
-export async function readCurrentUser(response: Response): Promise<ReservationSidebarUser | null> {
+export async function readCurrentUser(response: Response): Promise<CurrentUserReadResult> {
+  if (response.status === 401) {
+    return { kind: "unauthorized" };
+  }
   if (!response.ok) {
-    return null;
+    return { kind: "error" };
   }
-  const payload = await readOptionalJson(response);
-  const parsed = CurrentUserPayloadSchema.safeParse(payload);
-  if (!parsed.success) {
-    return null;
+  const payload = await readJsonBody(response);
+  switch (payload.kind) {
+    case "empty":
+    case "malformed":
+      return { kind: "error" };
+    case "loaded": {
+      const parsed = CurrentUserPayloadSchema.safeParse(payload.value);
+      return parsed.success ? { kind: "loaded", user: parsed.data.user } : { kind: "error" };
+    }
+    default:
+      return assertNever(payload);
   }
-  return parsed.data.user;
 }
 
 export async function readLoginPayload(response: Response): Promise<LoginPayload> {
@@ -135,15 +155,20 @@ export async function readLoginPayload(response: Response): Promise<LoginPayload
 }
 
 export async function readPeriodSummaries(response: Response): Promise<readonly PeriodSummary[]> {
+  const result = await readPeriodSummariesResult(response);
+  return result.kind === "loaded" ? result.periods : [];
+}
+
+export async function readPeriodSummariesResult(response: Response): Promise<PeriodSummariesReadResult> {
   if (!response.ok) {
-    return [];
+    return { kind: "error" };
   }
-  const payload = await readOptionalJson(response);
-  const parsed = PeriodsPayloadSchema.safeParse(payload);
-  if (!parsed.success) {
-    return [];
+  const payload = await readJsonBody(response);
+  if (payload.kind !== "loaded") {
+    return { kind: "error" };
   }
-  return parsed.data.periods;
+  const parsed = PeriodsPayloadSchema.safeParse(payload.value);
+  return parsed.success ? { kind: "loaded", periods: parsed.data.periods } : { kind: "error" };
 }
 
 export async function readPeriodWeekPayload(response: Response): Promise<StudentPeriodWeekPayload | null> {
