@@ -1,8 +1,11 @@
 import type { RetentionCleanupResult } from "./retention-policy";
+import { prismaDiscordReservationMessageRepository } from "./prisma-discord-reservation-message-repository";
 
 export type MaintenanceCleanupResult = {
   readonly backlogCount: number;
   readonly csrfTokensDeleted: number;
+  readonly discordInteractionReceiptsDeleted: number;
+  readonly discordMessagesDeleted: number;
   readonly expiredSanctionsRevoked: number;
   readonly rateLimitBucketsDeleted: number;
   readonly retention: RetentionCleanupResult;
@@ -25,12 +28,21 @@ export type MaintenanceCleanupStore = {
   readonly revokeExpiredSanctions: (now: Date) => Promise<MaintenanceExpiryBatchResult>;
 };
 
+export type DiscordMaintenanceCleanupStore = {
+  readonly deleteExpiredInteractionReceipts: (now: Date) => Promise<MaintenanceExpiryBatchResult>;
+  readonly deleteExpiredMessages: (now: Date) => Promise<MaintenanceExpiryBatchResult>;
+};
+
 const MAX_EXPIRY_BATCHES = 10;
 
 export async function runMaintenanceCleanup(input: {
+  readonly discordStore?: DiscordMaintenanceCleanupStore;
   readonly now: Date;
   readonly store: MaintenanceCleanupStore;
 }): Promise<MaintenanceCleanupResult> {
+  const discordStore = input.discordStore ?? prismaDiscordReservationMessageRepository;
+  const discordMessages = await drainExpiryBatches(() => discordStore.deleteExpiredMessages(input.now));
+  const discordReceipts = await drainExpiryBatches(() => discordStore.deleteExpiredInteractionReceipts(input.now));
   const sessions = await drainExpiryBatches(() => input.store.deleteExpiredSessions(input.now));
   const csrfTokens = await drainExpiryBatches(() => input.store.deleteExpiredCsrfTokens(input.now));
   const rateLimitBuckets = await drainExpiryBatches(() => input.store.deleteExpiredRateLimitBuckets(input.now));
@@ -41,11 +53,15 @@ export async function runMaintenanceCleanup(input: {
   return {
     backlogCount:
       sessions.remainingLowerBound +
+      discordMessages.remainingLowerBound +
+      discordReceipts.remainingLowerBound +
       csrfTokens.remainingLowerBound +
       rateLimitBuckets.remainingLowerBound +
       restrictions.remainingLowerBound +
       expiredSanctions.remainingLowerBound,
     csrfTokensDeleted: csrfTokens.processedCount,
+    discordInteractionReceiptsDeleted: discordReceipts.processedCount,
+    discordMessagesDeleted: discordMessages.processedCount,
     expiredSanctionsRevoked: expiredSanctions.processedCount,
     rateLimitBucketsDeleted: rateLimitBuckets.processedCount,
     retention,

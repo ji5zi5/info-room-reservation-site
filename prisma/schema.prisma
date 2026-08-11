@@ -153,9 +153,65 @@ model Reservation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   adminActions AdminAction[]
+  discordInteractionReceipt DiscordInteractionReceipt?
+  discordReservationMessage DiscordReservationMessage?
 
   @@unique([userId, date, studyPeriod])
   @@index([date, studyPeriod, status])
+}
+
+model DiscordReservationMessage {
+  reservationId            String      @id
+  reservation              Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  nonce                    String      @unique @db.VarChar(25)
+  guildId                  String?
+  channelId                String?
+  messageId                String?     @unique
+  initialSendStatus        String      @default("PENDING")
+  initialSendOutcome       String?
+  initialSendAttempts      Int         @default(0)
+  initialSendNextAttemptAt DateTime?   @default(now())
+  initialSendError         String?
+  initialSendClaimId       String?
+  initialSendClaimedAt     DateTime?
+  decision                 String?
+  decisionDiscordActorId   String?
+  decisionLocalActorId     String?
+  decidedAt                DateTime?
+  messageRevision          Int         @default(0)
+  syncedRevision           Int         @default(0)
+  syncStatus               String      @default("PENDING")
+  syncAttempts             Int         @default(0)
+  syncNextAttemptAt        DateTime?
+  syncError                String?
+  syncClaimId              String?
+  syncClaimRevision        Int?
+  syncClaimedAt            DateTime?
+  expiresAt                DateTime    @default(dbgenerated("(CURRENT_TIMESTAMP + interval '30 days')"))
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+
+  @@index([initialSendStatus, initialSendNextAttemptAt])
+  @@index([syncStatus, syncNextAttemptAt])
+  @@index([expiresAt])
+}
+
+model DiscordInteractionReceipt {
+  interactionId   String      @id
+  reservationId   String      @unique
+  reservation     Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  messageId       String?
+  intent          String
+  discordActorId  String
+  localActorId    String
+  status          String
+  terminalOutcome String
+  terminalResult  Json
+  expiresAt       DateTime    @default(dbgenerated("(CURRENT_TIMESTAMP + interval '30 days')"))
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([expiresAt, status])
 }
 
 model AdminAction {

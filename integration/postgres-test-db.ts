@@ -8,6 +8,8 @@ export { prisma };
 
 export async function resetPostgresTestDatabase(): Promise<void> {
   await withSystemDatabaseContext(async (transaction) => {
+    await transaction.discordInteractionReceipt.deleteMany();
+    await transaction.discordReservationMessage.deleteMany();
     await transaction.auditLog.deleteMany();
     await transaction.userSanction.deleteMany();
     await transaction.adminAction.deleteMany();
