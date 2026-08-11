@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { DiscordApplicationConfigError, parseDiscordApplicationConfig, type DiscordApplicationConfig } from "./discord-app-config";
 import { isDiscordWebhookUrl } from "./discord-webhook-url";
 import { resolveLocalStudentNumbers } from "./local-login";
 
@@ -26,6 +27,13 @@ const ServerEnvSchema = z.object({
   CRON_SECRET: z.string().optional(),
   DATABASE_URL: z.string().optional(),
   DIRECT_URL: z.string().optional(),
+  DISCORD_ADMIN_ROLE_ID: z.string().optional(),
+  DISCORD_ADMIN_USER_MAP: z.string().optional(),
+  DISCORD_APPLICATION_ID: z.string().optional(),
+  DISCORD_BOT_TOKEN: z.string().optional(),
+  DISCORD_CHANNEL_ID: z.string().optional(),
+  DISCORD_GUILD_ID: z.string().optional(),
+  DISCORD_PUBLIC_KEY: z.string().optional(),
   DISCORD_WEBHOOK_URL: z.union([z.string().url(), z.literal("")]).optional(),
   ENABLE_LOCAL_ADMIN: BooleanFlagSchema,
   ENABLE_LOCAL_STUDENT: BooleanFlagSchema,
@@ -50,6 +58,7 @@ export type ServerEnv = {
   readonly cronSecret: string | null;
   readonly databaseUrl: string | null;
   readonly directUrl: string | null;
+  readonly discordApplication: DiscordApplicationConfig | null;
   readonly discordWebhookUrl: string | null;
   readonly enableLocalAdmin: boolean;
   readonly enableProductionLocalStudent: boolean;
@@ -71,6 +80,16 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
     throw new ServerEnvError(parsed.error.issues.map((issue) => issue.path.join(".")).filter(Boolean));
   }
 
+  let discordApplication: DiscordApplicationConfig | null;
+  try {
+    discordApplication = parseDiscordApplicationConfig(parsed.data);
+  } catch (error) {
+    if (error instanceof DiscordApplicationConfigError) {
+      throw new ServerEnvError(error.keys);
+    }
+    throw error;
+  }
+
   return {
     adminLoginId: normalizeOptional(parsed.data.ADMIN_LOGIN_ID),
     adminLoginPassword: normalizeOptional(raw.ADMIN_LOGIN_PASSWORD),
@@ -80,6 +99,7 @@ export function parseServerEnv(raw: ServerEnvInput = process.env): ServerEnv {
     cronSecret: normalizeOptional(parsed.data.CRON_SECRET),
     databaseUrl: normalizeOptional(parsed.data.DATABASE_URL),
     directUrl: normalizeOptional(parsed.data.DIRECT_URL),
+    discordApplication,
     discordWebhookUrl: normalizeOptional(parsed.data.DISCORD_WEBHOOK_URL),
     enableLocalAdmin: parsed.data.ENABLE_LOCAL_ADMIN === "true",
     enableProductionLocalStudent: parsed.data.ENABLE_PRODUCTION_LOCAL_STUDENT === "true",

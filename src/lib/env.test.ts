@@ -35,6 +35,45 @@ describe("server environment guards", () => {
     expect(env).toMatchObject({ appOrigin: "https://example.test" });
   });
 
+  it("exposes a complete optional Discord application configuration in every environment", () => {
+    // Given
+    const raw = {
+      DISCORD_ADMIN_ROLE_ID: "123456789012345678",
+      DISCORD_ADMIN_USER_MAP: "223456789012345678:26001",
+      DISCORD_APPLICATION_ID: "323456789012345678",
+      DISCORD_BOT_TOKEN: "bot-token",
+      DISCORD_CHANNEL_ID: "423456789012345678",
+      DISCORD_GUILD_ID: "523456789012345678",
+      DISCORD_PUBLIC_KEY: "a".repeat(64),
+      NODE_ENV: "test"
+    } as const;
+
+    // When
+    const env = parseServerEnv(raw);
+
+    // Then
+    expect(env.discordApplication).toEqual({
+      adminRoleId: "123456789012345678",
+      adminUserBindings: [{ discordUserId: "223456789012345678", studentNumber: "26001" }],
+      applicationId: "323456789012345678",
+      botToken: "bot-token",
+      channelId: "423456789012345678",
+      guildId: "523456789012345678",
+      publicKey: "a".repeat(64)
+    });
+  });
+
+  it.each(["development", "test", "production"] as const)(
+    "rejects partial Discord application configuration in %s before production-only checks",
+    (nodeEnv) => {
+      // Given
+      const raw = { DISCORD_APPLICATION_ID: "323456789012345678", NODE_ENV: nodeEnv } as const;
+
+      // When / Then
+      expect(() => parseServerEnv(raw)).toThrow("DISCORD_BOT_TOKEN");
+    }
+  );
+
   it.each(["development", "test"] as const)(
     "accepts an explicitly configured HTTP localhost application origin in %s",
     (nodeEnv) => {
