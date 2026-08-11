@@ -195,6 +195,34 @@ describe("Prisma Discord reservation message repository", () => {
     );
   });
 
+  it("claims only the requested source-message revision with the same ownership checks", async () => {
+    repositoryMocks.transaction.discordReservationMessage.findMany.mockResolvedValue([{
+      channelId: "channel",
+      guildId: "guild",
+      messageId: "message",
+      messageRevision: 3,
+      reservationId: "reservation-priority",
+      syncAttempts: 1,
+      syncedRevision: 2
+    }]);
+    repositoryMocks.transaction.discordReservationMessage.updateMany.mockResolvedValue({ count: 1 });
+
+    const claim = await prismaDiscordReservationMessageRepository.claimMessageSync(now, "reservation-priority");
+
+    expect(claim).toMatchObject({ attempts: 2, reservationId: "reservation-priority", revision: 3 });
+    expect(repositoryMocks.transaction.discordReservationMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 1,
+        where: expect.objectContaining({ reservationId: "reservation-priority" })
+      })
+    );
+    expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ messageRevision: 3, reservationId: "reservation-priority" })
+      })
+    );
+  });
+
   it("rejects a sync save when a newer message revision superseded the claim", async () => {
     repositoryMocks.transaction.discordReservationMessage.updateMany.mockResolvedValue({ count: 0 });
 

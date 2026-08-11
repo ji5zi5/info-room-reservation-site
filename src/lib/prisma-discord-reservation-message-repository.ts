@@ -63,38 +63,13 @@ export const prismaDiscordReservationMessageRepository = {
     return claimInitialSends(now, undefined, DISCORD_CLAIM_BATCH_SIZE);
   },
 
+  async claimMessageSync(now: Date, reservationId: string): Promise<DiscordMessageSyncClaim | null> {
+    const claims = await claimMessageSyncs(now, reservationId, 1);
+    return claims[0] ?? null;
+  },
+
   async claimMessageSyncs(now: Date): Promise<readonly DiscordMessageSyncClaim[]> {
-    return withSystemContext(async (transaction) => {
-      const staleBefore = new Date(now.getTime() - DISCORD_CLAIM_LEASE_MS);
-      const claimable = syncClaimableWhere(now, staleBefore);
-      const candidates = await transaction.discordReservationMessage.findMany({
-        orderBy: [{ syncNextAttemptAt: "asc" }, { reservationId: "asc" }],
-        take: DISCORD_CLAIM_BATCH_SIZE,
-        where: { ...claimable, channelId: { not: null }, guildId: { not: null }, messageId: { not: null } }
-      });
-      const claims: DiscordMessageSyncClaim[] = [];
-      for (const candidate of candidates.slice(0, DISCORD_CLAIM_BATCH_SIZE)) {
-        if (!candidate.channelId || !candidate.guildId || !candidate.messageId || candidate.messageRevision <= candidate.syncedRevision) {
-          continue;
-        }
-        const claimId = randomUUID();
-        const result = await transaction.discordReservationMessage.updateMany({
-          data: {
-            syncAttempts: { increment: 1 },
-            syncClaimedAt: now,
-            syncClaimId: claimId,
-            syncClaimRevision: candidate.messageRevision,
-            syncError: null,
-            syncStatus: "SYNCING"
-          },
-          where: { ...claimable, messageRevision: candidate.messageRevision, reservationId: candidate.reservationId }
-        });
-        if (result.count === 1) {
-          claims.push({ attempts: candidate.syncAttempts + 1, channelId: candidate.channelId, claimId, guildId: candidate.guildId, messageId: candidate.messageId, reservationId: candidate.reservationId, revision: candidate.messageRevision });
-        }
-      }
-      return claims;
-    });
+    return claimMessageSyncs(now, undefined, DISCORD_CLAIM_BATCH_SIZE);
   },
 
   async readMessageSyncState(reservationId: string): Promise<DiscordMessageSyncState | null> {
@@ -232,6 +207,50 @@ async function claimInitialSends(
           outcome: candidate.initialSendOutcome,
           reservationId: candidate.reservationId
         });
+      }
+    }
+    return claims;
+  });
+}
+
+async function claimMessageSyncs(
+  now: Date,
+  reservationId: string | undefined,
+  limit: number
+): Promise<readonly DiscordMessageSyncClaim[]> {
+  return withSystemContext(async (transaction) => {
+    const staleBefore = new Date(now.getTime() - DISCORD_CLAIM_LEASE_MS);
+    const claimable = syncClaimableWhere(now, staleBefore);
+    const candidates = await transaction.discordReservationMessage.findMany({
+      orderBy: [{ syncNextAttemptAt: "asc" }, { reservationId: "asc" }],
+      take: limit,
+      where: {
+        ...claimable,
+        channelId: { not: null },
+        guildId: { not: null },
+        messageId: { not: null },
+        ...(reservationId === undefined ? {} : { reservationId })
+      }
+    });
+    const claims: DiscordMessageSyncClaim[] = [];
+    for (const candidate of candidates.slice(0, limit)) {
+      if (!candidate.channelId || !candidate.guildId || !candidate.messageId || candidate.messageRevision <= candidate.syncedRevision) {
+        continue;
+      }
+      const claimId = randomUUID();
+      const result = await transaction.discordReservationMessage.updateMany({
+        data: {
+          syncAttempts: { increment: 1 },
+          syncClaimedAt: now,
+          syncClaimId: claimId,
+          syncClaimRevision: candidate.messageRevision,
+          syncError: null,
+          syncStatus: "SYNCING"
+        },
+        where: { ...claimable, messageRevision: candidate.messageRevision, reservationId: candidate.reservationId }
+      });
+      if (result.count === 1) {
+        claims.push({ attempts: candidate.syncAttempts + 1, channelId: candidate.channelId, claimId, guildId: candidate.guildId, messageId: candidate.messageId, reservationId: candidate.reservationId, revision: candidate.messageRevision });
       }
     }
     return claims;

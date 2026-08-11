@@ -100,6 +100,7 @@ type DiscordReservationOutboxRepository = {
   }) => Promise<boolean>;
   readonly claimInitialSend: (now: Date, reservationId: string) => Promise<DiscordInitialSendClaim | null>;
   readonly claimInitialSends: (now: Date) => Promise<readonly DiscordInitialSendClaim[]>;
+  readonly claimMessageSync: (now: Date, reservationId: string) => Promise<DiscordMessageSyncClaim | null>;
   readonly claimMessageSyncs: (now: Date) => Promise<readonly DiscordMessageSyncClaim[]>;
   readonly readMessageSyncState: (reservationId: string) => Promise<DiscordMessageSyncState | null>;
   readonly saveInitialSendFailure: (input: InitialFailureInput) => Promise<boolean>;
@@ -135,7 +136,7 @@ export function createDiscordReservationOutbox(
     const initialResults = await Promise.all(initialClaims.map((claim) => processInitialClaim(dependencies, claim, input.now)));
     const syncClaims = input.reservationId === undefined
       ? await dependencies.repository.claimMessageSyncs(input.now)
-      : [];
+      : optionalSyncClaim(await dependencies.repository.claimMessageSync(input.now, input.reservationId));
     const syncResults = await Promise.all(syncClaims.map((claim) => processSyncClaim(dependencies, claim, input.now)));
     return {
       initial: summarizeInitial(initialResults),
@@ -430,6 +431,10 @@ function summarizeSync(results: readonly SyncClaimResult[]): SyncRunSummary {
 }
 
 function optionalClaim(claim: DiscordInitialSendClaim | null): readonly DiscordInitialSendClaim[] {
+  return claim === null ? [] : [claim];
+}
+
+function optionalSyncClaim(claim: DiscordMessageSyncClaim | null): readonly DiscordMessageSyncClaim[] {
   return claim === null ? [] : [claim];
 }
 
