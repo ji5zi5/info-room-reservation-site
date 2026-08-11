@@ -31,8 +31,8 @@ describe("interactive Discord reservation messages", () => {
       components: [
         {
           components: [
-            { custom_id: "reservation:reservation-1:accept", label: "수락", style: 3, type: 2 },
-            { custom_id: "reservation:reservation-1:reject", label: "거절", style: 4, type: 2 }
+            { custom_id: "reservation:accept:reservation-1", label: "수락", style: 3, type: 2 },
+            { custom_id: "reservation:reject:reservation-1", label: "거절", style: 4, type: 2 }
           ],
           type: 1
         }

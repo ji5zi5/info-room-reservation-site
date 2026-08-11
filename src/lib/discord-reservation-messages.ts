@@ -93,7 +93,7 @@ function reservationActions(reservationId: string): readonly DiscordActionRowCom
       ...row,
       components: row.components.map((button) => ({
         ...button,
-        custom_id: `reservation:${reservationId}:${button.label === "수락" ? "accept" : "reject"}`
+        custom_id: `reservation:${button.label === "수락" ? "accept" : "reject"}:${reservationId}`
       }))
     }
   ];
