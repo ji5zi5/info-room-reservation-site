@@ -1,105 +1,53 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type Reservation } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  AdministratorCancellationInput,
+  AdministratorCancellationResult
+} from "@/lib/admin-reservation-operations";
+import type { CsrfValidationResult } from "@/lib/csrf";
 import { TransactionRetryExhaustedError } from "@/lib/db-context";
-import type { DatabaseActor } from "@/lib/db-context";
 import type { RateLimitResult } from "@/lib/rate-limit";
 import type { CurrentSession, SessionUser } from "@/lib/session";
 
-type ReservationRow = {
+type MockReservationRow = {
   readonly id: string;
   readonly status: string;
   readonly userId: string;
 };
-type ReservationFindUnique = (input: unknown) => Promise<ReservationRow | null>;
-type ReservationUpdate = (input: unknown) => Promise<ReservationRow>;
-type ReservationUpdateMany = (input: unknown) => Promise<{ readonly count: number }>;
-type AdminActionCreate = (input: unknown) => Promise<{ readonly id: string }>;
-type AuditLogCreate = (input: unknown) => Promise<unknown>;
-type TransactionClient = {
-  readonly $executeRaw: (strings: TemplateStringsArray, ...values: readonly unknown[]) => Promise<number>;
-  readonly adminAction: { readonly create: AdminActionCreate };
-  readonly auditLog: { readonly create: AuditLogCreate };
-  readonly reservation: {
-    readonly findUnique: ReservationFindUnique;
-    readonly update: ReservationUpdate;
-    readonly updateMany: ReservationUpdateMany;
-  };
-};
-type PrismaTransaction = <T>(operation: (transaction: TransactionClient) => Promise<T>) => Promise<T>;
-type DatabaseContextClient = {
-  readonly reservation: { readonly findUnique: ReservationFindUnique };
-};
-type WithDatabaseContext = <T>(input: {
-  readonly actor: DatabaseActor;
-  readonly client: unknown;
-  readonly operation: (transaction: DatabaseContextClient) => Promise<T>;
-}) => Promise<T>;
-type RequireAdminSession = () => Promise<CurrentSession>;
-type ValidateRequestCsrf = (request: Request, sessionId: string) => Promise<{ readonly kind: "ok" }>;
 type MockCancellationResult =
-  | { readonly kind: "cancelled"; readonly reservation: ReservationRow; readonly user: SessionUser }
-  | { readonly kind: "not_cancellable"; readonly reservation: ReservationRow; readonly user: SessionUser }
+  | { readonly kind: "cancelled"; readonly reservation: MockReservationRow; readonly user: SessionUser }
+  | { readonly kind: "forbidden" }
+  | { readonly kind: "not_cancellable"; readonly reservation: MockReservationRow; readonly user: SessionUser }
   | { readonly kind: "not_found" };
-type CancelMockReservation = (input: unknown) => MockCancellationResult;
 
 const routeMocks = vi.hoisted(() => ({
-  adminActionCreate: vi.fn<AdminActionCreate>(),
-  auditLogCreate: vi.fn<AuditLogCreate>(),
-  cancelMockReservation: vi.fn<CancelMockReservation>(),
-  databaseActorFromSessionUser: vi.fn<(user: SessionUser) => DatabaseActor>(),
+  cancelAdministratorReservation: vi.fn<
+    (input: AdministratorCancellationInput) => Promise<AdministratorCancellationResult>
+  >(),
+  cancelMockReservation: vi.fn<(input: unknown) => MockCancellationResult>(),
   enforceAdminMutationRateLimit: vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
-  requireAdminSession: vi.fn<RequireAdminSession>(),
+  requireAdminSession: vi.fn<() => Promise<CurrentSession>>(),
   requireMutatingRequestSafety: vi.fn<(request: Request) => null>(),
-  rawCalls: [] as Array<{ readonly strings: readonly string[]; readonly values: readonly unknown[] }>,
-  rawReservationFindUnique: vi.fn<ReservationFindUnique>(),
-  reservationFindUnique: vi.fn<ReservationFindUnique>(),
-  reservationUpdate: vi.fn<ReservationUpdate>(),
-  reservationUpdateMany: vi.fn<ReservationUpdateMany>(),
-  scopedReservationFindUnique: vi.fn<ReservationFindUnique>(),
-  transaction: vi.fn<PrismaTransaction>(),
-  validateRequestCsrf: vi.fn<ValidateRequestCsrf>(),
-  withDatabaseContext: vi.fn<WithDatabaseContext>()
+  validateRequestCsrf: vi.fn<(request: Request, sessionId: string) => Promise<CsrfValidationResult>>()
 }));
 
-vi.mock("@/lib/db", () => ({
-  prisma: {
-    $transaction: routeMocks.transaction,
-    reservation: { findUnique: routeMocks.rawReservationFindUnique }
-  }
+vi.mock("@/lib/admin-reservation-operations", () => ({
+  cancelAdministratorReservation: routeMocks.cancelAdministratorReservation
 }));
-
-vi.mock("@/lib/db-context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/db-context")>();
-  return {
-    ...actual,
-    databaseActorFromSessionUser: routeMocks.databaseActorFromSessionUser,
-    withDatabaseContext: routeMocks.withDatabaseContext
-  };
-});
-
 vi.mock("@/lib/request-csrf", () => ({
   messageForCsrfError: (reason: string) => `csrf:${reason}`,
   validateRequestCsrf: routeMocks.validateRequestCsrf
 }));
-
-vi.mock("@/lib/mock-dev-mode", () => ({
-  isNoDatabaseMockMode: routeMocks.isNoDatabaseMockMode
-}));
-
-vi.mock("@/lib/mock-reservation-data", () => ({
-  cancelMockReservation: routeMocks.cancelMockReservation
-}));
-
+vi.mock("@/lib/mock-dev-mode", () => ({ isNoDatabaseMockMode: routeMocks.isNoDatabaseMockMode }));
+vi.mock("@/lib/mock-reservation-data", () => ({ cancelMockReservation: routeMocks.cancelMockReservation }));
 vi.mock("@/lib/request-security", () => ({
   requireMutatingRequestSafety: routeMocks.requireMutatingRequestSafety
 }));
-
 vi.mock("@/lib/route-rate-limit", () => ({
   enforceAdminMutationRateLimit: routeMocks.enforceAdminMutationRateLimit
 }));
-
 vi.mock("@/lib/session", () => ({
   ForbiddenSessionError: class ForbiddenSessionError extends Error {},
   requireAdminSession: routeMocks.requireAdminSession,
@@ -119,159 +67,76 @@ const adminUser: SessionUser = {
   studentNumber: "90000"
 };
 
-const reservation = {
+const reservation: Reservation & { readonly status: "CANCELLED" } = {
+  createdAt: new Date("2026-08-11T00:00:00.000Z"),
+  date: "2026-08-12",
   id: "reservation-1",
-  status: "CONFIRMED",
+  reason: "자습",
+  status: "CANCELLED",
+  studyPeriod: "EIGHTH",
+  updatedAt: new Date("2026-08-11T00:00:00.000Z"),
   userId: "student-1"
-} satisfies ReservationRow;
+};
 
 const allowedRateLimit: RateLimitResult = {
   kind: "allowed",
   remaining: 9,
-  resetAt: new Date("2026-06-16T00:01:00.000Z")
+  resetAt: new Date("2026-08-11T00:01:00.000Z")
 };
 
 describe("admin reservation cancel route", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    routeMocks.rawCalls.length = 0;
     routeMocks.requireMutatingRequestSafety.mockReturnValue(null);
     routeMocks.requireAdminSession.mockResolvedValue({ id: "session-admin", user: adminUser });
     routeMocks.validateRequestCsrf.mockResolvedValue({ kind: "ok" });
     routeMocks.enforceAdminMutationRateLimit.mockResolvedValue(allowedRateLimit);
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
+    routeMocks.cancelAdministratorReservation.mockResolvedValue({ kind: "ok", reservation });
     routeMocks.cancelMockReservation.mockReturnValue({ kind: "not_found" });
-    routeMocks.databaseActorFromSessionUser.mockImplementation((user) => ({ id: user.id, role: "ADMIN" }));
-    routeMocks.rawReservationFindUnique.mockResolvedValue(reservation);
-    routeMocks.reservationFindUnique.mockResolvedValue(reservation);
-    routeMocks.scopedReservationFindUnique.mockResolvedValue(reservation);
-    routeMocks.reservationUpdate.mockResolvedValue({ ...reservation, status: "CANCELLED" });
-    routeMocks.reservationUpdateMany.mockResolvedValue({ count: 1 });
-    routeMocks.adminActionCreate.mockResolvedValue({ id: "action-cancel" });
-    routeMocks.auditLogCreate.mockResolvedValue({});
-    routeMocks.withDatabaseContext.mockImplementation(async (input) => input.operation(databaseContextClient()));
-    routeMocks.transaction.mockImplementation(async (operation) => operation(transactionClient()));
   });
 
-  it("reads the target reservation through the authenticated ADMIN context before deriving the user lock key", async () => {
+  it("passes explicit web actor, source, provenance, reason, and reservation ID to the locked service", async () => {
     // Given
-    const adminActor = { id: adminUser.id, role: "ADMIN" } satisfies DatabaseActor;
+    const reason = "행사 준비로 정보실 사용 불가";
+
+    // When
+    const response = await POST(cancelRequest({ reason }), cancelContext());
+
+    // Then
+    expect(response.status).toBe(200);
+    expect(routeMocks.cancelAdministratorReservation).toHaveBeenCalledWith({
+      actor: { id: adminUser.id, role: "ADMIN" },
+      ipHash: expect.any(String),
+      reason,
+      reservationId: reservation.id,
+      source: { kind: "WEB_ADMIN" }
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      reservation: { id: reservation.id, status: "CANCELLED" }
+    });
+  });
+
+  it.each([
+    ["not_found", 404, "not_found", "예약을 찾을 수 없습니다."],
+    ["invalid_status", 409, "bad_request", "이미 처리된 예약은 관리자 취소로 변경할 수 없습니다."]
+  ] as const)("maps the %s service result to the existing response", async (kind, status, code, message) => {
+    // Given
+    routeMocks.cancelAdministratorReservation.mockResolvedValue({ kind });
 
     // When
     const response = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
 
     // Then
-    expect(response.status).toBe(200);
-    expect(routeMocks.databaseActorFromSessionUser).toHaveBeenCalledWith(adminUser);
-    expect(routeMocks.withDatabaseContext).toHaveBeenCalledWith({
-      actor: adminActor,
-      client: expect.anything(),
-      operation: expect.any(Function)
-    });
-    expect(routeMocks.rawReservationFindUnique).not.toHaveBeenCalled();
-    expect(routeMocks.scopedReservationFindUnique).toHaveBeenCalledWith({
-      select: { userId: true },
-      where: { id: reservation.id }
-    });
-    expect(routeMocks.withDatabaseContext.mock.invocationCallOrder[0]).toBeLessThan(
-      routeMocks.transaction.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toMatchObject({ error: { code, message } });
+  });
+
+  it("maps only an exhausted P2034 service conflict to the existing 409 response", async () => {
+    // Given
+    routeMocks.cancelAdministratorReservation.mockRejectedValue(
+      new TransactionRetryExhaustedError(serializableConflict())
     );
-  });
-
-  it("returns 404 from the scoped pre-lock read without entering the mutation when the reservation is absent", async () => {
-    // Given
-    routeMocks.scopedReservationFindUnique.mockResolvedValueOnce(null);
-
-    // When
-    const response = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
-
-    // Then
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toMatchObject({ error: { code: "not_found" } });
-    expect(routeMocks.withDatabaseContext).toHaveBeenCalledOnce();
-    expect(routeMocks.rawReservationFindUnique).not.toHaveBeenCalled();
-    expect(routeMocks.transaction).not.toHaveBeenCalled();
-  });
-
-  it("stores the admin cancellation reason in the action and audit log", async () => {
-    const response = await POST(cancelRequest({ reason: "행사 준비로 정보실 사용 불가" }), cancelContext());
-
-    expect(response.status).toBe(200);
-    expect(routeMocks.adminActionCreate).toHaveBeenCalledWith({
-      data: {
-        action: "ADMIN_RESERVATION_CANCEL",
-        actorId: adminUser.id,
-        after: JSON.stringify({ reservationStatus: "CANCELLED" }),
-        before: JSON.stringify({ reservationStatus: "CONFIRMED" }),
-        ipHash: expect.any(String),
-        reason: "행사 준비로 정보실 사용 불가",
-        reservationId: reservation.id,
-        targetUserId: reservation.userId
-      }
-    });
-    expect(routeMocks.auditLogCreate).toHaveBeenCalledWith({
-      data: {
-        action: "ADMIN_RESERVATION_CANCEL",
-        actorId: adminUser.id,
-        detail: JSON.stringify({
-          actionId: "action-cancel",
-          reason: "행사 준비로 정보실 사용 불가",
-          reservationId: reservation.id
-        }),
-        userId: reservation.userId
-      }
-    });
-    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledWith({
-      data: { status: "CANCELLED" },
-      where: { id: reservation.id, status: "CONFIRMED" }
-    });
-    expect(routeMocks.reservationUpdateMany.mock.invocationCallOrder[0]).toBeLessThan(
-      routeMocks.adminActionCreate.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
-    );
-    const lockValues = routeMocks.rawCalls
-      .filter((call) => call.strings.join("?").includes("pg_advisory_xact_lock"))
-      .map((call) => call.values);
-    expect(lockValues).toEqual([[`user:${reservation.userId}`]]);
-  });
-
-  it("records only one admin cancellation when two requests race on the status guard", async () => {
-    // Given
-    const firstTransactionEntered = deferred();
-    const releaseFirstTransaction = deferred();
-    routeMocks.reservationUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
-    routeMocks.transaction
-      .mockImplementationOnce(async (operation) => {
-        const result = await operation(transactionClient());
-        firstTransactionEntered.resolve();
-        await releaseFirstTransaction.promise;
-        return result;
-      })
-      .mockImplementationOnce(async (operation) => {
-        await releaseFirstTransaction.promise;
-        return operation(transactionClient());
-      });
-
-    // When
-    const firstPromise = POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
-    await firstTransactionEntered.promise;
-    const secondPromise = POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
-    releaseFirstTransaction.resolve();
-    const [first, second] = await Promise.all([firstPromise, secondPromise]);
-
-    // Then
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(409);
-    expect(routeMocks.reservationUpdateMany).toHaveBeenCalledTimes(2);
-    expect(routeMocks.adminActionCreate).toHaveBeenCalledTimes(1);
-    expect(routeMocks.auditLogCreate).toHaveBeenCalledTimes(1);
-  });
-
-  it("maps only an exhausted three-attempt P2034 cancellation to the bounded conflict response", async () => {
-    // Given
-    routeMocks.transaction.mockImplementation(async (operation) => {
-      await operation(transactionClient());
-      throw serializableConflict();
-    });
 
     // When
     const response = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
@@ -279,60 +144,69 @@ describe("admin reservation cancel route", () => {
     // Then
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ error: { code: "bad_request" } });
-    expect(routeMocks.transaction).toHaveBeenCalledTimes(3);
   });
 
   it.each([
-    ["an exhausted non-serializable cause", new TransactionRetryExhaustedError(new Error("connection lost"))],
-    ["an unknown transaction failure", new Error("unknown failure")]
-  ])("returns 500 for %s", async (_label, failure) => {
+    ["non-serializable exhausted cause", new TransactionRetryExhaustedError(new Error("connection lost"))],
+    ["unknown service failure", new Error("unknown failure")]
+  ])("keeps %s on the server-error path", async (_label, failure) => {
     // Given
-    routeMocks.transaction.mockRejectedValueOnce(failure);
+    routeMocks.cancelAdministratorReservation.mockRejectedValue(failure);
 
     // When
     const response = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
 
     // Then
     expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "server_error" } });
   });
 
-  it("rejects an admin cancellation without a reason before mutating reservations", async () => {
-    routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
-
+  it("rejects a blank reason before either cancellation implementation", async () => {
+    // When
     const response = await POST(cancelRequest({ reason: "   " }), cancelContext());
 
+    // Then
     expect(response.status).toBe(400);
-    expect(routeMocks.transaction).not.toHaveBeenCalled();
+    expect(routeMocks.cancelAdministratorReservation).not.toHaveBeenCalled();
     expect(routeMocks.cancelMockReservation).not.toHaveBeenCalled();
   });
 
-  it("returns 409 when the same mock reservation is cancelled a second time", async () => {
+  it("preserves the CSRF failure response before rate limiting and cancellation", async () => {
     // Given
-    routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
-    routeMocks.cancelMockReservation
-      .mockReturnValueOnce({ kind: "cancelled", reservation: { ...reservation, status: "CANCELLED" }, user: adminUser })
-      .mockReturnValueOnce({ kind: "not_cancellable", reservation, user: adminUser });
+    routeMocks.validateRequestCsrf.mockResolvedValue({ kind: "error", reason: "csrf_invalid" });
 
     // When
-    const first = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
-    const second = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
+    const response = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
 
     // Then
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(409);
-    await expect(second.json()).resolves.toMatchObject({ error: { code: "bad_request" } });
-    expect(routeMocks.rawReservationFindUnique).not.toHaveBeenCalled();
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "csrf_invalid" } });
+    expect(routeMocks.enforceAdminMutationRateLimit).not.toHaveBeenCalled();
+    expect(routeMocks.cancelAdministratorReservation).not.toHaveBeenCalled();
+  });
+
+  it("preserves the rate-limit response before cancellation", async () => {
+    // Given
+    routeMocks.enforceAdminMutationRateLimit.mockResolvedValue({
+      kind: "blocked",
+      limit: 10,
+      resetAt: new Date("2026-08-11T00:01:00.000Z")
+    });
+
+    // When
+    const response = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
+
+    // Then
+    expect(response.status).toBe(429);
+    expect(routeMocks.cancelAdministratorReservation).not.toHaveBeenCalled();
   });
 
   it.each([
-    [
-      "cancels a confirmed mock reservation",
-      { kind: "cancelled", reservation: { ...reservation, status: "CANCELLED" }, user: adminUser },
-      200,
-      undefined
-    ],
-    ["returns not found for an unknown mock reservation", { kind: "not_found" }, 404, "not_found"]
-  ] as const)("%s Given no-database mock mode When an admin submits a valid cancellation Then it keeps the real route contract", async (_label, result, expectedStatus, expectedCode) => {
+    ["cancelled", { kind: "cancelled", reservation, user: adminUser }, 200, undefined],
+    ["not_found", { kind: "not_found" }, 404, "not_found"],
+    ["not_cancellable", { kind: "not_cancellable", reservation, user: adminUser }, 409, "bad_request"],
+    ["forbidden", { kind: "forbidden" }, 403, "forbidden"]
+  ] as const)("preserves the %s no-database mock result", async (_label, result, status, code) => {
     // Given
     routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
     routeMocks.cancelMockReservation.mockReturnValue(result);
@@ -341,54 +215,13 @@ describe("admin reservation cancel route", () => {
     const response = await POST(cancelRequest({ reason: "운영 취소" }), cancelContext());
 
     // Then
-    expect(response.status).toBe(expectedStatus);
-    expect(routeMocks.cancelMockReservation).toHaveBeenCalledWith({
-      id: reservation.id,
-      now: expect.any(Date),
-      requireConfirmed: true,
-      user: adminUser
-    });
-    expect(routeMocks.rawReservationFindUnique).not.toHaveBeenCalled();
-    if (expectedCode) {
-      await expect(response.json()).resolves.toMatchObject({ error: { code: expectedCode } });
-      return;
+    expect(response.status).toBe(status);
+    expect(routeMocks.cancelAdministratorReservation).not.toHaveBeenCalled();
+    if (code) {
+      await expect(response.json()).resolves.toMatchObject({ error: { code } });
     }
-    await expect(response.json()).resolves.toMatchObject({ reservation: { id: reservation.id, status: "CANCELLED" } });
   });
 });
-
-function transactionClient(): TransactionClient {
-  return {
-    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
-      routeMocks.rawCalls.push({ strings: [...strings], values });
-      return 1;
-    },
-    adminAction: { create: routeMocks.adminActionCreate },
-    auditLog: { create: routeMocks.auditLogCreate },
-    reservation: {
-      findUnique: routeMocks.reservationFindUnique,
-      update: routeMocks.reservationUpdate,
-      updateMany: routeMocks.reservationUpdateMany
-    }
-  };
-}
-
-function databaseContextClient(): DatabaseContextClient {
-  return { reservation: { findUnique: routeMocks.scopedReservationFindUnique } };
-}
-
-function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
-  let resolvePromise: (() => void) | undefined;
-  const promise = new Promise<void>((resolve) => {
-    resolvePromise = resolve;
-  });
-  return {
-    promise,
-    resolve() {
-      resolvePromise?.();
-    }
-  };
-}
 
 function serializableConflict(): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError("serialization conflict", {
@@ -400,11 +233,7 @@ function serializableConflict(): Prisma.PrismaClientKnownRequestError {
 function cancelRequest(body: unknown): Request {
   return new Request("https://example.test/api/admin/reservations/reservation-1/cancel", {
     body: JSON.stringify(body),
-    headers: {
-      "content-type": "application/json",
-      "x-csrf-token": "csrf-token",
-      origin: "https://example.test"
-    },
+    headers: { "content-type": "application/json", "x-csrf-token": "csrf-token", origin: "https://example.test" },
     method: "POST"
   });
 }

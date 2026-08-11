@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { canAdminCancelReservation } from "@/lib/admin-reservation-transition";
+import { cancelAdministratorReservation } from "@/lib/admin-reservation-operations";
 import {
-  databaseActorFromSessionUser,
   isSerializableTransactionConflict,
-  TransactionRetryExhaustedError,
-  userMutationLockKey,
-  withDatabaseContext,
-  withDatabaseMutation
+  TransactionRetryExhaustedError
 } from "@/lib/db-context";
-import { prisma } from "@/lib/db";
 import {
   jsonError,
   jsonMutatingRequestSafetyError,
@@ -68,59 +63,12 @@ export async function POST(request: Request, context: { readonly params: Promise
       return NextResponse.json({ reservation: result.reservation });
     }
     const ipHash = hashRequestClientIp(request);
-    const target = await withDatabaseContext({
-      actor: databaseActorFromSessionUser(admin),
-      client: prisma,
-      operation: (transaction) => transaction.reservation.findUnique({
-        select: { userId: true },
-        where: { id: params.id }
-      })
-    });
-    if (!target) {
-      return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");
-    }
-    const result = await withDatabaseMutation({
-      actor: databaseActorFromSessionUser(admin),
-      client: prisma,
-      lockKeys: [userMutationLockKey(target.userId)],
-      operation: async (transaction) => {
-      const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
-      if (!reservation) {
-        return { kind: "not_found" } as const;
-      }
-      if (!canAdminCancelReservation(reservation.status)) {
-        return { kind: "invalid_status" } as const;
-      }
-      const transition = await transaction.reservation.updateMany({
-        data: { status: "CANCELLED" },
-        where: { id: reservation.id, status: "CONFIRMED" }
-      });
-      if (transition.count !== 1) {
-        return { kind: "invalid_status" } as const;
-      }
-      const updated = { ...reservation, status: "CANCELLED" } as const;
-      const action = await transaction.adminAction.create({
-        data: {
-          action: "ADMIN_RESERVATION_CANCEL",
-          actorId: admin.id,
-          after: JSON.stringify({ reservationStatus: updated.status }),
-          before: JSON.stringify({ reservationStatus: reservation.status }),
-          ipHash,
-          reason: parsed.data.reason,
-          reservationId: reservation.id,
-          targetUserId: reservation.userId
-        }
-      });
-      await transaction.auditLog.create({
-        data: {
-          action: "ADMIN_RESERVATION_CANCEL",
-          actorId: admin.id,
-          detail: JSON.stringify({ actionId: action.id, reason: parsed.data.reason, reservationId: reservation.id }),
-          userId: reservation.userId
-        }
-      });
-      return { kind: "ok", reservation: updated } as const;
-      }
+    const result = await cancelAdministratorReservation({
+      actor: { id: admin.id, role: "ADMIN" },
+      ipHash,
+      reason: parsed.data.reason,
+      reservationId: params.id,
+      source: { kind: "WEB_ADMIN" }
     });
     if (result.kind === "not_found") {
       return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");

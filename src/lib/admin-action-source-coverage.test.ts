@@ -8,11 +8,15 @@ const directAdminActionRouteFiles = [
   "src/app/api/admin/notifications/closed-periods/send/route.ts",
   "src/app/api/admin/period-settings/route.ts",
   "src/app/api/admin/reservations/admin-create-reservation.ts",
-  "src/app/api/admin/reservations/[id]/cancel/route.ts",
   "src/app/api/admin/reservations/[id]/no-show/route.ts",
   "src/app/api/admin/users/[id]/restriction/route.ts",
   "src/app/api/admin/users/[id]/sessions/revoke/route.ts"
 ] as const;
+
+const sharedAdminCancellationAuditContract = {
+  operationFile: "src/lib/admin-reservation-operations.ts",
+  routeFile: "src/app/api/admin/reservations/[id]/cancel/route.ts"
+} as const;
 
 const studentCancellationAuditContract = {
   capability: "app_private.cancel_owned_student_reservation",
@@ -33,6 +37,21 @@ describe("admin action source coverage", () => {
       expect(source, `${filePath} should compute hashed request source`).toContain("hashRequestClientIp(request)");
       expect(source, `${filePath} should persist AdminAction.ipHash`).toContain("ipHash");
     }
+  });
+
+  it("passes the hashed web cancellation source to the shared AdminAction writer", () => {
+    // Given
+    const routeSource = readFileSync(join(process.cwd(), sharedAdminCancellationAuditContract.routeFile), "utf8");
+    const operationSource = readFileSync(join(process.cwd(), sharedAdminCancellationAuditContract.operationFile), "utf8");
+
+    // When
+    const routeHashesAndPassesSource =
+      routeSource.includes("const ipHash = hashRequestClientIp(request)") && routeSource.includes("ipHash,");
+
+    // Then
+    expect(routeHashesAndPassesSource).toBe(true);
+    expect(operationSource).toContain("adminAction.create");
+    expect(operationSource).toContain("ipHash: input.ipHash");
   });
 
   it("binds the hashed student cancellation request source to the SQL capability AdminAction insert", () => {
