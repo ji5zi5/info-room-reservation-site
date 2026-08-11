@@ -44,6 +44,7 @@ describe("admin audit action helpers", () => {
 
   it("classifies known admin action strings", () => {
     expect(classifyAdminAuditAction("ADMIN_RESERVATION_CREATE")).toBe("RESERVATION");
+    expect(classifyAdminAuditAction("DISCORD_RESERVATION_ACCEPT")).toBe("RESERVATION");
     expect(classifyAdminAuditAction("SHADOW_BAN_CHAOS_CANCEL")).toBe("RESERVATION");
     expect(classifyAdminAuditAction("USER_RESTRICTION_REMOVE")).toBe("RESTRICTION");
     expect(classifyAdminAuditAction("STUDENT_RESERVATION_CANCEL_RESTRICTION")).toBe("RESERVATION");
@@ -57,6 +58,10 @@ describe("admin audit action helpers", () => {
 
   it("labels manual admin reservation creation", () => {
     expect(getAdminAuditActionLabel("ADMIN_RESERVATION_CREATE")).toBe("관리자 예약 추가");
+  });
+
+  it("labels Discord reservation acceptance", () => {
+    expect(getAdminAuditActionLabel("DISCORD_RESERVATION_ACCEPT")).toBe("디스코드 예약 수락");
   });
 
   it("labels shadow-ban chaos cancellations", () => {

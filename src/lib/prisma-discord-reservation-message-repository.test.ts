@@ -6,7 +6,7 @@ type Model = {
   readonly deleteMany: ReturnType<typeof vi.fn>;
   readonly findMany: ReturnType<typeof vi.fn>;
   readonly findUnique: ReturnType<typeof vi.fn>;
-  readonly updateMany: ReturnType<typeof vi.fn>;
+  readonly updateMany: ReturnType<typeof vi.fn<(input: Prisma.DiscordReservationMessageUpdateManyArgs) => Promise<Prisma.BatchPayload>>>;
 };
 
 type ReceiptRow = { readonly terminalResult: Prisma.JsonValue };
@@ -24,7 +24,7 @@ const repositoryMocks = vi.hoisted(() => {
     deleteMany: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
-    updateMany: vi.fn()
+    updateMany: vi.fn<(input: Prisma.DiscordReservationMessageUpdateManyArgs) => Promise<Prisma.BatchPayload>>()
   });
   const receiptModel = (): ReceiptModel => ({
     createMany: vi.fn(),
@@ -57,7 +57,8 @@ import {
   DISCORD_CLEANUP_BATCH_SIZE,
   cappedDiscordRetryAt,
   prismaDiscordReservationMessageRepository,
-  recordDiscordInteractionReceipt
+  recordDiscordInteractionReceipt,
+  recordDiscordReservationDecision
 } from "./prisma-discord-reservation-message-repository";
 
 const now = new Date("2026-08-11T00:00:00.000Z");
@@ -195,6 +196,30 @@ describe("Prisma Discord reservation message repository", () => {
     });
   });
 
+  it("records rejection decision metadata without a second revision bump", async () => {
+    repositoryMocks.transaction.discordReservationMessage.updateMany.mockResolvedValue({ count: 1 });
+
+    const recorded = await recordDiscordReservationDecision(repositoryMocks.transaction, {
+      decision: "CANCELLED",
+      discordActorId: "discord-user",
+      localActorId: "admin",
+      now,
+      reservationId: "reservation",
+      revision: "PRESERVE"
+    });
+
+    expect(recorded).toBe(true);
+    expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledWith({
+      data: {
+        decidedAt: now,
+        decision: "CANCELLED",
+        decisionDiscordActorId: "discord-user",
+        decisionLocalActorId: "admin"
+      },
+      where: { decision: null, reservationId: "reservation" }
+    });
+  });
+
   it("replays the stored terminal receipt after an interaction-id conflict", async () => {
     const result = { kind: "accepted", reservationId: "reservation" };
     repositoryMocks.transaction.discordInteractionReceipt.createMany.mockResolvedValue({ count: 0 });
@@ -210,6 +235,28 @@ describe("Prisma Discord reservation message repository", () => {
       status: "TERMINAL",
       terminalOutcome: "ACCEPTED",
       terminalResult: result
+    });
+
+    expect(receipt).toEqual({ kind: "replayed", terminalResult: result });
+  });
+
+  it("replays the first reservation receipt for a different interaction id", async () => {
+    const result = { kind: "accepted", reservationId: "reservation" };
+    repositoryMocks.transaction.discordInteractionReceipt.createMany.mockResolvedValue({ count: 0 });
+    repositoryMocks.transaction.discordInteractionReceipt.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ terminalResult: result });
+
+    const receipt = await recordDiscordInteractionReceipt(repositoryMocks.transaction, {
+      discordActorId: "other-discord-user",
+      interactionId: "different-interaction",
+      intent: "REJECT",
+      localActorId: "other-admin",
+      messageId: "message",
+      reservationId: "reservation",
+      status: "TERMINAL",
+      terminalOutcome: "CANCELLED",
+      terminalResult: { kind: "cancelled", reservationId: "reservation" }
     });
 
     expect(receipt).toEqual({ kind: "replayed", terminalResult: result });
