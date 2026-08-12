@@ -24,10 +24,15 @@ describe("Prisma Discord reservation message initial sends", () => {
 
     expect(marked).toBe(true);
     expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledWith({
-      data: { initialSendOutcome: "WEBHOOK_FALLBACK_STARTED" },
+      data: {
+        initialSendOutcome: "WEBHOOK_FALLBACK_STARTED",
+        initialSendStatus: "POSTING",
+        postOperationBoundary: "WEBHOOK_FALLBACK_STARTED",
+        postOperationId: "claim"
+      },
       where: {
         initialSendClaimId: "claim",
-        initialSendStatus: "SENDING",
+        initialSendStatus: "CLAIMED",
         reservationId: "reservation"
       }
     });
@@ -50,7 +55,7 @@ describe("Prisma Discord reservation message initial sends", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           initialSendClaimId: "stale-claim",
-          initialSendStatus: "SENDING"
+          initialSendStatus: { in: ["CLAIMED", "POSTING"] }
         })
       })
     );

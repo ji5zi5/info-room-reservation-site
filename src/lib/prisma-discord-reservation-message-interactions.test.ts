@@ -39,10 +39,9 @@ describe("Prisma Discord reservation message interaction writes", () => {
 
   it("replays the stored terminal receipt after an interaction-id conflict", async () => {
     const result = { kind: "accepted", reservationId: "reservation" };
+    const storedReceipt = { reservationId: "reservation", status: "TERMINAL", terminalResult: result };
     repositoryMocks.transaction.discordInteractionReceipt.createMany.mockResolvedValue({ count: 0 });
-    repositoryMocks.transaction.discordInteractionReceipt.findUnique.mockResolvedValue({
-      terminalResult: result
-    });
+    repositoryMocks.transaction.discordInteractionReceipt.findUnique.mockResolvedValue(storedReceipt);
 
     const receipt = await recordDiscordInteractionReceipt(repositoryMocks.transaction, {
       discordActorId: "discord-user",
@@ -59,25 +58,28 @@ describe("Prisma Discord reservation message interaction writes", () => {
     expect(receipt).toEqual({ kind: "replayed", terminalResult: result });
   });
 
-  it("replays the first reservation receipt for a different interaction id", async () => {
-    const result = { kind: "accepted", reservationId: "reservation" };
+  it("rejects an interaction replay bound to another reservation", async () => {
+    const result = { kind: "accepted", reservationId: "other-reservation" };
+    const storedReceipt = { reservationId: "other-reservation", status: "TERMINAL", terminalResult: result };
     repositoryMocks.transaction.discordInteractionReceipt.createMany.mockResolvedValue({ count: 0 });
-    repositoryMocks.transaction.discordInteractionReceipt.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ terminalResult: result });
+    repositoryMocks.transaction.discordInteractionReceipt.findUnique.mockResolvedValue(storedReceipt);
 
-    const receipt = await recordDiscordInteractionReceipt(repositoryMocks.transaction, {
-      discordActorId: "other-discord-user",
-      interactionId: "different-interaction",
-      intent: "REJECT",
-      localActorId: "other-admin",
-      messageId: "message",
-      reservationId: "reservation",
-      status: "TERMINAL",
-      terminalOutcome: "CANCELLED",
-      terminalResult: { kind: "cancelled", reservationId: "reservation" }
-    });
+    await expect(recordDiscordInteractionReceipt(repositoryMocks.transaction, {
+      discordActorId: "discord-user", interactionId: "interaction", intent: "ACCEPT",
+      localActorId: "admin", messageId: "message", reservationId: "reservation", status: "TERMINAL",
+      terminalOutcome: "ACCEPTED", terminalResult: result
+    })).rejects.toThrow("interaction");
+  });
 
-    expect(receipt).toEqual({ kind: "replayed", terminalResult: result });
+  it("does not replay a different interaction receipt for the same reservation", async () => {
+    repositoryMocks.transaction.discordInteractionReceipt.createMany.mockResolvedValue({ count: 0 });
+    repositoryMocks.transaction.discordInteractionReceipt.findUnique.mockResolvedValue(null);
+
+    await expect(recordDiscordInteractionReceipt(repositoryMocks.transaction, {
+      discordActorId: "other-discord-user", interactionId: "different-interaction", intent: "REJECT",
+      localActorId: "other-admin", messageId: "message", reservationId: "reservation", status: "TERMINAL",
+      terminalOutcome: "CANCELLED", terminalResult: { kind: "cancelled", reservationId: "reservation" }
+    })).rejects.toThrow("different-interaction");
+    expect(repositoryMocks.transaction.discordInteractionReceipt.findUnique).toHaveBeenCalledTimes(1);
   });
 });

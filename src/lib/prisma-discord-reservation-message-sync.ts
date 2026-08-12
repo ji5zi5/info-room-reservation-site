@@ -26,6 +26,46 @@ export function bumpMessageRevision(reservationId: string, now: Date): Promise<b
   });
 }
 
+export function beginSyncPatch(input: Readonly<{
+  claimId: string;
+  deadlineAt: Date;
+  epoch: number;
+  operationId: string;
+  reservationId: string;
+  revision: number;
+}>): Promise<boolean> {
+  return conditionalSyncUpdate(input.reservationId, {
+    patchDeadlineAt: input.deadlineAt,
+    patchOperationEpoch: input.epoch,
+    patchOperationId: input.operationId,
+    syncStatus: "PATCHING"
+  }, {
+    messageRevision: input.revision,
+    syncClaimId: input.claimId,
+    syncClaimRevision: input.revision,
+    syncStatus: "CLAIMED"
+  });
+}
+
+export function markSyncPendingReview(input: Readonly<{
+  claimId: string;
+  reason: string;
+  reservationId: string;
+  revision: number;
+}>): Promise<boolean> {
+  return conditionalSyncUpdate(input.reservationId, {
+    pendingReviewReason: input.reason,
+    remoteVerificationStatus: "PENDING",
+    syncNextAttemptAt: null,
+    syncStatus: "PENDING_REVIEW"
+  }, {
+    messageRevision: input.revision,
+    syncClaimId: input.claimId,
+    syncClaimRevision: input.revision,
+    syncStatus: "PATCHING"
+  });
+}
+
 export function readMessageSyncState(reservationId: string): Promise<DiscordMessageSyncState | null> {
   return withDiscordReservationMessageSystemContext(async (transaction) => {
     const [message, cancellationAction] = await Promise.all([
@@ -65,7 +105,7 @@ export function saveSyncFailure(input: {
     messageRevision: input.revision,
     syncClaimId: input.claimId,
     syncClaimRevision: input.revision,
-    syncStatus: "SYNCING"
+    syncStatus: { in: ["CLAIMED", "PATCHING"] }
   });
 }
 
@@ -87,7 +127,7 @@ export function saveSyncSuccess(input: {
     messageRevision: input.revision,
     syncClaimId: input.claimId,
     syncClaimRevision: input.revision,
-    syncStatus: "SYNCING"
+    syncStatus: { in: ["CLAIMED", "PATCHING"] }
   });
 }
 

@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import type { StudyPeriod } from "./study-periods";
 
 export const DATABASE_ACTOR_ROLES = ["ADMIN", "STUDENT", "SYSTEM"] as const;
+export const DISCORD_OPERATIONS_APPLICATION_CONTRACT = "discord-ops-v2" as const;
 
 export type DatabaseActorRole = (typeof DATABASE_ACTOR_ROLES)[number];
 
@@ -89,10 +90,22 @@ export function systemDatabaseActor(): DatabaseActor {
 }
 
 export function databaseContextSettings(actor: DatabaseActor): readonly DatabaseContextSetting[] {
-  return [
+  const actorSettings: readonly DatabaseContextSetting[] = [
     ["app.current_user_id", actor.id ?? ""],
     ["app.current_user_role", actor.role]
   ];
+  const deploymentSha = resolveDeploymentSha();
+  return /^[0-9a-f]{40}$/u.test(deploymentSha)
+    ? [
+        ...actorSettings,
+        ["app.application_contract", DISCORD_OPERATIONS_APPLICATION_CONTRACT],
+        ["app.deployment_sha", deploymentSha]
+      ]
+    : actorSettings;
+}
+
+export function resolveDeploymentSha(): string {
+  return process.env.DEPLOYMENT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "";
 }
 
 export async function setDatabaseContext(

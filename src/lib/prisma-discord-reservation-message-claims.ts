@@ -49,6 +49,31 @@ export function claimMessageSyncs(now: Date): Promise<readonly DiscordMessageSyn
   return claimMessageSyncsWithLimit(now, undefined, DISCORD_CLAIM_BATCH_SIZE);
 }
 
+export function reconcileLegacyDiscordTransportClaims(): Promise<Readonly<{
+  initialSendCount: number;
+  syncCount: number;
+}>> {
+  return withDiscordReservationMessageSystemContext(async (transaction) => {
+    const initial = await transaction.discordReservationMessage.updateMany({
+      data: {
+        initialSendNextAttemptAt: null,
+        initialSendStatus: "PENDING_REVIEW",
+        pendingReviewReason: "LEGACY_SENDING"
+      },
+      where: { initialSendStatus: "SENDING" }
+    });
+    const sync = await transaction.discordReservationMessage.updateMany({
+      data: {
+        pendingReviewReason: "LEGACY_SYNCING",
+        syncNextAttemptAt: null,
+        syncStatus: "PENDING_REVIEW"
+      },
+      where: { syncStatus: "SYNCING" }
+    });
+    return { initialSendCount: initial.count, syncCount: sync.count };
+  });
+}
+
 async function claimInitialSendsWithLimit(
   now: Date,
   reservationId: string | undefined,
@@ -71,7 +96,7 @@ async function claimInitialSendsWithLimit(
           initialSendClaimedAt: now,
           initialSendClaimId: claimId,
           initialSendError: null,
-          initialSendStatus: "SENDING"
+          initialSendStatus: "CLAIMED"
         },
         where: { ...claimable, reservationId: candidate.reservationId }
       });
@@ -120,7 +145,7 @@ async function claimMessageSyncsWithLimit(
           syncClaimId: claimId,
           syncClaimRevision: candidate.messageRevision,
           syncError: null,
-          syncStatus: "SYNCING"
+          syncStatus: "CLAIMED"
         },
         where: { ...claimable, messageRevision: candidate.messageRevision, reservationId: candidate.reservationId }
       });
@@ -147,7 +172,7 @@ function initialSendClaimableWhere(
   return {
     OR: [
       { initialSendNextAttemptAt: { lte: now }, initialSendStatus: { in: ["PENDING", "RETRY"] } },
-      { initialSendClaimedAt: { lte: staleBefore }, initialSendStatus: "SENDING" }
+      { initialSendClaimedAt: { lte: staleBefore }, initialSendStatus: "CLAIMED" }
     ]
   };
 }
@@ -156,7 +181,7 @@ function syncClaimableWhere(now: Date, staleBefore: Date): Prisma.DiscordReserva
   return {
     OR: [
       { syncNextAttemptAt: { lte: now }, syncStatus: { in: ["PENDING", "RETRY"] } },
-      { syncClaimedAt: { lte: staleBefore }, syncStatus: "SYNCING" }
+      { syncClaimedAt: { lte: staleBefore }, syncStatus: "CLAIMED" }
     ]
   };
 }

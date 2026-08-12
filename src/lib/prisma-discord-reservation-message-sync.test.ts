@@ -27,7 +27,8 @@ describe("Prisma Discord reservation message synchronization", () => {
         where: expect.objectContaining({
           messageRevision: 3,
           syncClaimId: "sync-claim",
-          syncClaimRevision: 3
+          syncClaimRevision: 3,
+          syncStatus: { in: ["CLAIMED", "PATCHING"] }
         })
       })
     );

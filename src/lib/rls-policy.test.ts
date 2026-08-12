@@ -27,6 +27,11 @@ const DISCORD_OPERATIONS_MIGRATION_PATH = join(
   "migration.sql"
 );
 
+const DISCORD_V2_MIGRATION_PATH = join(
+  process.cwd(), "prisma", "migrations",
+  "20260811150000_add_discord_ops_v2_foundations", "migration.sql"
+);
+
 const PRISMA_MIGRATION_ROOT = join(process.cwd(), "prisma", "migrations");
 const PRISMA_SCHEMA_PATH = join(process.cwd(), "prisma", "schema.prisma");
 const BAD_RUNTIME_ROLE_MIGRATION = "20260729060000_add_limited_runtime_role";
@@ -62,6 +67,30 @@ function prismaTableNames(): readonly string[] {
 }
 
 describe("Postgres row level security policy migration", () => {
+  it("adds forced-RLS Discord v2 foundations with owner-only activation state", () => {
+    const sql = readFileSync(DISCORD_V2_MIGRATION_PATH, "utf8");
+    for (const table of ["DiscordInteractionJob", "DiscordOperationsControl", "SchemaCompatibility", "ApplicationDeploymentReceipt"]) {
+      expect(sql).toContain(`ALTER TABLE "${table}" FORCE ROW LEVEL SECURITY;`);
+    }
+    expect(sql).toContain("CREATE TABLE app_private.online_schema_migrations");
+    expect(sql).toContain("app_private.record_application_readiness");
+    expect(sql).toContain("app_private.activate_application_contract");
+    expect(sql).toContain("app_private.require_application_contract");
+    expect(sql).toMatch(/CREATE ROLE info_room_activation_owner[\s\S]*?NOLOGIN[\s\S]*?NOSUPERUSER[\s\S]*?NOBYPASSRLS/iu);
+    expect(sql).toMatch(/CREATE ROLE info_room_activation_executor[\s\S]*?LOGIN[\s\S]*?NOSUPERUSER[\s\S]*?NOBYPASSRLS/iu);
+    expect(sql).toContain("ALTER FUNCTION app_private.record_application_readiness(text, text, text) OWNER TO info_room_activation_owner;");
+    expect(sql).toContain("ALTER FUNCTION app_private.activate_application_contract(text, text, text) OWNER TO info_room_activation_owner;");
+    expect(sql).toContain('CREATE POLICY "application_deployment_receipt_activation_insert"');
+    expect(sql).toContain('CREATE POLICY "application_deployment_receipt_activation_update"');
+    expect(sql).toContain('CREATE POLICY "schema_compatibility_activation_update"');
+    expect(sql).toContain('CREATE POLICY "discord_operations_control_activation_update"');
+    expect(sql).toContain('GRANT SELECT, INSERT, UPDATE ON TABLE "ApplicationDeploymentReceipt" TO info_room_activation_owner;');
+    expect(sql).toContain('GRANT SELECT, UPDATE ON TABLE "SchemaCompatibility", "DiscordOperationsControl" TO info_room_activation_owner;');
+    expect(sql).toContain("REVOKE ALL ON FUNCTION app_private.record_application_readiness(text, text, text) FROM PUBLIC, info_room_runtime;");
+    expect(sql).toContain("GRANT EXECUTE ON FUNCTION app_private.record_application_readiness(text, text, text) TO info_room_activation_executor;");
+    expect(sql).not.toMatch(/GRANT\s+(?:INSERT|UPDATE|DELETE).*(ApplicationDeploymentReceipt|SchemaCompatibility|online_schema_migrations).*info_room_runtime/iu);
+  });
+
   it("uses app session settings instead of Supabase Auth JWT helpers", () => {
     const sql = readRlsMigration();
 

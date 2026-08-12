@@ -1,15 +1,18 @@
 import {
   beginInitialSendTerminalDelivery,
+  beginInitialSendPost,
   createDiscordReservationMessage,
   createDiscordReservationMessageInSystemContext,
   saveInitialSendFailure,
+  markInitialSendPendingReview,
   saveInitialSendSuccess
 } from "./prisma-discord-reservation-message-initial-send";
 import {
   claimInitialSend,
   claimInitialSends,
   claimMessageSync,
-  claimMessageSyncs
+  claimMessageSyncs,
+  reconcileLegacyDiscordTransportClaims
 } from "./prisma-discord-reservation-message-claims";
 import {
   deleteExpiredInteractionReceipts,
@@ -17,6 +20,8 @@ import {
 } from "./prisma-discord-reservation-message-cleanup";
 import {
   bumpMessageRevision,
+  beginSyncPatch,
+  markSyncPendingReview,
   readMessageSyncState,
   saveSyncFailure,
   saveSyncSuccess
@@ -41,16 +46,21 @@ export {
 export type { DiscordMessageSyncState } from "./prisma-discord-reservation-message-sync";
 
 export const prismaDiscordReservationMessageRepository = {
+  beginInitialSendPost,
   beginInitialSendTerminalDelivery,
+  beginSyncPatch,
   bumpMessageRevision,
   claimInitialSend,
   claimInitialSends,
   claimMessageSync,
   claimMessageSyncs,
+  reconcileLegacyDiscordTransportClaims,
   create: createDiscordReservationMessageInSystemContext,
   deleteExpiredInteractionReceipts,
   deleteExpiredMessages,
   readMessageSyncState,
+  markInitialSendPendingReview,
+  markSyncPendingReview,
   saveInitialSendFailure,
   saveInitialSendSuccess,
   saveSyncFailure,

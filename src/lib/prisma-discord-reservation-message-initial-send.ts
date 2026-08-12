@@ -11,11 +11,46 @@ export function beginInitialSendTerminalDelivery(input: {
   readonly reservationId: string;
 }): Promise<boolean> {
   return conditionalInitialSendUpdate(input.reservationId, {
-    initialSendOutcome: input.outcome
+    initialSendOutcome: input.outcome,
+    initialSendStatus: "POSTING",
+    postOperationBoundary: input.outcome,
+    postOperationId: input.claimId
   }, {
     initialSendClaimId: input.claimId,
-    initialSendStatus: "SENDING"
+    initialSendStatus: "CLAIMED"
   });
+}
+
+export function beginInitialSendPost(input: Readonly<{
+  boundary: string;
+  claimId: string;
+  deadlineAt: Date;
+  epoch: number;
+  nonce: string;
+  operationId: string;
+  reservationId: string;
+}>): Promise<boolean> {
+  return conditionalInitialSendUpdate(input.reservationId, {
+    initialSendStatus: "POSTING",
+    postDeadlineAt: input.deadlineAt,
+    postOperationBoundary: input.boundary,
+    postOperationEpoch: input.epoch,
+    postOperationId: input.operationId,
+    postOperationNonce: input.nonce
+  }, { initialSendClaimId: input.claimId, initialSendStatus: "CLAIMED" });
+}
+
+export function markInitialSendPendingReview(input: Readonly<{
+  claimId: string;
+  reason: string;
+  reservationId: string;
+}>): Promise<boolean> {
+  return conditionalInitialSendUpdate(input.reservationId, {
+    initialSendNextAttemptAt: null,
+    initialSendStatus: "PENDING_REVIEW",
+    pendingReviewReason: input.reason,
+    remoteVerificationStatus: "PENDING"
+  }, { initialSendClaimId: input.claimId, initialSendStatus: "POSTING" });
 }
 
 export function cappedDiscordRetryAt(now: Date, attempts: number): Date {
@@ -64,7 +99,7 @@ export function saveInitialSendFailure(input: {
     initialSendOutcome: input.outcome,
     initialSendStatus: input.retryable ? "RETRY" : "ABANDONED",
     ...(!input.retryable ? { syncStatus: "ABANDONED" } : {})
-  }, { initialSendClaimId: input.claimId, initialSendStatus: "SENDING" });
+  }, { initialSendClaimId: input.claimId, initialSendStatus: { in: ["CLAIMED", "POSTING"] } });
 }
 
 export function saveInitialSendSuccess(input: {
@@ -88,7 +123,7 @@ export function saveInitialSendSuccess(input: {
     } satisfies Prisma.DiscordReservationMessageUpdateManyMutationInput;
     const where = {
       initialSendClaimId: input.claimId,
-      initialSendStatus: "SENDING",
+      initialSendStatus: { in: ["CLAIMED", "POSTING"] },
       reservationId: input.reservationId
     } satisfies Prisma.DiscordReservationMessageWhereInput;
     const current = await transaction.discordReservationMessage.updateMany({

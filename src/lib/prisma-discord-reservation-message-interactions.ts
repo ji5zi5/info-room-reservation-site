@@ -1,4 +1,11 @@
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
+
+const receiptReplaySchema = z.object({
+  reservationId: z.string(),
+  status: z.literal("TERMINAL"),
+  terminalResult: z.json()
+});
 
 type ReceiptWrite = Readonly<{
   discordActorId: string;
@@ -19,7 +26,7 @@ type ReceiptTransaction = {
     ) => Promise<Prisma.BatchPayload>;
     readonly findUnique: (
       input: Prisma.DiscordInteractionReceiptFindUniqueArgs
-    ) => Promise<{ readonly terminalResult: Prisma.JsonValue } | null>;
+    ) => Promise<unknown>;
   };
 };
 
@@ -51,11 +58,13 @@ export async function findDiscordInteractionTerminalResult(
   input: Readonly<{ interactionId: string; reservationId: string }>
 ): Promise<Prisma.JsonValue | null> {
   const receipt = await transaction.discordInteractionReceipt.findUnique({
+    select: { reservationId: true, status: true, terminalResult: true },
     where: { interactionId: input.interactionId }
-  }) ?? await transaction.discordInteractionReceipt.findUnique({
-    where: { reservationId: input.reservationId }
   });
-  return receipt?.terminalResult ?? null;
+  const parsed = receiptReplaySchema.safeParse(receipt);
+  return parsed.success && parsed.data.reservationId === input.reservationId
+    ? parsed.data.terminalResult
+    : null;
 }
 
 export async function recordDiscordReservationDecision(

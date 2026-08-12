@@ -4,6 +4,8 @@ import { join, relative, resolve } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
+import { databaseContextSettings } from "./db-context";
+
 type PrismaBypassKind = "model" | "raw" | "transaction";
 
 type PrismaBypass = {
@@ -181,6 +183,22 @@ function isApprovedReadinessProbe(
 }
 
 describe("Prisma context boundary", () => {
+  it("sets the exact v2 application contract and resolved full deployment SHA", () => {
+    const previous = process.env.DEPLOYMENT_SHA;
+    process.env.DEPLOYMENT_SHA = "90386d9f77c9c9c665754966d2535a8276a5a547";
+    try {
+      expect(databaseContextSettings({ id: null, role: "SYSTEM" })).toEqual([
+        ["app.current_user_id", ""],
+        ["app.current_user_role", "SYSTEM"],
+        ["app.application_contract", "discord-ops-v2"],
+        ["app.deployment_sha", "90386d9f77c9c9c665754966d2535a8276a5a547"]
+      ]);
+    } finally {
+      if (previous === undefined) delete process.env.DEPLOYMENT_SHA;
+      else process.env.DEPLOYMENT_SHA = previous;
+    }
+  });
+
   it("detects formatted global Prisma model, transaction, and raw calls while allowing contextual clients", () => {
     const findings = findPrismaBypasses(
       "src/lib/synthetic.ts",
