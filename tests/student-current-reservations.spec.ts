@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import path from "node:path";
 
 import type { StudentNotification } from "../src/lib/student-notifications";
@@ -44,6 +44,7 @@ test("current reservation band stays visible with collapsed sidebar and navigate
   const futureReservation = band.getByRole("button", { name: "2026-06-12 1면학 예약 보기" });
   await futureReservation.click();
 
+  await expectSelectedReservationContrast(futureReservation);
   await expect(futureReservation).toHaveAttribute("aria-current", "true");
   await expect(page.locator(".topbar .muted").first()).toHaveText(FIXED_FRIDAY);
   await expect(page.locator(".period-card").filter({ hasText: "1면학" }).getByRole("button", { name: "예약 취소" })).toBeVisible();
@@ -73,6 +74,7 @@ test("desktop current reservation band has one working control per reservation",
 
   await futureReservation.click();
 
+  await expectSelectedReservationContrast(futureReservation);
   await expect(futureReservation).toHaveAttribute("aria-current", "true");
   await expect(page.locator(".topbar .muted").first()).toHaveText(FIXED_FRIDAY);
   await expect(page.locator(".period-card").filter({ hasText: "1면학" }).getByRole("button", { name: "예약 취소" })).toBeVisible();
@@ -80,9 +82,12 @@ test("desktop current reservation band has one working control per reservation",
   await page.screenshot({
     path: path.join(requiredEvidenceDir(), "task-18-current-reservations-desktop-1440x900.png")
   });
+  await page.screenshot({
+    path: path.join(requiredEvidenceDir(), "task-18-selected-nav-desktop-1440x900.png")
+  });
 });
 
-test("student notification badge count matches five rendered rows and error state remains compact", async ({ page }) => {
+test("desktop-expanded five-row notification popover preserves workflow geometry", async ({ page }) => {
   let notificationStatus: 200 | 500 = 200;
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
@@ -93,16 +98,26 @@ test("student notification badge count matches five rendered rows and error stat
 
   await login(page, "five-notification-student");
 
+  const geometryBefore = await captureWorkflowGeometry(page);
   const openButton = page.getByRole("button", { name: "학생 알림 열기" });
   await expect(openButton.locator(".student-notification-count")).toHaveText("5");
   await openButton.click();
+  const notificationWidget = page.locator(".student-notification-widget");
+  await expect(notificationWidget).toHaveAttribute("data-open", "true");
+  await expect(openButton).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(".student-notification-item")).toHaveCount(5);
   await expect(page.getByText("알림 5")).toBeVisible();
+  expect(await captureWorkflowGeometry(page)).toEqual(geometryBefore);
+  await expectWithinViewport(page.locator(".student-notification-body"), page, "desktop expanded notification popover");
   await expect(await hasHorizontalOverflow(page)).toBe(false);
 
   await page.screenshot({
-    path: path.join(requiredEvidenceDir(), "task-18-notifications-desktop-1440x900.png")
+    path: path.join(requiredEvidenceDir(), "task-18-notifications-desktop-expanded-1440x900.png")
   });
+
+  await page.keyboard.press("Escape");
+  await expect(openButton).toHaveAttribute("aria-expanded", "false");
+  await expect(openButton).toBeFocused();
 
   notificationStatus = 500;
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
@@ -111,6 +126,32 @@ test("student notification badge count matches five rendered rows and error stat
   await expect(page.getByText("알림을 불러오지 못했습니다.")).toBeVisible();
   await expect(page.locator(".student-notification-item")).toHaveCount(0);
   await expect(await hasHorizontalOverflow(page)).toBe(false);
+});
+
+test("mobile-expanded long Korean notification popover preserves workflow geometry", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
+  await installRoutes(page, {
+    notifications: fiveNotifications("매우긴한국어사유가좁은모바일화면에서도잘려나가거나가로로넘치지않아야합니다".repeat(4))
+  });
+
+  await login(page, "five-notification-mobile-student");
+
+  const geometryBefore = await captureWorkflowGeometry(page);
+  const openButton = page.getByRole("button", { name: "학생 알림 열기" });
+  await expect(openButton.locator(".student-notification-count")).toHaveText("5");
+  await openButton.click();
+
+  const notificationWidget = page.locator(".student-notification-widget");
+  await expect(notificationWidget).toHaveAttribute("data-open", "true");
+  await expect(page.locator(".student-notification-item")).toHaveCount(5);
+  expect(await captureWorkflowGeometry(page)).toEqual(geometryBefore);
+  await expectWithinViewport(page.locator(".student-notification-body"), page, "mobile expanded notification popover");
+  await expect(await hasHorizontalOverflow(page)).toBe(false);
+
+  await page.screenshot({
+    path: path.join(requiredEvidenceDir(), "task-18-notifications-mobile-expanded-long-korean-390x844.png")
+  });
 });
 
 type MutableRouteOptions = RouteOptions & {
@@ -248,7 +289,56 @@ function profilePayload(user: SessionUser): StudentProfilePayload {
 }
 
 async function hasHorizontalOverflow(page: Page): Promise<boolean> {
-  return page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  return page.evaluate(
+    () =>
+      document.documentElement.scrollWidth > document.documentElement.clientWidth ||
+      document.body.scrollWidth > document.body.clientWidth
+  );
+}
+
+type WorkflowGeometry = {
+  readonly calendar: Awaited<ReturnType<typeof visibleBox>>;
+  readonly modeRow: Awaited<ReturnType<typeof visibleBox>>;
+  readonly periodGrid: Awaited<ReturnType<typeof visibleBox>>;
+  readonly statusPanel: Awaited<ReturnType<typeof visibleBox>>;
+  readonly topbar: Awaited<ReturnType<typeof visibleBox>>;
+  readonly warning: Awaited<ReturnType<typeof visibleBox>>;
+};
+
+async function captureWorkflowGeometry(page: Page): Promise<WorkflowGeometry> {
+  return {
+    calendar: await visibleBox(page.locator(".reservation-calendar"), "reservation calendar"),
+    modeRow: await visibleBox(page.locator(".reservation-mode-row"), "reservation mode row"),
+    periodGrid: await visibleBox(page.locator(".period-grid"), "reservation period grid"),
+    statusPanel: await visibleBox(page.locator(".student-status-panel"), "student status panel"),
+    topbar: await visibleBox(page.locator(".tool-panel > .topbar"), "reservation topbar"),
+    warning: await visibleBox(page.locator(".reservation-warning"), "reservation warning")
+  };
+}
+
+async function expectWithinViewport(locator: Locator, page: Page, label: string): Promise<void> {
+  const viewport = page.viewportSize();
+  if (!viewport) {
+    throw new Error("viewport should be configured");
+  }
+  const box = await visibleBox(locator, label);
+  expect(box.x, `${label} left edge`).toBeGreaterThanOrEqual(0);
+  expect(box.y, `${label} top edge`).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width, `${label} right edge`).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height, `${label} bottom edge`).toBeLessThanOrEqual(viewport.height);
+}
+
+async function expectSelectedReservationContrast(locator: Locator): Promise<void> {
+  const reservationStyles = await locator.evaluate((element) => {
+    const computed = window.getComputedStyle(element);
+    return {
+      backgroundColor: computed.backgroundColor,
+      color: computed.color
+    };
+  });
+  const selectedStrongColor = await locator.locator("strong").evaluate((element) => window.getComputedStyle(element).color);
+  expect(reservationStyles).toEqual({ backgroundColor: "rgb(23, 26, 32)", color: "rgb(255, 255, 255)" });
+  expect(selectedStrongColor).toBe("rgb(255, 255, 255)");
 }
 
 function requiredEvidenceDir(): string {

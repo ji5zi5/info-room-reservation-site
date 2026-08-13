@@ -178,10 +178,7 @@
   min-height: var(--icon-size-lg);
   max-width: 100%;
   padding: 0 var(--space-3);
-  transition:
-    background-color var(--motion),
-    border-color var(--motion),
-    color var(--motion);
+  transition: border-color var(--motion);
 }
 
 .student-status-reservation svg {
@@ -282,4 +279,30 @@
   .calendar-date-number {
     font-size: var(--text-2xs);
   }
+}
+
+.student-notification-widget {
+  position: relative;
+}
+
+.tool-panel > .topbar > .student-notification-widget[data-open="true"] {
+  flex: 0 0 auto;
+  order: 0;
+  width: auto;
+}
+
+.student-notification-body {
+  background: var(--white);
+  border: var(--stroke-width) solid var(--fog);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-end: 0;
+  max-height: min(var(--sidebar-content-max-height), calc(100svh - var(--toolbar-min-height) - var(--space-13)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-5);
+  position: absolute;
+  width: min(var(--sidebar-card-width), calc(100vw - (var(--space-13) * 2)));
+  z-index: var(--z-overlay);
 }

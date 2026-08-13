@@ -41,12 +41,29 @@ export function StudentNotificationPanel({ authenticationGeneration, user }: Stu
       : { ...EMPTY_NOTIFICATION_STATE, authenticationGeneration, userId: user?.id ?? null };
   const [open, setOpen] = useState(false);
   const bodyId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const presentation = studentNotificationPresentation(state);
   const countLabel = presentation.count > 9 ? "9+" : String(presentation.count);
 
   useEffect(() => {
     setOpen(false);
   }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [open]);
 
   return (
     <section
@@ -60,6 +77,7 @@ export function StudentNotificationPanel({ authenticationGeneration, user }: Stu
         aria-expanded={open}
         aria-label={open ? "학생 알림 닫기" : "학생 알림 열기"}
         className="student-notification-head"
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((current) => !current)}
       >
