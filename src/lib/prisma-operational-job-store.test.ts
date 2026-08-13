@@ -77,4 +77,31 @@ describe("prisma operational-job readiness reads", () => {
     expect(storeMocks.withDatabaseContext).toHaveBeenCalledOnce();
     expect(storeMocks.withDatabaseContext.mock.calls[0]?.[0]?.actor).toEqual({ id: null, role: "SYSTEM" });
   });
+
+  it.each(["DISCORD_INTERACTIONS", "DISCORD_RESERVATION_OUTBOX"])(
+    "parses the %s operational job record",
+    async (job) => {
+      const startedAt = new Date("2026-08-10T00:00:00.000Z");
+      storeMocks.transactionClient.operationalJob.findMany.mockResolvedValue([
+        {
+          backlogCount: 1,
+          consecutiveFailures: 0,
+          durationMs: 20,
+          failureCode: null,
+          finishedAt: startedAt,
+          job,
+          lastAttemptAt: startedAt,
+          lastSuccessAt: startedAt,
+          oldestBacklogAt: startedAt,
+          result: "{}",
+          startedAt,
+          status: "SUCCEEDED"
+        }
+      ]);
+
+      await expect(getPrismaOperationalJobs()).resolves.toEqual([
+        expect.objectContaining({ job, status: "SUCCEEDED" })
+      ]);
+    }
+  );
 });
