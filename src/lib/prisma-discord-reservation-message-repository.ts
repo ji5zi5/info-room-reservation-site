@@ -3,8 +3,10 @@ import {
   beginInitialSendPost,
   createDiscordReservationMessage,
   createDiscordReservationMessageInSystemContext,
-  saveInitialSendFailure,
   markInitialSendPendingReview,
+  readOperationsControl,
+  reconcileExpiredInitialPosts,
+  saveInitialSendFailure,
   saveInitialSendSuccess
 } from "./prisma-discord-reservation-message-initial-send";
 import {
@@ -59,6 +61,8 @@ export const prismaDiscordReservationMessageRepository = {
   deleteExpiredInteractionReceipts,
   deleteExpiredMessages,
   readMessageSyncState,
+  readOperationsControl,
+  reconcileExpiredInitialPosts,
   markInitialSendPendingReview,
   markSyncPendingReview,
   saveInitialSendFailure,

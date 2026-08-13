@@ -1,6 +1,8 @@
 import { CLOSED_LIST_NOTIFICATION_KIND, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
 import { prisma } from "./db";
 import { type DatabaseActor, withDatabaseContext } from "./db-context";
+import type { OperationalJobRecord } from "./operational-job-runner";
+import type { OperationalJobName, OperationalJobReadiness } from "./operational-jobs";
 import { getPeriodSummaries, type PeriodSummary } from "./period-settings";
 import {
   getClosedPeriodNotificationReconciliationBacklog,
@@ -37,6 +39,46 @@ export type AdminDashboardPayload = {
   readonly notificationBacklog: readonly AdminDashboardNotificationBacklogItem[];
   readonly periods: readonly AdminDashboardPeriod[];
 };
+
+export type AdminOperationalJobSummary = {
+  readonly backlogCount: number;
+  readonly code: OperationalJobReadiness["code"];
+  readonly job: OperationalJobName;
+  readonly label: string;
+  readonly lastAttemptAt: string;
+  readonly lastSuccessAt: string | null;
+  readonly oldestBacklogAt: string | null;
+  readonly status: OperationalJobReadiness["status"];
+};
+
+export function toAdminOperationalJobSummary(
+  record: OperationalJobRecord,
+  readiness: OperationalJobReadiness
+): AdminOperationalJobSummary {
+  return {
+    backlogCount: record.backlogCount,
+    code: readiness.code,
+    job: record.job,
+    label: operationalJobLabel(record.job),
+    lastAttemptAt: record.lastAttemptAt.toISOString(),
+    lastSuccessAt: record.lastSuccessAt?.toISOString() ?? null,
+    oldestBacklogAt: record.oldestBacklogAt?.toISOString() ?? null,
+    status: readiness.status
+  };
+}
+
+export function operationalJobLabel(job: OperationalJobName): string {
+  switch (job) {
+    case "CLOSED_PERIOD_NOTIFICATIONS":
+      return "마감 명단 알림";
+    case "DISCORD_INTERACTIONS":
+      return "Discord 상호작용";
+    case "DISCORD_RESERVATION_OUTBOX":
+      return "Discord 예약 전송함";
+    case "MAINTENANCE":
+      return "유지보수";
+  }
+}
 
 export async function getAdminDashboard(
   date: string,

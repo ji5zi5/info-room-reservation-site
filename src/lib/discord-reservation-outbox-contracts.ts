@@ -13,9 +13,48 @@ import type { Reservation } from "./reservation-service";
 export type InitialRunSummary = {
   readonly claimed: number;
   readonly retried: number;
+  readonly review: number;
   readonly sent: number;
   readonly terminal: number;
 };
+
+export type InitialClaimResult = "retried" | "review" | "sent" | "terminal";
+
+export function summarizeInitialRun(results: readonly InitialClaimResult[]): InitialRunSummary {
+  return results.reduce(addInitialResult, {
+    claimed: results.length,
+    retried: 0,
+    review: 0,
+    sent: 0,
+    terminal: 0
+  });
+}
+
+function addInitialResult(summary: InitialRunSummary, result: InitialClaimResult): InitialRunSummary {
+  switch (result) {
+    case "retried":
+      return { ...summary, retried: summary.retried + 1 };
+    case "review":
+      return { ...summary, review: summary.review + 1 };
+    case "sent":
+      return { ...summary, sent: summary.sent + 1 };
+    case "terminal":
+      return { ...summary, terminal: summary.terminal + 1 };
+    default:
+      return assertNeverInitialResult(result);
+  }
+}
+
+function assertNeverInitialResult(value: never): never {
+  throw new InvalidInitialClaimResultError(value);
+}
+
+class InvalidInitialClaimResultError extends Error {
+  public constructor(readonly value: never) {
+    super("Invalid initial Discord outbox claim result");
+    this.name = "InvalidInitialClaimResultError";
+  }
+}
 
 export type SyncRunSummary = {
   readonly abandoned: number;

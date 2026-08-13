@@ -39,7 +39,10 @@ describe("readiness report", () => {
       assertConfig: () => undefined,
       loadSnapshot: async () => ({
         closedPeriodNotificationsEnabled: false,
+        discordOperationsEnabled: true,
         jobs: [
+          succeededJob("DISCORD_INTERACTIONS"),
+          succeededJob("DISCORD_RESERVATION_OUTBOX"),
           {
             consecutiveFailures: 0,
             finishedAt: new Date("2026-06-12T07:24:00.000Z"),
@@ -56,6 +59,20 @@ describe("readiness report", () => {
 
     expect(report.status).toBe("ok");
     expect(report.checks.jobs.CLOSED_PERIOD_NOTIFICATIONS).toEqual({ code: "disabled", status: "ok" });
+    expect(report.checks.jobs.DISCORD_INTERACTIONS).toEqual({ code: "healthy", status: "ok" });
+    expect(report.checks.jobs.DISCORD_RESERVATION_OUTBOX).toEqual({ code: "healthy", status: "ok" });
     expect(report.checks.jobs.MAINTENANCE).toEqual({ code: "healthy", status: "ok" });
   });
 });
+
+function succeededJob(job: "DISCORD_INTERACTIONS" | "DISCORD_RESERVATION_OUTBOX") {
+  return {
+    consecutiveFailures: 0,
+    finishedAt: new Date("2026-06-12T07:24:00.000Z"),
+    job,
+    lastAttemptAt: new Date("2026-06-12T07:24:00.000Z"),
+    lastSuccessAt: new Date("2026-06-12T07:24:00.000Z"),
+    startedAt: new Date("2026-06-12T07:23:00.000Z"),
+    status: "SUCCEEDED" as const
+  };
+}
