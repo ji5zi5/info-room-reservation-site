@@ -45,7 +45,10 @@ describe("Discord interaction deferred handler", () => {
 
     // Then
     expect(events).toEqual(["decision", "outbox", "completion"]);
-    expect(dependencies.processDecision).toHaveBeenCalledWith(expect.objectContaining({ ipHash }));
+    expect(dependencies.processDecision).toHaveBeenCalledWith(expect.objectContaining({
+      currentApplicationId: config.applicationId,
+      ipHash
+    }));
     expect(dependencies.runOutbox).toHaveBeenCalledWith(expect.objectContaining({ reservationId: ledger.reservationId }));
     expect(dependencies.editCompletion).toHaveBeenCalledWith(expect.objectContaining({
       applicationId: config.applicationId,
@@ -65,6 +68,7 @@ describe("Discord interaction deferred handler", () => {
     // Then
     expect(dependencies.processDecision).toHaveBeenCalledWith({
       command: expect.objectContaining({ kind: "reject", reason: "행사 준비", reservationId: ledger.reservationId }),
+      currentApplicationId: config.applicationId,
       ipHash,
       now: expect.any(Date)
     });

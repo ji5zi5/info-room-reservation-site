@@ -10,6 +10,7 @@ export type AdministratorCancellationActor = {
 };
 
 export type AdministratorCancellationSource =
+  | { readonly kind: "DISCORD_ADMIN_CANCEL" }
   | { readonly kind: "DISCORD_REJECTION" }
   | { readonly kind: "WEB_ADMIN" };
 

@@ -85,6 +85,20 @@ describe("Discord interaction job runner", () => {
     expect(fixture.state).toEqual({ status: "STALE", terminalResult: { code: "discord_control_stale" } });
   });
 
+  it("moves an unbound legacy claim to stale review before dispatch", async () => {
+    const fixture = runnerFixture({ ...claim(1), sourceApplicationId: null });
+    const dispatch = vi.fn();
+
+    const result = await runDiscordInteractionJobs({ dispatch, now, store: fixture.store });
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(result.stale).toBe(1);
+    expect(fixture.state).toEqual({
+      status: "STALE",
+      terminalResult: { code: "discord_source_application_missing" }
+    });
+  });
+
   it("redacts a thrown worker error to code and type", async () => {
     // Given: an exception containing prohibited transport secrets.
     const fixture = runnerFixture(claim(1));
@@ -119,6 +133,7 @@ function claim(attempts: number): DiscordInteractionJobClaim {
     localActorId: "admin-1",
     renderedEpoch: 7,
     reservationId: "reservation-1",
+    sourceApplicationId: "application-1",
     sourceChannelId: "channel-1",
     sourceGuildId: "guild-1",
     sourceMessageId: "message-1"

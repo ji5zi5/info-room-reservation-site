@@ -53,6 +53,22 @@ export async function recordDiscordInteractionReceipt(
   return { kind: insertion.count === 1 ? "inserted" : "replayed", terminalResult };
 }
 
+export function recordDiscordOperationReceipt(
+  transaction: ReceiptTransaction,
+  input: Readonly<{
+    discordActorId: string;
+    interactionId: string;
+    intent: string;
+    localActorId: string;
+    messageId: string;
+    reservationId: string;
+    terminalOutcome: string;
+    terminalResult: Prisma.InputJsonObject;
+  }>
+): Promise<{ readonly kind: "inserted" | "replayed"; readonly terminalResult: Prisma.JsonValue }> {
+  return recordDiscordInteractionReceipt(transaction, { ...input, status: "TERMINAL" });
+}
+
 export async function findDiscordInteractionTerminalResult(
   transaction: ReceiptTransaction,
   input: Readonly<{ interactionId: string; reservationId: string }>
@@ -72,10 +88,13 @@ export async function recordDiscordReservationDecision(
   input: Readonly<{
     decision: string;
     discordActorId: string;
+    expectedDecision: "ACCEPTED" | null;
     localActorId: string;
     now: Date;
     reservationId: string;
+    renderedSourceEpoch: number;
     revision: "INCREMENT" | "PRESERVE";
+    sourceMessageId: string;
   }>
 ): Promise<boolean> {
   const revisionUpdate = input.revision === "INCREMENT" ? {
@@ -96,7 +115,12 @@ export async function recordDiscordReservationDecision(
       decisionLocalActorId: input.localActorId,
       ...revisionUpdate
     },
-    where: { decision: null, reservationId: input.reservationId }
+    where: {
+      decision: input.expectedDecision,
+      messageId: input.sourceMessageId,
+      renderedSourceEpoch: input.renderedSourceEpoch,
+      reservationId: input.reservationId
+    }
   });
   return result.count === 1;
 }

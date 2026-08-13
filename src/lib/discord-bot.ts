@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import ky, { HTTPError } from "ky";
+import ky, { HTTPError, TimeoutError } from "ky";
 import { z } from "zod";
 
 import { classifyDiscordBotError, getDiscordRateLimitDelay } from "./discord-bot-errors";
@@ -13,6 +13,9 @@ const MAX_RATE_LIMIT_RETRIES = 1;
 
 const discordMessageResponseSchema = z.object({
   id: z.string().min(1)
+});
+const discordGuildMemberSchema = z.object({
+  roles: z.array(z.string())
 });
 
 export type DiscordEmbedField = {
@@ -72,6 +75,12 @@ export type DiscordBotDeleteResult =
   | { readonly kind: "removed" }
   | { readonly code: string; readonly kind: "failed"; readonly message: string };
 
+export type DiscordGuildMemberLookupResult =
+  | { readonly kind: "found"; readonly roleIds: readonly string[] }
+  | { readonly kind: "missing" }
+  | { readonly code: string; readonly kind: "retryable_failure" }
+  | { readonly code: string; readonly kind: "terminal_failure" };
+
 export type DiscordBotClient = {
   readonly createChannelMessage: (input: {
     readonly channelId: string;
@@ -93,6 +102,13 @@ export type DiscordBotClient = {
   }) => Promise<DiscordBotDeliveryResult>;
 };
 
+export type DiscordGuildMemberClient = {
+  readonly getGuildMember: (input: {
+    readonly guildId: string;
+    readonly userId: string;
+  }) => Promise<DiscordGuildMemberLookupResult>;
+};
+
 type DiscordBotClientInput = {
   readonly applicationId: string;
   readonly botToken: string;
@@ -108,7 +124,7 @@ type RequestOptions = {
   readonly url: string;
 };
 
-export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBotClient {
+export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBotClient & DiscordGuildMemberClient {
   const sleep = input.sleep ?? sleepFor;
   const http = ky.create({
     ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
@@ -200,7 +216,35 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
         method: "PATCH",
         payload,
         url: `${DISCORD_API_BASE_URL}/webhooks/${encodeURIComponent(input.applicationId)}/${encodeURIComponent(interactionToken)}/messages/%40original`
-      })
+      }),
+    getGuildMember: async ({ guildId, userId }) => {
+      try {
+        const body = await http.get(
+          `${DISCORD_API_BASE_URL}/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}`,
+          { headers: { authorization: `Bot ${input.botToken}` } }
+        ).json<unknown>();
+        const parsed = discordGuildMemberSchema.safeParse(body);
+        return parsed.success
+          ? { kind: "found", roleIds: parsed.data.roles }
+          : { code: "discord_invalid_member_response", kind: "retryable_failure" };
+      } catch (error) {
+        if (error instanceof HTTPError) {
+          const status = error.response.status;
+          if (status === 404) return { kind: "missing" };
+          if (status === 401 || status === 403) {
+            return { code: `discord_http_${status}`, kind: "terminal_failure" };
+          }
+          return { code: `discord_http_${status}`, kind: "retryable_failure" };
+        }
+        if (error instanceof TimeoutError || error instanceof TypeError) {
+          return {
+            code: error instanceof TimeoutError ? "discord_timeout" : "discord_network_error",
+            kind: "retryable_failure"
+          };
+        }
+        throw error;
+      }
+    }
   };
 }
 

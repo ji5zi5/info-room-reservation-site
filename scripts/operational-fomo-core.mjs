@@ -159,9 +159,9 @@ async function runDatabaseContractQa(databaseUrl) {
       `);
       await transaction.$executeRawUnsafe(`
         INSERT INTO "DiscordInteractionJob" (
-          "interactionId","reservationId","sourceGuildId","sourceChannelId","sourceMessageId",
+          "interactionId","reservationId","sourceApplicationId","sourceGuildId","sourceChannelId","sourceMessageId",
           "discordActorId","localActorId","renderedEpoch","intent","ipHash","commandDigest","updatedAt"
-        ) VALUES ('qa-job','qa-reservation','guild','channel','message','discord','qa-user',0,'ACCEPT','sha256:ip','sha256:command',CURRENT_TIMESTAMP)
+        ) VALUES ('qa-job','qa-reservation','qa-application','guild','channel','message','discord','qa-user',0,'ACCEPT','sha256:ip','sha256:command',CURRENT_TIMESTAMP)
       `);
       await transaction.$executeRawUnsafe(`
         INSERT INTO "DiscordInteractionReceipt" (
@@ -259,6 +259,30 @@ async function runDatabaseContractQa(databaseUrl) {
           `SELECT app_private.activate_application_contract($1,$2,$3)::text`, sha, receipt, expectedSource
         );
       });
+
+    const activationGuardReceipt = await createReceipt();
+    await prisma.$transaction(async (transaction) => {
+      await setContext(transaction, "discord-ops-v2", DEPLOYMENT_SHA, "SYSTEM");
+      await transaction.$executeRawUnsafe(`
+        INSERT INTO "DiscordInteractionJob" (
+          "interactionId","reservationId","sourceGuildId","sourceChannelId","sourceMessageId",
+          "discordActorId","localActorId","renderedEpoch","intent","ipHash","commandDigest","updatedAt"
+        ) VALUES ('qa-unbound-job','qa-reservation','guild','channel','message','discord','qa-user',0,'ACCEPT','sha256:ip','sha256:unbound',CURRENT_TIMESTAMP)
+      `);
+    });
+    await expectDatabaseFailure(executorPrisma, () => createReceipt(), "unbound job readiness");
+    await expectDatabaseFailure(executorPrisma, () => activateReceipt(activationGuardReceipt), "unbound job activation");
+    await prisma.$transaction(async (transaction) => {
+      await setContext(transaction, "discord-ops-v2", DEPLOYMENT_SHA, "SYSTEM");
+      await transaction.$executeRawUnsafe(`
+        UPDATE "DiscordInteractionJob"
+        SET "errorCode"='discord_source_application_missing', "lastError"='APPLICATION_BINDING_REVIEW',
+            "nextAttemptAt"=NULL, "status"='STALE',
+            "terminalResult"='{"code":"discord_source_application_missing"}'::jsonb,
+            "updatedAt"=CURRENT_TIMESTAMP
+        WHERE "interactionId"='qa-unbound-job' AND "sourceApplicationId" IS NULL
+      `);
+    });
 
     const expiredReceipt = await createReceipt();
     await prisma.$executeRawUnsafe(`UPDATE "ApplicationDeploymentReceipt" SET "expiresAt"=CURRENT_TIMESTAMP - interval '1 second' WHERE "id"=$1`, expiredReceipt);

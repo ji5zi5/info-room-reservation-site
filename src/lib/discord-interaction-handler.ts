@@ -27,6 +27,7 @@ type HandlerDependencies = {
   readonly loadLedger: (messageId: string) => Promise<DiscordReservationMessageLedgerSnapshot | null>;
   readonly processDecision: (input: {
     readonly command: DecisionCommand;
+    readonly currentApplicationId: string;
     readonly ipHash: string;
     readonly now: Date;
   }) => Promise<DiscordReservationDecisionResult>;
@@ -61,6 +62,7 @@ export function createDiscordInteractionHandler(dependencies: HandlerDependencie
         if (authorization !== null && authorization.command.kind !== "open_reject_modal") {
           const result = await dependencies.processDecision({
             command: authorization.command,
+            currentApplicationId: input.config.applicationId,
             ipHash: input.ipHash,
             now: new Date()
           });

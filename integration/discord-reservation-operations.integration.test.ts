@@ -19,6 +19,7 @@ import {
 
 const now = new Date("2026-08-11T00:00:00.000Z");
 const ipHash = "integration-request-source-hash";
+const currentApplicationId = "integration-application";
 
 beforeEach(resetPostgresTestDatabase);
 afterAll(async () => {
@@ -78,8 +79,8 @@ describe("durable Discord reservation operations", () => {
     await markMessageSent(reservationId, "accept-message");
     const command = decisionCommand({ interactionId: "accept-interaction", kind: "accept", reservationId, sourceMessageId: "accept-message", studentNumber: admin.studentNumber });
 
-    await expect(processDiscordReservationDecision({ command, ipHash, now })).resolves.toEqual({ kind: "accepted", reservationId });
-    await expect(processDiscordReservationDecision({ command, ipHash, now })).resolves.toEqual({ kind: "accepted", reservationId });
+    await expect(processDiscordReservationDecision({ command, currentApplicationId, ipHash, now })).resolves.toEqual({ kind: "accepted", reservationId });
+    await expect(processDiscordReservationDecision({ command, currentApplicationId, ipHash, now })).resolves.toEqual({ kind: "accepted", reservationId });
 
     const stored = await withSystemDatabaseContext(async (transaction) => ({
       actionCount: await transaction.adminAction.count({ where: { action: "DISCORD_RESERVATION_ACCEPT", reservationId } }),
@@ -97,7 +98,7 @@ describe("durable Discord reservation operations", () => {
     const reservationId = await seedMessage("reject", "reject-nonce");
     await markMessageSent(reservationId, "reject-message");
 
-    await expect(processDiscordReservationDecision({ command: { ...decisionCommand({ interactionId: "reject-interaction", kind: "reject", reservationId, sourceMessageId: "reject-message", studentNumber: admin.studentNumber }), reason: "행사 준비" }, ipHash, now })).resolves.toEqual({ kind: "cancelled", reservationId });
+    await expect(processDiscordReservationDecision({ command: { ...decisionCommand({ interactionId: "reject-interaction", kind: "reject", reservationId, sourceMessageId: "reject-message", studentNumber: admin.studentNumber }), reason: "행사 준비" }, currentApplicationId, ipHash, now })).resolves.toEqual({ kind: "cancelled", reservationId });
 
     const stored = await withSystemDatabaseContext(async (transaction) => ({
       action: await transaction.adminAction.findFirstOrThrow({ where: { reservationId } }),
@@ -119,8 +120,8 @@ describe("durable Discord reservation operations", () => {
     const reject = { ...decisionCommand({ interactionId: "race-reject", kind: "reject", reservationId, sourceMessageId: "race-message", studentNumber: admin.studentNumber }), reason: "경합 거절" } as const;
 
     const results = await Promise.all([
-      processDiscordReservationDecision({ command: accept, ipHash, now }),
-      processDiscordReservationDecision({ command: reject, ipHash, now })
+      processDiscordReservationDecision({ command: accept, currentApplicationId, ipHash, now }),
+      processDiscordReservationDecision({ command: reject, currentApplicationId, ipHash, now })
     ]);
 
     expect(results[0]).toEqual(results[1]);
@@ -146,7 +147,7 @@ describe("durable Discord reservation operations", () => {
     const admin = await seedUser({ id: "discord-stale-admin", role: "ADMIN" });
     const reservationId = await seedMessage("stale", "stale-nonce");
     await markMessageSent(reservationId, "stale-message");
-    await processDiscordReservationDecision({ command: decisionCommand({ interactionId: "stale-interaction", kind: "accept", reservationId, sourceMessageId: "stale-message", studentNumber: admin.studentNumber }), ipHash, now });
+    await processDiscordReservationDecision({ command: decisionCommand({ interactionId: "stale-interaction", kind: "accept", reservationId, sourceMessageId: "stale-message", studentNumber: admin.studentNumber }), currentApplicationId, ipHash, now });
     const [claim] = await prismaDiscordReservationMessageRepository.claimMessageSyncs(now);
     await withSystemDatabaseContext((transaction) => transaction.reservation.update({ data: { status: "NO_SHOW" }, where: { id: reservationId } }));
 

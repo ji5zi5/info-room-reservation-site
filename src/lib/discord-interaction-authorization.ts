@@ -1,4 +1,7 @@
 import type { DiscordApplicationConfig } from "./discord-app-config";
+import type { DiscordGuildMemberLookupResult } from "./discord-bot";
+import { prisma } from "./db";
+import { systemDatabaseActor, withDatabaseContext } from "./db-context";
 import type {
   DiscordReservationInteraction,
   DiscordReservationInteractionCommand,
@@ -23,6 +26,103 @@ export type DiscordReservationInteractionAuthorization =
 export type DiscordPingInteractionAuthorization =
   | { readonly kind: "authorized" }
   | { readonly code: "invalid_interaction" | "wrong_application"; readonly kind: "rejected" };
+
+export type CurrentDiscordReservationActorAuthorization =
+  | { readonly kind: "authorized"; readonly studentNumber: string }
+  | {
+      readonly code: "guild_member_missing" | "missing_required_role" | "unmapped_discord_user";
+      readonly kind: "stale";
+    }
+  | { readonly code: string; readonly kind: "retryable_failure" | "terminal_failure" };
+
+type CurrentDiscordReservationSource = {
+  readonly sourceApplicationId: string | null;
+  readonly sourceChannelId: string;
+  readonly sourceGuildId: string;
+};
+
+export function isCurrentDiscordReservationSource(input: {
+  readonly config: DiscordApplicationConfig;
+  readonly source: CurrentDiscordReservationSource;
+}): boolean {
+  return input.source.sourceApplicationId === input.config.applicationId &&
+    input.source.sourceGuildId === input.config.guildId &&
+    input.source.sourceChannelId === input.config.channelId;
+}
+
+export function authorizeCurrentDiscordReservationActor(input: {
+  readonly config: DiscordApplicationConfig;
+  readonly member: DiscordGuildMemberLookupResult;
+  readonly source: {
+    readonly discordActorId: string;
+    readonly localActorId: string;
+    readonly sourceApplicationId: string | null;
+    readonly sourceChannelId: string;
+    readonly sourceGuildId: string;
+  };
+}): CurrentDiscordReservationActorAuthorization {
+  if (!isCurrentDiscordReservationSource(input)) {
+    return { code: "discord_config_mismatch", kind: "terminal_failure" };
+  }
+  switch (input.member.kind) {
+    case "missing":
+      return { code: "guild_member_missing", kind: "stale" };
+    case "retryable_failure":
+    case "terminal_failure":
+      return input.member;
+    case "found": {
+      const binding = input.config.adminUserBindings.find(
+        ({ discordUserId }) => discordUserId === input.source.discordActorId
+      );
+      if (binding === undefined) return { code: "unmapped_discord_user", kind: "stale" };
+      return input.member.roleIds.includes(input.config.adminRoleId)
+        ? { kind: "authorized", studentNumber: binding.studentNumber }
+        : { code: "missing_required_role", kind: "stale" };
+    }
+    default:
+      return assertNever(input.member);
+  }
+}
+
+export async function resolveLegacyDiscordDecisionContext(input: {
+  readonly reservationId: string;
+  readonly studentNumber: string;
+}): Promise<
+  | { readonly code: "actor_not_found" | "stale_message"; readonly kind: "rejected" }
+  | {
+      readonly channelId: string;
+      readonly guildId: string;
+      readonly kind: "resolved";
+      readonly localActorId: string;
+      readonly renderedControlEpoch: number;
+    }
+> {
+  const resolved = await withDatabaseContext({
+    actor: systemDatabaseActor(),
+    client: prisma,
+    operation: async (transaction) => {
+      const [actor, message] = await Promise.all([
+        transaction.user.findUnique({ select: { id: true }, where: { studentNumber: input.studentNumber } }),
+        transaction.discordReservationMessage.findUnique({
+          select: { channelId: true, guildId: true, renderedSourceEpoch: true },
+          where: { reservationId: input.reservationId }
+        })
+      ]);
+      return { actor, message };
+    }
+  });
+  if (resolved.actor === null) return { code: "actor_not_found", kind: "rejected" };
+  if (resolved.message?.channelId == null || resolved.message.guildId === null) {
+    return { code: "stale_message", kind: "rejected" };
+  }
+  return {
+    channelId: resolved.message.channelId,
+    guildId: resolved.message.guildId,
+    kind: "resolved",
+    localActorId: resolved.actor.id,
+    renderedControlEpoch: resolved.message.renderedSourceEpoch
+  };
+}
 
 export function authorizeDiscordReservationInteraction(input: {
   readonly config: DiscordApplicationConfig;

@@ -235,6 +235,7 @@ model DiscordInteractionJob {
   interactionId       String      @id
   reservationId       String
   reservation         Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  sourceApplicationId String?
   sourceGuildId       String
   sourceChannelId     String
   sourceMessageId     String

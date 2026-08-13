@@ -9,6 +9,7 @@ export type DiscordInteractionJobClaim = {
   readonly localActorId: string;
   readonly renderedEpoch: number;
   readonly reservationId: string;
+  readonly sourceApplicationId: string | null;
   readonly sourceChannelId: string;
   readonly sourceGuildId: string;
   readonly sourceMessageId: string;
@@ -47,6 +48,7 @@ export interface DiscordInteractionJobStore {
   }): Promise<void>;
   completeStale(input: {
     readonly claim: DiscordInteractionJobClaim;
+    readonly errorCode?: string;
     readonly terminalResult: DiscordInteractionTerminalResult;
   }): Promise<void>;
   completeSuccess(input: {
@@ -76,6 +78,15 @@ export async function runDiscordInteractionJobs(input: {
   const claims = await input.store.claim(input.now, input.interactionId);
   const counts = { abandoned: 0, claimed: claims.length, retried: 0, stale: 0, succeeded: 0 };
   for (const claim of claims) {
+    if (claim.sourceApplicationId === null) {
+      await input.store.completeStale({
+        claim,
+        errorCode: "discord_source_application_missing",
+        terminalResult: { code: "discord_source_application_missing" }
+      });
+      counts.stale += 1;
+      continue;
+    }
     if (!(await input.store.isDispatchAllowed(claim))) {
       await input.store.completeStale({ claim, terminalResult: { code: "discord_control_stale" } });
       counts.stale += 1;
