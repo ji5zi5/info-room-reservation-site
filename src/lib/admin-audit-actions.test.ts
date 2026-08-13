@@ -5,7 +5,9 @@ import {
   filterAdminAuditActions,
   getAdminAuditActionLabel,
   orderAdminAuditActions,
-  parseAdminAuditActionFilter
+  paginateAdminAuditActions,
+  parseAdminAuditActionFilter,
+  type AdminAuditActionPage
 } from "./admin-audit-actions";
 
 const actions = [
@@ -90,5 +92,42 @@ describe("admin audit action helpers", () => {
 
   it("orders actions newest first", () => {
     expect(orderAdminAuditActions(actions).map((action) => action.id)).toEqual(["cancel", "restriction", "session"]);
+  });
+
+  it("uses descending id as the immutable final key when creation time ties", () => {
+    // Given: actions sharing the same immutable creation timestamp.
+    const tied = [
+      { ...actions[0], id: "a" },
+      { ...actions[0], id: "z" }
+    ];
+
+    // When: the audit ordering adapter is applied.
+    const ordered = orderAdminAuditActions(tied);
+
+    // Then: descending id provides deterministic cursor movement.
+    expect(ordered.map((action) => action.id)).toEqual(["z", "a"]);
+  });
+
+  it("traverses 227 audits newest-first to a terminal cursor without duplicate ids", () => {
+    // Given: 227 immutable audit rows.
+    const generated = Array.from({ length: 227 }, (_, index) => ({
+      ...actions[0],
+      createdAt: new Date(1_786_570_000_000 + index * 1_000),
+      id: `audit-${String(index).padStart(3, "0")}`
+    }));
+    const cutoff = new Date(1_786_570_000_000 + 226 * 1_000);
+
+    // When: all descending pages move by creation time and id.
+    const seen: string[] = [];
+    let after: { readonly createdAt: string; readonly id: string } | null = null;
+    do {
+      const page: AdminAuditActionPage<(typeof generated)[number]> = paginateAdminAuditActions({ after, cutoff, rows: generated });
+      seen.push(...page.rows.map((row) => row.id));
+      after = page.next;
+    } while (after !== null);
+
+    // Then: all ids appear exactly once.
+    expect(seen).toHaveLength(227);
+    expect(new Set(seen).size).toBe(227);
   });
 });

@@ -31,6 +31,12 @@ export type AdminAuditActionFilters = {
   readonly query: string;
 };
 
+export type AdminAuditActionPage<T extends AdminAuditActionRow> = {
+  readonly currentTotal: number;
+  readonly next: { readonly createdAt: string; readonly id: string } | null;
+  readonly rows: readonly T[];
+};
+
 const ADMIN_AUDIT_ACTION_CATEGORIES: Readonly<Record<string, AdminAuditActionCategory>> = {
   ADMIN_RESERVATION_CREATE: "RESERVATION",
   ADMIN_RESERVATION_CANCEL: "RESERVATION",
@@ -99,7 +105,35 @@ export function filterAdminAuditActions<T extends AdminAuditActionRow>(
 }
 
 export function orderAdminAuditActions<T extends AdminAuditActionRow>(actions: readonly T[]): readonly T[] {
-  return [...actions].sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+  return [...actions].sort((left, right) =>
+    right.createdAt.getTime() - left.createdAt.getTime() || compareText(right.id, left.id)
+  );
+}
+
+export function normalizeAdminAuditActionFilters(filters: AdminAuditActionFilters): AdminAuditActionFilters {
+  return { action: filters.action, query: filters.query.trim().toLocaleLowerCase("ko-KR") };
+}
+
+export function paginateAdminAuditActions<T extends AdminAuditActionRow>(input: {
+  readonly after: { readonly createdAt: string; readonly id: string } | null;
+  readonly cutoff: Date;
+  readonly rows: readonly T[];
+}): AdminAuditActionPage<T> {
+  const eligible = orderAdminAuditActions(input.rows.filter((row) => row.createdAt.getTime() <= input.cutoff.getTime()));
+  const after = input.after;
+  const remaining = after === null ? eligible : eligible.filter((row) =>
+    row.createdAt.getTime() < Date.parse(after.createdAt) ||
+    (row.createdAt.getTime() === Date.parse(after.createdAt) && compareText(row.id, after.id) < 0)
+  );
+  const rows = remaining.slice(0, 50);
+  const last = rows.at(-1);
+  return {
+    currentTotal: eligible.length,
+    next: remaining.length > rows.length && last !== undefined
+      ? { createdAt: last.createdAt.toISOString(), id: last.id }
+      : null,
+    rows
+  };
 }
 
 function auditSearchTokens(action: AdminAuditActionRow): readonly string[] {
@@ -111,4 +145,8 @@ function auditSearchTokens(action: AdminAuditActionRow): readonly string[] {
     action.targetUser?.name ?? "",
     action.targetUser?.studentNumber ?? ""
   ];
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
