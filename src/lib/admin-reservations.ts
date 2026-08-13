@@ -1,3 +1,6 @@
+import type { Prisma } from "@prisma/client";
+
+import { ADMIN_EXPORT_PROBE_ROWS, ADMIN_PAGE_SIZE } from "./admin-pagination";
 import { STUDY_PERIODS } from "./study-periods";
 
 export const ADMIN_RESERVATION_STATUS_FILTERS = ["CONFIRMED", "NO_SHOW", "CANCELLED", "ALL"] as const;
@@ -35,6 +38,11 @@ export type AdminReservationQueryFilters = {
   readonly query: string;
   readonly studyPeriod: AdminReservationStudyPeriodFilter;
   readonly userId: string | null;
+};
+
+export type AdminReservationFilters = AdminReservationQueryFilters & {
+  readonly date: string;
+  readonly status: AdminReservationStatusFilter;
 };
 
 export function parseAdminReservationStatus(value: string | null): AdminReservationStatusFilter {
@@ -107,6 +115,94 @@ export function normalizeAdminReservationFilters(filters: AdminReservationQueryF
     query: filters.query.trim().toLocaleLowerCase("ko-KR"),
     studyPeriod: filters.studyPeriod,
     userId: filters.userId?.trim() || null
+  };
+}
+
+export function parseAdminReservationFilters(parameters: URLSearchParams, defaultDate: string): AdminReservationFilters {
+  const normalized = normalizeAdminReservationFilters({
+    query: parameters.get("query") ?? "",
+    studyPeriod: parseAdminReservationStudyPeriod(parameters.get("studyPeriod")),
+    userId: parameters.get("userId")
+  });
+  return {
+    date: parameters.get("date") ?? defaultDate,
+    query: normalized.query,
+    status: parseAdminReservationStatus(parameters.get("status")),
+    studyPeriod: normalized.studyPeriod,
+    userId: normalized.userId
+  };
+}
+
+export function buildAdminReservationWhere(input: {
+  readonly after: { readonly createdAt: string; readonly id: string; readonly studyPeriod: "EIGHTH" | "FIRST" } | null;
+  readonly cutoff: Date;
+  readonly filters: AdminReservationFilters;
+}): Prisma.ReservationWhereInput {
+  const query = input.filters.query;
+  const after = input.after;
+  const tuple = after === null
+    ? {}
+    : after.studyPeriod === "EIGHTH"
+      ? {
+          OR: [
+            { studyPeriod: "FIRST" },
+            { studyPeriod: "EIGHTH", createdAt: { gt: new Date(after.createdAt) } },
+            { studyPeriod: "EIGHTH", createdAt: new Date(after.createdAt), id: { gt: after.id } }
+          ]
+        }
+      : {
+          OR: [
+            { studyPeriod: "FIRST", createdAt: { gt: new Date(after.createdAt) } },
+            { studyPeriod: "FIRST", createdAt: new Date(after.createdAt), id: { gt: after.id } }
+          ]
+        };
+  return {
+    ...tuple,
+    createdAt: { lte: input.cutoff },
+    date: input.filters.date,
+    ...(input.filters.status === "ALL" ? {} : { status: input.filters.status }),
+    ...(input.filters.studyPeriod === "ALL" ? {} : { studyPeriod: input.filters.studyPeriod }),
+    ...(input.filters.userId === null ? {} : { userId: input.filters.userId }),
+    ...(query.length === 0
+      ? {}
+      : {
+          AND: [{
+            user: {
+              OR: [
+                { name: { contains: query, mode: "insensitive" } },
+                { studentNumber: { contains: query, mode: "insensitive" } }
+              ]
+            }
+          }]
+        })
+  };
+}
+
+export function buildAdminReservationPageQuery(input: {
+  readonly after: { readonly createdAt: string; readonly id: string; readonly studyPeriod: "EIGHTH" | "FIRST" } | null;
+  readonly cutoff: Date;
+  readonly filters: AdminReservationFilters;
+}): Pick<Prisma.ReservationFindManyArgs, "orderBy" | "take" | "where"> {
+  return buildAdminReservationQuery({ ...input, take: ADMIN_PAGE_SIZE + 1 });
+}
+
+export function buildAdminReservationExportQuery(input: {
+  readonly cutoff: Date;
+  readonly filters: AdminReservationFilters;
+}): Pick<Prisma.ReservationFindManyArgs, "orderBy" | "take" | "where"> {
+  return buildAdminReservationQuery({ after: null, ...input, take: ADMIN_EXPORT_PROBE_ROWS });
+}
+
+function buildAdminReservationQuery(input: {
+  readonly after: { readonly createdAt: string; readonly id: string; readonly studyPeriod: "EIGHTH" | "FIRST" } | null;
+  readonly cutoff: Date;
+  readonly filters: AdminReservationFilters;
+  readonly take: number;
+}): Pick<Prisma.ReservationFindManyArgs, "orderBy" | "take" | "where"> {
+  return {
+    orderBy: [{ studyPeriod: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    take: input.take,
+    where: buildAdminReservationWhere(input)
   };
 }
 

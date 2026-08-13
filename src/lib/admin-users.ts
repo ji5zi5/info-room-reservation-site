@@ -1,3 +1,7 @@
+import type { Prisma } from "@prisma/client";
+
+import { ADMIN_PAGE_SIZE } from "./admin-pagination";
+
 export const ADMIN_USER_STATUS_FILTERS = ["ACTIVE", "RESTRICTED", "BANNED", "SHADOW_BANNED", "ALL"] as const;
 
 export type AdminUserStatusFilter = (typeof ADMIN_USER_STATUS_FILTERS)[number];
@@ -74,6 +78,49 @@ export function filterAdminUsers(
 
 export function normalizeAdminUserFilters(filters: AdminUserFilterInput): AdminUserFilterInput {
   return { bookingStatus: filters.bookingStatus, query: filters.query.trim().toLocaleLowerCase("ko-KR") };
+}
+
+export function buildAdminUserWhere(input: {
+  readonly after: { readonly createdAt: string; readonly id: string } | null;
+  readonly cutoff: Date;
+  readonly filters: AdminUserFilterInput;
+}): Prisma.UserWhereInput {
+  const query = input.filters.query;
+  const tuple = input.after === null
+    ? {}
+    : {
+        OR: [
+          { createdAt: { gt: new Date(input.after.createdAt) } },
+          { createdAt: new Date(input.after.createdAt), id: { gt: input.after.id } }
+        ]
+      };
+  return {
+    ...tuple,
+    createdAt: { lte: input.cutoff },
+    ...(input.filters.bookingStatus === "ALL" ? {} : { bookingStatus: input.filters.bookingStatus }),
+    ...(query.length === 0
+      ? {}
+      : {
+          AND: [{
+            OR: [
+              { name: { contains: query, mode: "insensitive" } },
+              { studentNumber: { contains: query, mode: "insensitive" } }
+            ]
+          }]
+        })
+  };
+}
+
+export function buildAdminUserPageQuery(input: {
+  readonly after: { readonly createdAt: string; readonly id: string } | null;
+  readonly cutoff: Date;
+  readonly filters: AdminUserFilterInput;
+}): Pick<Prisma.UserFindManyArgs, "orderBy" | "take" | "where"> {
+  return {
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: ADMIN_PAGE_SIZE + 1,
+    where: buildAdminUserWhere(input)
+  };
 }
 
 export function orderAdminUsers<T extends AdminUserCursorRow>(users: readonly T[]): readonly T[] {

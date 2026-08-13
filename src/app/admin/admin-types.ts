@@ -94,14 +94,17 @@ export const AdminDashboardPayloadSchema = z
     periods: z.array(AdminDashboardPeriodSchema)
   })
   .strict();
-export const AdminReservationsPayloadSchema = z.object({ reservations: z.array(AdminReservationSchema) });
-export const AdminUsersPayloadSchema = z.object({ users: z.array(AdminUserSchema) });
+
+const AdminPageMetadataShape = { cutoff: z.string().datetime({ offset: true }), currentTotalCount: z.number().int().nonnegative(), expiresAt: z.string().datetime({ offset: true }), nextCursor: z.string().min(1).nullable() } as const;
+
+export const AdminReservationsPayloadSchema = z.object({ ...AdminPageMetadataShape, items: z.array(AdminReservationSchema) }).strict();
+export const AdminUsersPayloadSchema = z.object({ ...AdminPageMetadataShape, items: z.array(AdminUserSchema) }).strict();
 
 const AdminAuditPersonSchema = z.object({
   id: z.string(),
   name: z.string(),
   studentNumber: z.string()
-});
+}).strict();
 
 const AdminAuditActionCategorySchema = z.union([
   z.literal("NO_SHOW"),
@@ -126,9 +129,9 @@ export const AdminAuditActionSchema = z.object({
   reservationId: z.string().nullable(),
   targetUser: AdminAuditPersonSchema.nullable(),
   targetUserId: z.string().nullable()
-});
+}).strict();
 
-export const AdminAuditActionsPayloadSchema = z.object({ actions: z.array(AdminAuditActionSchema) });
+export const AdminAuditActionsPayloadSchema = z.object({ ...AdminPageMetadataShape, items: z.array(AdminAuditActionSchema) }).strict();
 
 const AdminCountSummarySchema = z.object({
   cancelledCount: z.number(),

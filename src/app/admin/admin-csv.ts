@@ -1,6 +1,11 @@
 import type { AdminAuditAction, AdminReservation, AdminStatistics } from "./admin-types";
 
 const SPREADSHEET_FORMULA_PREFIX = /^[=+\-@\t\r\n＝＋－＠]/u;
+const UTF8_BOM = "\uFEFF";
+
+export function buildDownloadableAdminCsv(csv: string): string {
+  return csv.startsWith(UTF8_BOM) ? csv : `${UTF8_BOM}${csv}`;
+}
 
 export function buildReservationCsv(reservations: readonly AdminReservation[]): string {
   const rows = reservations.map((reservation) => [

@@ -3,6 +3,9 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 export const ADMIN_PAGE_SIZE = 50;
+export const ADMIN_EXPORT_MAX_ROWS = 10_000;
+export const ADMIN_EXPORT_PROBE_ROWS = ADMIN_EXPORT_MAX_ROWS + 1;
+export const ADMIN_EXPORT_TOO_LARGE_CODE = "ADMIN_EXPORT_TOO_LARGE";
 export const ADMIN_CURSOR_TTL_MS = 15 * 60 * 1_000;
 
 const CURSOR_VERSION = 1;
@@ -113,6 +116,16 @@ export function sessionSecretForAdminCursor(env: NodeJS.ProcessEnv = process.env
   const secret = env.SESSION_SECRET;
   requireSecret(secret ?? "");
   return secret ?? "";
+}
+
+export function adminPageTimes(input: { readonly cutoff: Date; readonly issuedAt: Date }): {
+  readonly cutoff: string;
+  readonly expiresAt: string;
+} {
+  return {
+    cutoff: input.cutoff.toISOString(),
+    expiresAt: new Date(input.issuedAt.getTime() + ADMIN_CURSOR_TTL_MS).toISOString()
+  };
 }
 
 function requireSecret(secret: string): void {
