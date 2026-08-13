@@ -101,7 +101,12 @@ function toOperationalJobRecord(record: OperationalJob): OperationalJobRecord {
 }
 
 function parseOperationalJobName(value: string): OperationalJobName {
-  if (value === "CLOSED_PERIOD_NOTIFICATIONS" || value === "MAINTENANCE") {
+  if (
+    value === "CLOSED_PERIOD_NOTIFICATIONS"
+    || value === "DISCORD_INTERACTIONS"
+    || value === "DISCORD_RESERVATION_OUTBOX"
+    || value === "MAINTENANCE"
+  ) {
     return value;
   }
   throw new InvalidOperationalJobRecordError("job", value);

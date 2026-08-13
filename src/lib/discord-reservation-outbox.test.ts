@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerEnvError } from "./env";
 import { defaultNotificationSettings } from "./notification-settings";
@@ -15,6 +15,17 @@ describe("Discord reservation outbox initial delivery", () => {
 
   beforeEach(() => {
     dependencies = dependenciesFixture();
+  });
+
+  it("reconciles expired POSTING before claiming outbox work", async () => {
+    const reconcileExpiredInitialPosts = vi.fn(async () => 1);
+    Object.assign(dependencies.repository, { reconcileExpiredInitialPosts });
+
+    await createDiscordReservationOutbox(dependencies)({ now });
+
+    expect(reconcileExpiredInitialPosts).toHaveBeenCalledWith(now);
+    expect(dependencies.repository.claimInitialSends).toHaveBeenCalledOnce();
+    expect(dependencies.bot.createChannelMessage).not.toHaveBeenCalled();
   });
 
   it("persists a terminal disabled outcome without network delivery", async () => {
@@ -66,6 +77,7 @@ describe("Discord reservation outbox initial delivery", () => {
       claimId: claim.claimId,
       guildId: "22345678901234567",
       messageId: "bot-message",
+      renderedSourceEpoch: 0,
       reservationId: claim.reservationId,
       sentAt: now
     });
