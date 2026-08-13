@@ -29,7 +29,10 @@ type JsonResponseSchema<T> = {
     | { readonly success: false };
 };
 
-type AdminPage<T> = {
+export type AdminReadPage<T> = {
+  readonly cutoff: string;
+  readonly currentTotalCount: number;
+  readonly expiresAt: string;
   readonly items: readonly T[];
   readonly nextCursor: string | null;
 };
@@ -86,6 +89,7 @@ export async function fetchAdminStatistics(
 
 export async function fetchAdminReservations(
   input: {
+    readonly cursor?: string;
     readonly date: string;
     readonly query: string;
     readonly reservationId?: string;
@@ -94,7 +98,7 @@ export async function fetchAdminReservations(
     readonly userId?: string | null;
   },
   options?: AdminReadOptions
-): Promise<AdminReadResult<readonly AdminReservation[]>> {
+): Promise<AdminReadResult<AdminReadPage<AdminReservation>>> {
   const params = new URLSearchParams({
     date: input.date,
     query: input.query,
@@ -107,27 +111,31 @@ export async function fetchAdminReservations(
   if (input.reservationId) {
     params.set("reservationId", input.reservationId);
   }
-  const response = await fetch(`/api/admin/reservations?${params.toString()}`, options);
-  const result = await readJsonResponse(response, AdminReservationsPayloadSchema);
-  if (result.kind !== "ok" || input.reservationId) {
-    return result.kind === "ok" ? { data: result.data.items, kind: "ok" } : result;
+  if (input.cursor) {
+    params.set("cursor", input.cursor);
   }
-  return fetchRemainingPages(`/api/admin/reservations?${params.toString()}`, result.data, AdminReservationsPayloadSchema, options);
+  const response = await fetch(`/api/admin/reservations?${params.toString()}`, options);
+  return readJsonResponse(response, AdminReservationsPayloadSchema);
 }
 
 export async function fetchAdminUsers(
-  input: { readonly query: string; readonly status: AdminUserStatusFilter; readonly userId?: string },
+  input: {
+    readonly cursor?: string;
+    readonly query: string;
+    readonly status: AdminUserStatusFilter;
+    readonly userId?: string;
+  },
   options?: AdminReadOptions
-): Promise<AdminReadResult<readonly AdminUser[]>> {
+): Promise<AdminReadResult<AdminReadPage<AdminUser>>> {
   const params = new URLSearchParams({ bookingStatus: input.status, query: input.query });
   if (input.userId) {
     params.set("userId", input.userId);
   }
+  if (input.cursor) {
+    params.set("cursor", input.cursor);
+  }
   const response = await fetch(`/api/admin/users?${params.toString()}`, options);
-  const result = await readJsonResponse(response, AdminUsersPayloadSchema);
-  return result.kind === "ok" && !input.userId
-    ? fetchRemainingPages(`/api/admin/users?${params.toString()}`, result.data, AdminUsersPayloadSchema, options)
-    : result.kind === "ok" ? { data: result.data.items, kind: "ok" } : result;
+  return readJsonResponse(response, AdminUsersPayloadSchema);
 }
 
 export async function fetchAdminUserDetail(
@@ -140,44 +148,23 @@ export async function fetchAdminUserDetail(
 }
 
 export async function fetchAdminAuditActions(
-  input: { readonly action: AdminAuditActionFilter; readonly actionId?: string; readonly query: string },
+  input: {
+    readonly action: AdminAuditActionFilter;
+    readonly actionId?: string;
+    readonly cursor?: string;
+    readonly query: string;
+  },
   options?: AdminReadOptions
-): Promise<AdminReadResult<readonly AdminAuditAction[]>> {
+): Promise<AdminReadResult<AdminReadPage<AdminAuditAction>>> {
   const params = new URLSearchParams({ action: input.action, query: input.query });
   if (input.actionId) {
     params.set("actionId", input.actionId);
   }
-  const response = await fetch(`/api/admin/actions?${params.toString()}`, options);
-  const result = await readJsonResponse(response, AdminAuditActionsPayloadSchema);
-  return result.kind === "ok" && !input.actionId
-    ? fetchRemainingPages(`/api/admin/actions?${params.toString()}`, result.data, AdminAuditActionsPayloadSchema, options)
-    : result.kind === "ok" ? { data: result.data.items, kind: "ok" } : result;
-}
-
-async function fetchRemainingPages<T>(
-  baseUrl: string,
-  firstPage: AdminPage<T>,
-  schema: JsonResponseSchema<AdminPage<T>>,
-  options?: AdminReadOptions
-): Promise<AdminReadResult<readonly T[]>> {
-  const items: T[] = [...firstPage.items];
-  const seenCursors = new Set<string>();
-  let nextCursor = firstPage.nextCursor;
-  while (nextCursor !== null) {
-    if (seenCursors.has(nextCursor)) {
-      return { kind: "error", message: "관리자 데이터 페이지가 반복되었습니다." };
-    }
-    seenCursors.add(nextCursor);
-    const separator = baseUrl.includes("?") ? "&" : "?";
-    const response = await fetch(`${baseUrl}${separator}cursor=${encodeURIComponent(nextCursor)}`, options);
-    const result = await readJsonResponse(response, schema);
-    if (result.kind !== "ok") {
-      return result;
-    }
-    items.push(...result.data.items);
-    nextCursor = result.data.nextCursor;
+  if (input.cursor) {
+    params.set("cursor", input.cursor);
   }
-  return { data: items, kind: "ok" };
+  const response = await fetch(`/api/admin/actions?${params.toString()}`, options);
+  return readJsonResponse(response, AdminAuditActionsPayloadSchema);
 }
 
 async function readJsonResponse<T>(

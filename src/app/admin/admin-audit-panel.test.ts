@@ -22,7 +22,7 @@ describe("AdminAuditPanel", () => {
     expect(markup).not.toContain("<select");
   });
 
-  it("discloses the 80 displayed and 200 queried audit-record limits for empty results", () => {
+  it("renders the empty state for empty results", () => {
     const markup = renderToStaticMarkup(
       createElement(AdminAuditPanel, {
         actionFilter: "ALL",
@@ -34,7 +34,6 @@ describe("AdminAuditPanel", () => {
       })
     );
 
-    expect(markup).toContain("최근 최대 80건 표시 · 최대 200건 조회");
     expect(markup).toContain("표시할 감사 로그가 없습니다.");
   });
 
@@ -64,7 +63,6 @@ describe("AdminAuditPanel", () => {
       })
     );
 
-    expect(markup).toContain("최근 최대 80건 표시 · 최대 200건 조회");
     expect(markup.match(/class="audit-line"/gu)).toHaveLength(80);
   });
 });

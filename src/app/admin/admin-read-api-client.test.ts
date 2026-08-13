@@ -15,7 +15,7 @@ describe("admin read api client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     // When: the client performs the exact lookup.
-    await fetchAdminReservations({
+    const result = await fetchAdminReservations({
       date: "2026-06-16",
       query: "",
       reservationId: "deep-link-target-101",
@@ -28,76 +28,77 @@ describe("admin read api client", () => {
       "/api/admin/reservations?date=2026-06-16&query=&status=CONFIRMED&studyPeriod=ALL&reservationId=deep-link-target-101",
       undefined
     );
+    expect(result).toEqual({ data: page([]), kind: "ok" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("traverses every bounded user page until nextCursor is null", async () => {
-    // Given: 127 users split across three authenticated page envelopes.
-    const users = Array.from({ length: 127 }, (_, index) => user(`user-${index + 1}`));
-    const fetchMock = vi
-      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValueOnce(new Response(JSON.stringify(page(users.slice(0, 50), "cursor-2", 127)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(page(users.slice(50, 100), "cursor-3", 127)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(page(users.slice(100), null, 127)), { status: 200 }));
+  it("fetches exactly one user page and forwards only a caller-supplied cursor", async () => {
+    // Given: two page envelopes with distinct metadata.
+    const firstPage = page([user("user-1")], "cursor-2", 127);
+    const secondPage = page([user("user-2")], null, 126, "2026-08-13T01:15:00.000Z");
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(firstPage), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(secondPage), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    // When: the array-compatible client reads the filtered user collection.
-    const result = await fetchAdminUsers({ query: "학생", status: "ALL" });
+    // When: the caller requests page one, then explicitly supplies its continuation.
+    const firstResult = await fetchAdminUsers({ query: "학생", status: "ALL" });
+    const secondResult = await fetchAdminUsers({ cursor: "cursor-2", query: "학생", status: "ALL" });
 
-    // Then: all 127 rows are returned in server order and each cursor is forwarded once.
-    expect(result).toEqual({ data: users, kind: "ok" });
+    // Then: each call makes one request and preserves its complete page metadata.
+    expect(firstResult).toEqual({ data: firstPage, kind: "ok" });
+    expect(secondResult).toEqual({ data: secondPage, kind: "ok" });
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/users?bookingStatus=ALL&query=%ED%95%99%EC%83%9D", undefined);
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/admin/users?bookingStatus=ALL&query=%ED%95%99%EC%83%9D&cursor=cursor-2",
       undefined
     );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
-      "/api/admin/users?bookingStatus=ALL&query=%ED%95%99%EC%83%9D&cursor=cursor-3",
-      undefined
-    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("traverses all 127 filtered reservations without an old cap", async () => {
-    // Given: 127 reservations split into bounded server pages.
-    const reservations = Array.from({ length: 127 }, (_, index) => reservation(`reservation-${index + 1}`));
+  it("fetches exactly one reservation page with caller-owned continuation and metadata", async () => {
+    // Given: a non-terminal reservation page.
+    const reservationPage = page([reservation("reservation-51")], "reservation-cursor-2", 127);
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
-      .mockResolvedValueOnce(new Response(JSON.stringify(page(reservations.slice(0, 50), "r-2", 127)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(page(reservations.slice(50, 100), "r-3", 127)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(page(reservations.slice(100), null, 127)), { status: 200 }));
+      .mockResolvedValue(new Response(JSON.stringify(reservationPage), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    // When: the array-compatible reservation reader follows the cursor chain.
+    // When: the caller explicitly requests that page.
     const result = await fetchAdminReservations({
+      cursor: "reservation-cursor-1",
       date: "2026-08-13",
       query: "",
       status: "ALL",
       studyPeriod: "ALL"
     });
 
-    // Then: all 127 rows survive in server order and every JSON response remains page-bounded.
-    expect(result).toEqual({ data: reservations, kind: "ok" });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // Then: the envelope is preserved and no internal continuation occurs.
+    expect(result).toEqual({ data: reservationPage, kind: "ok" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/reservations?date=2026-08-13&query=&status=ALL&studyPeriod=ALL&cursor=reservation-cursor-1",
+      undefined
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("traverses all 227 filtered audit actions without an old cap", async () => {
-    // Given: 227 audit actions split into five bounded server pages.
-    const actions = Array.from({ length: 227 }, (_, index) => auditAction(`action-${index + 1}`));
-    const cursors = ["a-2", "a-3", "a-4", "a-5", null] as const;
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>();
-    for (let index = 0; index < cursors.length; index += 1) {
-      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(
-        page(actions.slice(index * 50, (index + 1) * 50), cursors[index], 227)
-      ), { status: 200 }));
-    }
+  it("fetches exactly one audit page with caller-owned continuation and metadata", async () => {
+    // Given: a non-terminal audit page.
+    const auditPage = page([auditAction("action-51")], "audit-cursor-2", 227);
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockResolvedValue(new Response(JSON.stringify(auditPage), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    // When: the audit reader follows every authenticated continuation.
-    const result = await fetchAdminAuditActions({ action: "ALL", query: "" });
+    // When: the caller explicitly requests that page.
+    const result = await fetchAdminAuditActions({ action: "ALL", cursor: "audit-cursor-1", query: "" });
 
-    // Then: all 227 actions are returned and traversal stops only at terminal null.
-    expect(result).toEqual({ data: actions, kind: "ok" });
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    // Then: the envelope is preserved and no internal continuation occurs.
+    expect(result).toEqual({ data: auditPage, kind: "ok" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/actions?action=ALL&query=&cursor=audit-cursor-1",
+      undefined
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns a controlled error for a legacy or malformed page envelope", async () => {
@@ -124,8 +125,8 @@ describe("admin read api client", () => {
     const actionResult = await fetchAdminAuditActions({ action: "NO_SHOW", actionId: "action-227", query: "missing" });
 
     // Then: each ID is sent once and terminal empty results never trigger substitute pagination.
-    expect(userResult).toEqual({ data: [], kind: "ok" });
-    expect(actionResult).toEqual({ data: [], kind: "ok" });
+    expect(userResult).toEqual({ data: page([]), kind: "ok" });
+    expect(actionResult).toEqual({ data: page([]), kind: "ok" });
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "/api/admin/users?bookingStatus=BANNED&query=missing&userId=user-127",
@@ -140,11 +141,16 @@ describe("admin read api client", () => {
   });
 });
 
-function page(items: readonly unknown[], nextCursor: string | null = null, currentTotalCount = items.length): object {
+function page(
+  items: readonly unknown[],
+  nextCursor: string | null = null,
+  currentTotalCount = items.length,
+  expiresAt = "2026-08-13T01:15:00.000Z"
+): object {
   return {
     cutoff: "2026-08-13T01:00:00.000Z",
     currentTotalCount,
-    expiresAt: "2026-08-13T01:15:00.000Z",
+    expiresAt,
     items,
     nextCursor
   };

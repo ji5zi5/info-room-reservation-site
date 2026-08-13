@@ -35,7 +35,6 @@ export function AdminUsersPanel({
       <div className="topbar">
         <div>
           <h2>학생 관리</h2>
-          <p className="muted">검색 결과 최대 100명</p>
         </div>
       </div>
       <div className="admin-row">

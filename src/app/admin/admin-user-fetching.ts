@@ -1,6 +1,7 @@
 import {
   fetchAdminUsers,
   type AdminReadOptions,
+  type AdminReadPage,
   type AdminReadResult
 } from "./admin-api-client";
 import type { AdminSection } from "./admin-console-state";
@@ -15,7 +16,7 @@ type AdminUserFetchInput = {
 export async function fetchAdminUsersForSection(
   input: AdminUserFetchInput,
   options?: AdminReadOptions
-): Promise<AdminReadResult<readonly AdminUser[]>> {
+): Promise<AdminReadResult<AdminReadPage<AdminUser>>> {
   if (input.activeSection !== "blacklist") {
     const query = { query: input.query, status: input.status };
     return options ? fetchAdminUsers(query, options) : fetchAdminUsers(query);
@@ -33,7 +34,15 @@ export async function fetchAdminUsersForSection(
   const searched = await (options
     ? fetchAdminUsers(searchQuery, options)
     : fetchAdminUsers(searchQuery));
-  return searched.kind === "ok" ? { data: mergeAdminUsers(blacklist.data, searched.data), kind: "ok" } : searched;
+  return searched.kind === "ok"
+    ? {
+        data: {
+          ...searched.data,
+          items: mergeAdminUsers(blacklist.data.items, searched.data.items)
+        },
+        kind: "ok"
+      }
+    : searched;
 }
 
 function mergeAdminUsers(

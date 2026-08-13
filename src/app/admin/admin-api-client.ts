@@ -24,6 +24,7 @@ export {
   fetchAdminUserDetail,
   fetchAdminUsers,
   type AdminReadOptions,
+  type AdminReadPage,
   type AdminReadResult
 } from "./admin-read-api-client";
 

@@ -457,6 +457,92 @@ describe("admin reservations route", () => {
     await expect(response.json()).resolves.toEqual(pagePayload([reservationDto(cancelled)], 1));
   });
 
+  it("keeps cursor order and cutoff while status drift changes the current total", async () => {
+    // Given: 52 confirmed reservations and a status change after the first page is issued.
+    const fixture = [
+      ...Array.from({ length: 50 }, (_unused, index) => reservationListRow({
+        id: `drift-eighth-${String(index + 1).padStart(3, "0")}`,
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId: `drift-eighth-student-${String(index + 1).padStart(3, "0")}`
+      })),
+      ...Array.from({ length: 2 }, (_unused, index) => reservationListRow({
+        id: `drift-first-${String(index + 1).padStart(3, "0")}`,
+        status: "CONFIRMED",
+        studyPeriod: "FIRST",
+        userId: `drift-first-student-${String(index + 1).padStart(3, "0")}`
+      }))
+    ];
+    routeMocks.reservationCount.mockImplementation(async () =>
+      fixture.filter((reservation) => reservation.status === "CONFIRMED").length
+    );
+    routeMocks.reservationFindMany.mockImplementation(async () => {
+      const confirmed = fixture.filter((reservation) => reservation.status === "CONFIRMED");
+      return routeMocks.reservationFindMany.mock.calls.length === 1
+        ? confirmed.slice(0, 51)
+        : confirmed.slice(50);
+    });
+    const pageSchema = z.object({
+      cutoff: z.string(),
+      currentTotalCount: z.number(),
+      expiresAt: z.string(),
+      items: z.array(z.object({ id: z.string() })),
+      nextCursor: z.string().nullable()
+    });
+
+    // When: page two reuses page one's cursor after the final reservation leaves the status filter.
+    const firstResponse = await GET(createReadRequest({
+      query: "drift",
+      reservationId: "",
+      status: "CONFIRMED",
+      studyPeriod: "ALL",
+      userId: null
+    }));
+    const firstPage = pageSchema.parse(await firstResponse.json());
+    const driftedReservation = fixture[51];
+    if (driftedReservation === undefined) {
+      throw new Error("missing status-drift fixture");
+    }
+    fixture[51] = { ...driftedReservation, status: "CANCELLED" };
+    const secondResponse = await GET(createReadRequest({
+      cursor: firstPage.nextCursor,
+      query: "drift",
+      reservationId: "",
+      status: "CONFIRMED",
+      studyPeriod: "ALL",
+      userId: null
+    }));
+    const secondPage = pageSchema.parse(await secondResponse.json());
+
+    // Then: the cursor snapshot remains creation-bounded and ordered while the live count is truthful.
+    expect(firstResponse.status).toBe(200);
+    expect(firstPage.items).toHaveLength(50);
+    expect(firstPage.items.at(-1)?.id).toBe("drift-eighth-050");
+    expect(firstPage.currentTotalCount).toBe(52);
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+    expect(secondResponse.status).toBe(200);
+    expect(secondPage).toMatchObject({
+      cutoff: firstPage.cutoff,
+      currentTotalCount: 51,
+      expiresAt: firstPage.expiresAt,
+      items: [{ id: "drift-first-001" }],
+      nextCursor: null
+    });
+    expect(routeMocks.reservationFindMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      orderBy: [{ studyPeriod: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      take: 51,
+      where: expect.objectContaining({
+        createdAt: { lte: new Date(firstPage.cutoff) },
+        status: "CONFIRMED",
+        OR: [
+          { studyPeriod: "FIRST" },
+          { studyPeriod: "EIGHTH", createdAt: { gt: new Date("2026-06-16T05:00:00.000Z") } },
+          { studyPeriod: "EIGHTH", createdAt: new Date("2026-06-16T05:00:00.000Z"), id: { gt: "drift-eighth-050" } }
+        ]
+      })
+    }));
+  });
+
   it("traverses every filtered reservation beyond the former cap with route-issued cursors", async () => {
     // Given: 127 matching rows crossing the EIGHTH/FIRST boundary at a shared timestamp.
     const fixture = [
