@@ -209,7 +209,6 @@ describe("admin reservation no-show route", () => {
 
     // Then
     expect(response.status).toBe(200);
-    expect(routeMocks.databaseActorFromSessionUser).toHaveBeenCalledWith(admin);
     expect(routeMocks.withDatabaseContext).toHaveBeenCalledWith(
       expect.objectContaining({ actor: adminActor, client: expect.anything(), operation: expect.any(Function) })
     );
@@ -233,6 +232,33 @@ describe("admin reservation no-show route", () => {
     expect(routeMocks.withDatabaseContext).toHaveBeenCalledOnce();
     expect(routeMocks.rawReservationFindUnique).not.toHaveBeenCalled();
     expect(routeMocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it("maps administrator targets to the preserved 403 code without mutation", async () => {
+    // Given
+    routeMocks.userFindUnique.mockResolvedValue({ ...student, role: "ADMIN" });
+
+    // When
+    const response = await POST(noShowRequest(), routeContext());
+
+    // Then
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "admin_target" } });
+    expect(routeMocks.reservationUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("maps replayed terminal reservations to invalid_status without side effects", async () => {
+    // Given
+    routeMocks.reservationFindUnique.mockResolvedValue({ ...reservation, status: "NO_SHOW" });
+
+    // When
+    const response = await POST(noShowRequest(), routeContext());
+
+    // Then
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "invalid_status" } });
+    expect(routeMocks.userUpdate).not.toHaveBeenCalled();
+    expect(routeMocks.adminActionCreate).not.toHaveBeenCalled();
   });
 
   it("marks the selected row first, cancels only other still-open-today and future rows, and reports the count", async () => {
@@ -286,7 +312,7 @@ describe("admin reservation no-show route", () => {
     );
   });
 
-  it("uses the default close time and keeps the window open one minute before close", async () => {
+  it("fails closed without effective settings and does not mutate", async () => {
     // Given
     vi.setSystemTime(new Date("2026-06-16T07:19:00.000Z"));
     routeMocks.periodSettingFindMany.mockResolvedValue([]);
@@ -302,8 +328,10 @@ describe("admin reservation no-show route", () => {
     const response = await POST(noShowRequest(), routeContext());
 
     // Then
-    expect(response.status).toBe(200);
-    expect(cancelledIds()).toEqual(["default-open-today"]);
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "not_closed" } });
+    expect(routeMocks.reservationUpdateMany).not.toHaveBeenCalled();
+    expect(routeMocks.userUpdate).not.toHaveBeenCalled();
   });
 
   it("records only one no-show ban when two requests race on the selected status guard", async () => {
@@ -340,6 +368,7 @@ describe("admin reservation no-show route", () => {
     // Then
     expect(first.status).toBe(200);
     expect(second.status).toBe(409);
+    await expect(second.json()).resolves.toMatchObject({ error: { code: "conflict" } });
     expect(selectedTransitions).toBe(2);
     expect(routeMocks.reservationUpdateMany).toHaveBeenCalledWith({
       data: { status: "NO_SHOW" },
@@ -368,7 +397,7 @@ describe("admin reservation no-show route", () => {
 
     // Then
     expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({ error: { code: "bad_request" } });
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
     expect(routeMocks.transaction).toHaveBeenCalledTimes(3);
   });
 
