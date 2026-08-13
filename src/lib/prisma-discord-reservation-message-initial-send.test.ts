@@ -46,17 +46,48 @@ describe("Prisma Discord reservation message initial sends", () => {
       claimId: "stale-claim",
       guildId: "guild",
       messageId: "message",
+      renderedSourceEpoch: 7,
       reservationId: "reservation",
       sentAt: repositoryNow
     });
 
     expect(saved).toBe(false);
+    expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledTimes(2);
+    expect(repositoryMocks.transaction.discordReservationMessage.updateMany.mock.calls.map(([write]) => write.where))
+      .toEqual([
+        {
+          initialSendClaimId: "stale-claim",
+          initialSendStatus: "POSTING",
+          messageRevision: 0,
+          reservationId: "reservation"
+        },
+        {
+          initialSendClaimId: "stale-claim",
+          initialSendStatus: "POSTING",
+          messageRevision: { gt: 0 },
+          reservationId: "reservation"
+        }
+      ]);
+  });
+
+  it("persists the rendered epoch when the initial revision is current", async () => {
+    repositoryMocks.transaction.discordReservationMessage.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const saved = await prismaDiscordReservationMessageRepository.saveInitialSendSuccess({
+      channelId: "channel",
+      claimId: "claim",
+      guildId: "guild",
+      messageId: "message",
+      renderedSourceEpoch: 7,
+      reservationId: "reservation",
+      sentAt: repositoryNow
+    });
+
+    expect(saved).toBe(true);
     expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
-          initialSendClaimId: "stale-claim",
-          initialSendStatus: "POSTING"
-        })
+        data: expect.objectContaining({ renderedSourceEpoch: 7, syncStatus: "SYNCED" }),
+        where: expect.objectContaining({ initialSendClaimId: "claim", messageRevision: 0 })
       })
     );
   });
@@ -71,6 +102,7 @@ describe("Prisma Discord reservation message initial sends", () => {
       claimId: "claim",
       guildId: "guild",
       messageId: "message",
+      renderedSourceEpoch: 7,
       reservationId: "reservation",
       sentAt: repositoryNow
     });
@@ -78,7 +110,11 @@ describe("Prisma Discord reservation message initial sends", () => {
     expect(saved).toBe(true);
     expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ syncNextAttemptAt: repositoryNow, syncStatus: "PENDING" }),
+        data: expect.objectContaining({
+          renderedSourceEpoch: 7,
+          syncNextAttemptAt: repositoryNow,
+          syncStatus: "PENDING"
+        }),
         where: expect.objectContaining({ initialSendClaimId: "claim", messageRevision: { gt: 0 } })
       })
     );

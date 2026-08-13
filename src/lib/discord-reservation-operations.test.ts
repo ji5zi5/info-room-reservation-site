@@ -334,6 +334,51 @@ describe("Discord reservation decisions", () => {
     expect(mocks.recordReceipt).not.toHaveBeenCalled();
   });
 
+  it("allows the persisted current epoch, then stales it after epoch advancement", async () => {
+    // Given
+    let currentEpoch = 7;
+    let renderedSourceEpoch = 7;
+    transaction.$queryRaw.mockImplementation(async () => [{ enabled: true, epoch: currentEpoch }]);
+    transaction.discordReservationMessage.findUnique.mockImplementation(async () => ({
+      channelId: "channel-1",
+      decision: null,
+      guildId: "guild-1",
+      messageId: "message-1",
+      renderedSourceEpoch
+    }));
+    const epochSevenCommand = operationCommand("accept", "interaction-epoch-7");
+
+    // When / Then: the initially rendered and persisted epoch is current.
+    await expect(processDiscordReservationOperation({
+      command: epochSevenCommand,
+      currentApplicationId,
+      ipHash,
+      now
+    })).resolves.toEqual({ kind: "accepted", reservationId: "reservation-1" });
+
+    // When / Then: advancing only current control makes the old rendered control stale.
+    currentEpoch = 8;
+    await expect(processDiscordReservationOperation({
+      command: epochSevenCommand,
+      currentApplicationId,
+      ipHash,
+      now
+    })).resolves.toEqual({ code: "stale_control", kind: "noop" });
+
+    // When / Then: freshly rendering and persisting epoch 8 restores the valid path.
+    renderedSourceEpoch = 8;
+    await expect(processDiscordReservationOperation({
+      command: {
+        ...operationCommand("accept", "interaction-epoch-8"),
+        renderedControlEpoch: 8
+      },
+      currentApplicationId,
+      ipHash,
+      now
+    })).resolves.toEqual({ kind: "accepted", reservationId: "reservation-1" });
+    expect(mocks.recordDecision).toHaveBeenCalledTimes(2);
+  });
+
   it("records two interaction receipts for accept followed by administrator cancellation", async () => {
     // Given
     let message = {

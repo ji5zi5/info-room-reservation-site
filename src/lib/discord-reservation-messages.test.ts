@@ -15,7 +15,9 @@ const baseInput = {
   confirmedCount: 9,
   date: "2026-06-17",
   reason: "과제",
+  renderedEpoch: 7,
   reservationId: "reservation-1",
+  customIdSecret: "discord-custom-id-test-secret",
   studyPeriod: "EIGHTH"
 } as const;
 
@@ -31,8 +33,8 @@ describe("interactive Discord reservation messages", () => {
       components: [
         {
           components: [
-            { custom_id: "reservation:accept:reservation-1", label: "수락", style: 3, type: 2 },
-            { custom_id: "reservation:reject:reservation-1", label: "거절", style: 4, type: 2 }
+            { custom_id: expect.stringMatching(/^dr2\.a\.7\./u), label: "수락", style: 3, type: 2 },
+            { custom_id: expect.stringMatching(/^dr2\.r\.7\./u), label: "거절", style: 4, type: 2 }
           ],
           type: 1
         }
@@ -65,19 +67,31 @@ describe("interactive Discord reservation messages", () => {
     expect(empty.embeds[0]?.fields.find((field) => field.name === "남은 자리")?.value).toBe("10석");
   });
 
-  it("removes controls from every terminal reservation lifecycle message", () => {
+  it("renders accepted follow-up controls and removes controls from terminal outcomes", () => {
     // Given: accepted, cancelled, and stale reservation outcomes.
-    const accepted = buildDiscordReservationAcceptedMessage(baseInput);
-    const cancelled = buildDiscordReservationCancelledMessage({ ...baseInput, cancellationReason: "관리자 사유" });
+    const action = {
+      actor: "Discord 관리자 223456789012345678",
+      at: new Date("2026-08-11T01:03:00.000Z"),
+      reason: "관리자 사유"
+    } as const;
+    const accepted = buildDiscordReservationAcceptedMessage({ ...baseInput, action });
+    const cancelled = buildDiscordReservationCancelledMessage({ ...baseInput, action, cancellationReason: "관리자 사유" });
     const stale = buildDiscordReservationStaleMessage(baseInput);
 
     // When: their terminal Discord messages are rendered.
-    // Then: each payload is mention-safe and contains no interactive controls.
-    for (const payload of [accepted, cancelled, stale]) {
+    // Then: accepted stays actionable while terminal payloads are mention-safe and inert.
+    expect(accepted.components).toEqual([{ components: [
+      expect.objectContaining({ custom_id: expect.stringMatching(/^dr2\.c\.7\./u), label: "관리자 취소" }),
+      expect.objectContaining({ custom_id: expect.stringMatching(/^dr2\.n\.7\./u), label: "노쇼" })
+    ], type: 1 }]);
+    for (const payload of [cancelled, stale]) {
       expect(payload.allowed_mentions).toEqual({ parse: [] });
       expect(payload.components).toEqual([]);
     }
     expect(cancelled.embeds[0]?.fields).toContainEqual({ inline: false, name: "취소 사유", value: "관리자 사유" });
+    expect(cancelled.embeds[0]?.fields).toContainEqual({ inline: false, name: "처리 관리자", value: action.actor });
+    expect(cancelled.embeds[0]?.fields).toContainEqual({ inline: false, name: "처리 시각", value: action.at.toISOString() });
+    expect(cancelled.embeds[0]?.fields).toContainEqual({ inline: false, name: "처리 사유", value: action.reason });
   });
 
   it("derives a stable Discord-safe nonce from a reservation identity", () => {

@@ -140,7 +140,7 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
       try {
         const body = await http(request.url, {
           headers: request.authorization === "bot" ? { authorization: `Bot ${input.botToken}` } : {},
-          json: request.payload,
+          json: { ...request.payload, allowed_mentions: { parse: [] } },
           method: request.method
         }).json<unknown>();
         return { kind: "sent", messageId: discordMessageResponseSchema.parse(body).id };
@@ -204,7 +204,7 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
     editChannelMessage: ({ channelId, messageId, payload }) =>
       send({
         authorization: "bot",
-        invalidResponseOutcome: "failed",
+        invalidResponseOutcome: "unknown",
         method: "PATCH",
         payload,
         url: `${DISCORD_API_BASE_URL}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`

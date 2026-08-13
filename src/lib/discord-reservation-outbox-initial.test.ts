@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DiscordReservationOutboxDependencies } from "./discord-reservation-outbox-contracts";
 import type { DiscordBotClient, DiscordBotDeliveryResult } from "./discord-bot";
 import type { DiscordReservationSnapshotResult } from "./discord-reservation-snapshot";
+import { parseDiscordReservationInteraction } from "./discord-interactions";
 import { createDiscordReservationOutbox } from "./discord-reservation-outbox";
 import {
   processDiscordInitialClaim,
@@ -19,6 +20,38 @@ const claim = {
 } as const;
 
 describe("Discord reservation initial POST", () => {
+  it("signs initial controls with the current fenced epoch and configured bot token", async () => {
+    const configuredBotToken = "initial-control-config-token";
+    const dependencies = readyDependencies({ botToken: configuredBotToken, controlEpoch: 7 });
+    vi.stubEnv("DISCORD_BOT_TOKEN", "ambient-token-that-must-not-verify");
+
+    try {
+      await expect(processDiscordInitialClaim(dependencies, claim, now)).resolves.toBe("sent");
+
+      expectInitialControlCommands(dependencies, configuredBotToken, 7);
+      expect(dependencies.repository.saveInitialSendSuccess).toHaveBeenCalledWith({
+        channelId: "channel",
+        claimId: "claim-1",
+        guildId: "guild",
+        messageId: "message-1",
+        renderedSourceEpoch: 7,
+        reservationId: "reservation-1",
+        sentAt: now
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("re-renders initial controls with the changed epoch after operations re-enable", async () => {
+    const configuredBotToken = "re-enabled-control-config-token";
+    const dependencies = readyDependencies({ botToken: configuredBotToken, controlEpoch: 8 });
+
+    await expect(processDiscordInitialClaim(dependencies, claim, now)).resolves.toBe("sent");
+
+    expectInitialControlCommands(dependencies, configuredBotToken, 8);
+  });
+
   it("performs zero HTTP requests when CLAIMED cannot transition to POSTING", async () => {
     const dependencies = readyDependencies({ posting: false });
 
@@ -119,6 +152,8 @@ describe("Discord reservation initial POST", () => {
 });
 
 function readyDependencies(input: Readonly<{
+  botToken?: string;
+  controlEpoch?: number;
   delivery?: DiscordBotDeliveryResult;
   expiredPostingCount?: number;
   initialClaims?: readonly (typeof claim)[];
@@ -134,7 +169,11 @@ function readyDependencies(input: Readonly<{
     claimMessageSyncs: vi.fn(async () => []),
     markInitialSendPendingReview: vi.fn(async () => true),
     readMessageSyncState: vi.fn(async () => null),
-    readOperationsControl: vi.fn(async () => ({ enabled: true, epoch: 7, pendingRemoteCleanup: false })),
+    readOperationsControl: vi.fn(async () => ({
+      enabled: true,
+      epoch: input.controlEpoch ?? 7,
+      pendingRemoteCleanup: false
+    })),
     reconcileExpiredInitialPosts: vi.fn(async () => input.expiredPostingCount ?? 0),
     saveInitialSendFailure: vi.fn(async () => true),
     saveInitialSendSuccess: vi.fn(async () => input.saveSuccess ?? true),
@@ -189,7 +228,7 @@ function readyDependencies(input: Readonly<{
       adminRoleId: "role",
       adminUserBindings: [{ discordUserId: "actor", studentNumber: "31001" }],
       applicationId: "application",
-      botToken: "token",
+      botToken: input.botToken ?? "token",
       channelId: "channel",
       guildId: "guild",
       publicKey: "public-key"
@@ -204,4 +243,41 @@ function readyDependencies(input: Readonly<{
     repository,
     sendWebhook
   } satisfies DiscordReservationOutboxDependencies;
+}
+
+function expectInitialControlCommands(
+  dependencies: ReturnType<typeof readyDependencies>,
+  configuredBotToken: string,
+  expectedEpoch: number
+): void {
+  const payload = dependencies.bot.createChannelMessage.mock.calls[0]?.[0]?.payload;
+  const buttons = payload?.components?.[0]?.components;
+
+  expect(buttons).toHaveLength(2);
+  expect(JSON.stringify(payload)).not.toContain(configuredBotToken);
+  expect(buttons?.map((button) => parseDiscordReservationInteraction(componentInteraction(button.custom_id), configuredBotToken)))
+    .toEqual([
+      expect.objectContaining({
+        command: expect.objectContaining({ kind: "accept", renderedEpoch: expectedEpoch, reservationId: claim.reservationId }),
+        kind: "component"
+      }),
+      expect.objectContaining({
+        command: expect.objectContaining({ kind: "reject", renderedEpoch: expectedEpoch, reservationId: claim.reservationId }),
+        kind: "component"
+      })
+    ]);
+}
+
+function componentInteraction(customId: string) {
+  return {
+    application_id: "123456789012345678",
+    channel_id: "223456789012345678",
+    data: { component_type: 2, custom_id: customId },
+    guild_id: "323456789012345678",
+    id: "423456789012345678",
+    member: { roles: [], user: { id: "523456789012345678" } },
+    message: { id: "623456789012345678" },
+    token: "interaction-token",
+    type: 3
+  };
 }

@@ -158,6 +158,7 @@ export function saveInitialSendSuccess(input: {
   readonly claimId: string;
   readonly guildId: string;
   readonly messageId: string;
+  readonly renderedSourceEpoch: number;
   readonly reservationId: string;
   readonly sentAt: Date;
 }): Promise<boolean> {
@@ -170,7 +171,8 @@ export function saveInitialSendSuccess(input: {
       initialSendNextAttemptAt: null,
       initialSendOutcome: "SENT",
       initialSendStatus: "SENT",
-      messageId: input.messageId
+      messageId: input.messageId,
+      renderedSourceEpoch: input.renderedSourceEpoch
     } satisfies Prisma.DiscordReservationMessageUpdateManyMutationInput;
     const where = {
       initialSendClaimId: input.claimId,

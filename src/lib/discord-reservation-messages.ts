@@ -6,6 +6,7 @@ import {
   buildReservationMessageNonce
 } from "./discord-bot";
 import { getStudyPeriodLabel, type StudyPeriod } from "./study-periods";
+import { buildDiscordReservationCustomId, type DiscordReservationCustomIdAction } from "./discord-interaction-contracts";
 
 type DiscordReservationMessageInput = {
   readonly applicant: {
@@ -16,27 +17,26 @@ type DiscordReservationMessageInput = {
   readonly closeTime: string;
   readonly confirmedCount: number;
   readonly date: string;
+  readonly customIdSecret?: string;
   readonly reason: string | null;
+  readonly renderedEpoch?: number;
   readonly reservationId: string;
+  readonly sourceIdentity?: string;
   readonly studyPeriod: StudyPeriod;
+  readonly action?: {
+    readonly actor: string;
+    readonly at: Date;
+    readonly label?: string;
+    readonly reason: string | null;
+  };
 };
-
-const INITIAL_MESSAGE_ACTIONS: readonly DiscordActionRowComponent[] = [
-  {
-    components: [
-      { custom_id: "", label: "수락", style: 3, type: 2 },
-      { custom_id: "", label: "거절", style: 4, type: 2 }
-    ],
-    type: 1
-  }
-];
 
 export function buildDiscordReservationInitialMessage(
   input: DiscordReservationMessageInput
 ): DiscordBotMessagePayload {
   return {
     allowed_mentions: { parse: [] },
-    components: reservationActions(input.reservationId),
+    components: reservationActions(input),
     embeds: [reservationEmbed(input, "정보실 예약 신청")]
   };
 }
@@ -44,7 +44,14 @@ export function buildDiscordReservationInitialMessage(
 export function buildDiscordReservationAcceptedMessage(
   input: DiscordReservationMessageInput
 ): DiscordBotMessagePayload {
-  return terminalReservationMessage(input, "예약 신청 수락 처리");
+  return {
+    allowed_mentions: { parse: [] },
+    components: reservationActions(input, [
+      { action: "admin_cancel", label: "관리자 취소", style: 4 },
+      { action: "no_show", label: "노쇼", style: 2 }
+    ]),
+    embeds: [reservationEmbed(input, "예약 신청 수락 처리")]
+  };
 }
 
 export function buildDiscordReservationCancelledMessage(
@@ -83,20 +90,39 @@ function terminalReservationMessage(
   };
 }
 
-function reservationActions(reservationId: string): readonly DiscordActionRowComponent[] {
-  const [row] = INITIAL_MESSAGE_ACTIONS;
-  if (row === undefined) {
-    return [];
-  }
+function reservationActions(
+  input: DiscordReservationMessageInput,
+  actions: readonly { readonly action: DiscordReservationCustomIdAction; readonly label: string; readonly style: 1 | 2 | 3 | 4 | 5 }[] = [
+    { action: "accept", label: "수락", style: 3 },
+    { action: "reject", label: "거절", style: 4 }
+  ]
+): readonly DiscordActionRowComponent[] {
+  const secret = input.customIdSecret ?? process.env.DISCORD_BOT_TOKEN;
+  if (secret === undefined || secret.length === 0) return [];
+  const renderedEpoch = input.renderedEpoch ?? 0;
   return [
     {
-      ...row,
-      components: row.components.map((button) => ({
-        ...button,
-        custom_id: `reservation:${button.label === "수락" ? "accept" : "reject"}:${reservationId}`
-      }))
+      components: actions.map(({ action, label, style }) => ({
+        custom_id: buildDiscordReservationCustomId({
+          action,
+          renderedEpoch,
+          reservationId: input.reservationId,
+          secret,
+          sourceIdentity: input.sourceIdentity ?? buildReservationMessageNonce(input.reservationId)
+        }),
+        label,
+        style,
+        type: 2
+      })),
+      type: 1
     }
   ];
+}
+
+export function buildDiscordReservationNoShowMessage(
+  input: DiscordReservationMessageInput
+): DiscordBotMessagePayload {
+  return terminalReservationMessage(input, "예약 노쇼 처리");
 }
 
 function reservationEmbed(input: DiscordReservationMessageInput, title: string): DiscordEmbed {
@@ -112,10 +138,21 @@ function reservationEmbed(input: DiscordReservationMessageInput, title: string):
         inline: false,
         name: "예약 마감",
         value: `${input.date} ${input.closeTime} KST (<t:${closeTimestamp(input.date, input.closeTime)}:R>)`
-      }
+      },
+      ...actionFields(input.action)
     ],
     title
   };
+}
+
+function actionFields(action: DiscordReservationMessageInput["action"]): readonly DiscordEmbedField[] {
+  if (action === undefined) return [];
+  return [
+    ...(action.label === undefined ? [] : [{ inline: false, name: "처리 작업", value: action.label }]),
+    { inline: false, name: "처리 관리자", value: action.actor },
+    { inline: false, name: "처리 시각", value: action.at.toISOString() },
+    { inline: false, name: "처리 사유", value: action.reason ?? "사유 미기록" }
+  ];
 }
 
 function closeTimestamp(date: string, closeTime: string): number {

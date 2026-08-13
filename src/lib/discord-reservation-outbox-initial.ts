@@ -103,7 +103,7 @@ export async function processDiscordInitialClaim(
       await markPendingReview(dependencies, claim, "POSTING_CAS_REJECTED");
       return "review";
     }
-    return deliverInitialPost(dependencies, claim, snapshotResult.snapshot, config, now);
+    return deliverInitialPost(dependencies, claim, snapshotResult.snapshot, config, fence.epoch, now);
   } catch (error) {
     await dependencies.repository.saveInitialSendFailure({
       attempts: claim.attempts,
@@ -123,12 +123,17 @@ async function deliverInitialPost(
   claim: DiscordInitialSendClaim,
   snapshot: DiscordReservationSnapshot,
   config: DiscordApplicationConfig,
+  renderedEpoch: number,
   now: Date
 ): Promise<InitialClaimResult> {
   try {
     const delivery = await dependencies.bot.createChannelMessage({
       channelId: config.channelId,
-      payload: buildDiscordReservationInitialMessage(messageInput(snapshot)),
+      payload: buildDiscordReservationInitialMessage({
+        ...messageInput(snapshot),
+        customIdSecret: config.botToken,
+        renderedEpoch
+      }),
       reservationId: claim.reservationId
     });
     switch (delivery.kind) {
@@ -138,6 +143,7 @@ async function deliverInitialPost(
           claimId: claim.claimId,
           guildId: config.guildId,
           messageId: delivery.messageId,
+          renderedSourceEpoch: renderedEpoch,
           reservationId: claim.reservationId,
           sentAt: now
         });

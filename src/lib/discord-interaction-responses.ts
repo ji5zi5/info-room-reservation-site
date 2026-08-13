@@ -15,15 +15,16 @@ export function buildDiscordPongResponse(): DiscordInteractionResponse {
   return { type: 1 };
 }
 
-export function buildDiscordRejectReasonModal(reservationId: string): DiscordInteractionResponse {
+export function buildDiscordRejectReasonModal(signedCustomId: string): DiscordInteractionResponse {
+  const adminCancellation = signedCustomId.startsWith("dr2.c.");
   return {
     data: {
       components: [{
-        components: [{ custom_id: "reason", label: "거절 사유", max_length: 200, min_length: 1, required: true, style: 2, type: 4 }],
+        components: [{ custom_id: "reason", label: adminCancellation ? "취소 사유" : "거절 사유", max_length: 200, min_length: 1, required: true, style: 2, type: 4 }],
         type: 1
       }],
-      custom_id: `reservation:reject:${reservationId}`,
-      title: "예약 거절 사유"
+      custom_id: signedCustomId,
+      title: adminCancellation ? "예약 관리자 취소 사유" : "예약 거절 사유"
     },
     type: 9
   };
