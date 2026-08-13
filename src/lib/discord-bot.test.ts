@@ -81,7 +81,7 @@ describe("Discord bot REST transport", () => {
     expect(callCount).toBe(2);
   });
 
-  it("retries an ambiguous create once with the same reservation nonce", async () => {
+  it("does not retry an ambiguous create", async () => {
     // Given: the first create attempt loses its network response.
     const bodies: string[] = [];
     let callCount = 0;
@@ -92,27 +92,23 @@ describe("Discord bot REST transport", () => {
         const request = new Request(input, init);
         bodies.push(await request.text());
         callCount += 1;
-        if (callCount === 1) {
-          throw new TypeError("network response lost");
-        }
-        return new Response(JSON.stringify({ id: "456" }), { status: 200 });
+        throw new TypeError("network response lost");
       }
     });
 
     // When: the bot creates a reservation message.
     const result = await bot.createChannelMessage({ channelId: "321", payload, reservationId: "reservation-1" });
 
-    // Then: it retries exactly once with the identical nonce.
-    expect(result).toEqual({ kind: "sent", messageId: "456" });
-    expect(callCount).toBe(2);
-    expect(bodies).toHaveLength(2);
+    // Then: the durable outbox must reconcile the one ambiguous request.
+    expect(result).toMatchObject({ kind: "unknown", outcome: "UNKNOWN" });
+    expect(callCount).toBe(1);
+    expect(bodies).toHaveLength(1);
     expect(bodies[0]).toContain('"enforce_nonce":true');
     expect(bodies[0]).toContain('"nonce":"');
-    expect(bodies[1]).toBe(bodies[0]);
   });
 
-  it("keeps a successful create response with a missing id ambiguous after one nonce-stable retry", async () => {
-    // Given: Discord accepts both creates but returns valid JSON without a message id.
+  it("keeps a successful create response with a missing id ambiguous without retrying", async () => {
+    // Given: Discord accepts the create but returns valid JSON without a message id.
     const bodies: string[] = [];
     const bot = createDiscordBotClient({
       applicationId: "123",
@@ -133,13 +129,12 @@ describe("Discord bot REST transport", () => {
     // Then: the outcome remains ambiguous, uses the same nonce, and cannot fall back to a webhook.
     expect(result).toMatchObject({ code: "discord_invalid_response", kind: "unknown", outcome: "UNKNOWN" });
     expect(canFallbackToDiscordWebhook(result)).toBe(false);
-    expect(bodies).toHaveLength(2);
+    expect(bodies).toHaveLength(1);
     expect(bodies[0]).toContain('"nonce":"reservation-');
-    expect(bodies[1]).toBe(bodies[0]);
   });
 
-  it("keeps a successful create response with malformed JSON ambiguous after one nonce-stable retry", async () => {
-    // Given: Discord accepts both creates but returns malformed JSON.
+  it("keeps a successful create response with malformed JSON ambiguous without retrying", async () => {
+    // Given: Discord accepts the create but returns malformed JSON.
     const bodies: string[] = [];
     const bot = createDiscordBotClient({
       applicationId: "123",
@@ -160,10 +155,9 @@ describe("Discord bot REST transport", () => {
     // Then: the outcome remains ambiguous, uses the same nonce, and cannot fall back to a webhook.
     expect(result).toMatchObject({ code: "discord_invalid_response", kind: "unknown", outcome: "UNKNOWN" });
     expect(canFallbackToDiscordWebhook(result)).toBe(false);
-    expect(bodies).toHaveLength(2);
+    expect(bodies).toHaveLength(1);
     expect(bodies[0]).toContain('"enforce_nonce":true');
     expect(bodies[0]).toContain('"nonce":"reservation-');
-    expect(bodies[1]).toBe(bodies[0]);
   });
 
   it.each([204, 404])("treats Discord message deletion status %s as removed", async (status) => {

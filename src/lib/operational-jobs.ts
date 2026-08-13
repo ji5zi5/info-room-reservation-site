@@ -3,6 +3,14 @@ export const OPERATIONAL_JOB_POLICIES = {
     intervalMs: 60_000,
     timeoutMs: 2 * 60_000
   },
+  DISCORD_INTERACTIONS: {
+    intervalMs: 60_000,
+    timeoutMs: 2 * 60_000
+  },
+  DISCORD_RESERVATION_OUTBOX: {
+    intervalMs: 60_000,
+    timeoutMs: 2 * 60_000
+  },
   MAINTENANCE: {
     intervalMs: 24 * 60 * 60_000,
     timeoutMs: 15 * 60_000

@@ -116,8 +116,11 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
     timeout: DISCORD_BOT_TIMEOUT_MS
   });
 
-  const send = async (request: RequestOptions): Promise<DiscordBotDeliveryResult> => {
-    for (let retryCount = 0; retryCount <= MAX_RATE_LIMIT_RETRIES; retryCount += 1) {
+  const send = async (
+    request: RequestOptions,
+    maxRateLimitRetries: number = MAX_RATE_LIMIT_RETRIES
+  ): Promise<DiscordBotDeliveryResult> => {
+    for (let retryCount = 0; retryCount <= maxRateLimitRetries; retryCount += 1) {
       try {
         const body = await http(request.url, {
           headers: request.authorization === "bot" ? { authorization: `Bot ${input.botToken}` } : {},
@@ -127,7 +130,7 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
         return { kind: "sent", messageId: discordMessageResponseSchema.parse(body).id };
       } catch (error) {
         const rateLimitDelay = await getDiscordRateLimitDelay(error);
-        if (rateLimitDelay !== null && retryCount < MAX_RATE_LIMIT_RETRIES) {
+        if (rateLimitDelay !== null && retryCount < maxRateLimitRetries) {
           await sleep(rateLimitDelay);
           continue;
         }
@@ -165,8 +168,7 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
         },
         url: `${DISCORD_API_BASE_URL}/channels/${encodeURIComponent(channelId)}/messages`
       };
-      const firstResult = await send(request);
-      return firstResult.kind === "unknown" ? send(request) : firstResult;
+      return send(request, 0);
     },
     deleteChannelMessage: async ({ channelId, messageId }) => {
       try {

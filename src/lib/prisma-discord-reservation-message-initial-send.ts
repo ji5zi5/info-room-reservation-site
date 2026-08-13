@@ -1,6 +1,7 @@
 import { Prisma, type DiscordReservationMessage } from "@prisma/client";
 
 import { withDiscordReservationMessageSystemContext } from "./prisma-discord-reservation-message-context";
+import type { DiscordOperationsControlState } from "./discord-operations-repair-policy";
 
 const DISCORD_MAX_RETRY_DELAY_MS = 60 * 60 * 1_000;
 const DISCORD_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -30,14 +31,64 @@ export function beginInitialSendPost(input: Readonly<{
   operationId: string;
   reservationId: string;
 }>): Promise<boolean> {
-  return conditionalInitialSendUpdate(input.reservationId, {
-    initialSendStatus: "POSTING",
-    postDeadlineAt: input.deadlineAt,
-    postOperationBoundary: input.boundary,
-    postOperationEpoch: input.epoch,
-    postOperationId: input.operationId,
-    postOperationNonce: input.nonce
-  }, { initialSendClaimId: input.claimId, initialSendStatus: "CLAIMED" });
+  return withDiscordReservationMessageSystemContext(async (transaction) => {
+    const control = await transaction.discordOperationsControl.findUnique({
+      select: { enabled: true, epoch: true, pendingRemoteCleanup: true },
+      where: { id: "discord-operations" }
+    });
+    if (
+      control === null ||
+      !control.enabled ||
+      control.pendingRemoteCleanup ||
+      control.epoch !== input.epoch
+    ) {
+      return false;
+    }
+    const result = await transaction.discordReservationMessage.updateMany({
+      data: {
+        initialSendStatus: "POSTING",
+        postDeadlineAt: input.deadlineAt,
+        postOperationBoundary: input.boundary,
+        postOperationEpoch: input.epoch,
+        postOperationId: input.operationId,
+        postOperationNonce: input.nonce
+      },
+      where: {
+        initialSendClaimId: input.claimId,
+        initialSendStatus: "CLAIMED",
+        reservationId: input.reservationId
+      }
+    });
+    return result.count === 1;
+  });
+}
+
+export function readOperationsControl(): Promise<DiscordOperationsControlState> {
+  return withDiscordReservationMessageSystemContext(async (transaction) => {
+    const control = await transaction.discordOperationsControl.findUnique({
+      select: { enabled: true, epoch: true, pendingRemoteCleanup: true },
+      where: { id: "discord-operations" }
+    });
+    return control ?? { enabled: false, epoch: 0, pendingRemoteCleanup: false };
+  });
+}
+
+export function reconcileExpiredInitialPosts(now: Date): Promise<number> {
+  return withDiscordReservationMessageSystemContext(async (transaction) => {
+    const result = await transaction.discordReservationMessage.updateMany({
+      data: {
+        initialSendNextAttemptAt: null,
+        initialSendStatus: "PENDING_REVIEW",
+        pendingReviewReason: "POSTING_EXPIRED",
+        remoteVerificationStatus: "PENDING"
+      },
+      where: {
+        initialSendStatus: "POSTING",
+        postDeadlineAt: { lte: now }
+      }
+    });
+    return result.count;
+  });
 }
 
 export function markInitialSendPendingReview(input: Readonly<{
@@ -123,7 +174,7 @@ export function saveInitialSendSuccess(input: {
     } satisfies Prisma.DiscordReservationMessageUpdateManyMutationInput;
     const where = {
       initialSendClaimId: input.claimId,
-      initialSendStatus: { in: ["CLAIMED", "POSTING"] },
+      initialSendStatus: "POSTING",
       reservationId: input.reservationId
     } satisfies Prisma.DiscordReservationMessageWhereInput;
     const current = await transaction.discordReservationMessage.updateMany({

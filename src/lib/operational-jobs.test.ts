@@ -9,6 +9,17 @@ import {
 const now = new Date("2026-06-12T07:25:00.000Z");
 
 describe("operational job readiness", () => {
+  it("schedules both Discord workers every minute", () => {
+    expect(OPERATIONAL_JOB_POLICIES.DISCORD_INTERACTIONS).toEqual({
+      intervalMs: 60_000,
+      timeoutMs: 2 * 60_000
+    });
+    expect(OPERATIONAL_JOB_POLICIES.DISCORD_RESERVATION_OUTBOX).toEqual({
+      intervalMs: 60_000,
+      timeoutMs: 2 * 60_000
+    });
+  });
+
   it("excludes an explicitly disabled job", () => {
     expect(
       evaluateOperationalJobReadiness({

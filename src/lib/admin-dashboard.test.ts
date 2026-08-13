@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DatabaseActor } from "./db-context";
+import type { OperationalJobRecord } from "./operational-job-runner";
 import type { PeriodSummary } from "./period-settings";
 
 type NotificationFindMany = (input: unknown) => Promise<readonly NotificationDelivery[]>;
@@ -46,7 +47,7 @@ vi.mock("./prisma-notification-repository", () => ({
   toDeliveryRecord: dashboardMocks.toDeliveryRecord
 }));
 
-import { getAdminDashboard } from "./admin-dashboard";
+import { getAdminDashboard, operationalJobLabel, toAdminOperationalJobSummary } from "./admin-dashboard";
 
 const actor = { id: "admin-dashboard-actor", role: "ADMIN" } satisfies DatabaseActor;
 const period = {
@@ -95,3 +96,44 @@ describe("admin dashboard protected reads", () => {
     expect(result.periods[0]?.applicants).toEqual(period.applicants);
   });
 });
+
+describe("admin operational job summaries", () => {
+  it("labels every operational job and exposes aggregate backlog health", () => {
+    expect([
+      operationalJobLabel("CLOSED_PERIOD_NOTIFICATIONS"),
+      operationalJobLabel("DISCORD_INTERACTIONS"),
+      operationalJobLabel("DISCORD_RESERVATION_OUTBOX"),
+      operationalJobLabel("MAINTENANCE")
+    ]).toEqual(["마감 명단 알림", "Discord 상호작용", "Discord 예약 전송함", "유지보수"]);
+
+    expect(
+      toAdminOperationalJobSummary(jobRecord(), { code: "last_attempt_failed", status: "degraded" })
+    ).toEqual({
+      backlogCount: 4,
+      code: "last_attempt_failed",
+      job: "DISCORD_RESERVATION_OUTBOX",
+      label: "Discord 예약 전송함",
+      lastAttemptAt: "2026-08-11T00:00:00.000Z",
+      lastSuccessAt: "2026-08-10T00:00:00.000Z",
+      oldestBacklogAt: "2026-08-09T00:00:00.000Z",
+      status: "degraded"
+    });
+  });
+});
+
+function jobRecord(): OperationalJobRecord {
+  return {
+    backlogCount: 4,
+    consecutiveFailures: 1,
+    durationMs: 250,
+    failureCode: "discord_delivery_failed",
+    finishedAt: new Date("2026-08-11T00:00:00.250Z"),
+    job: "DISCORD_RESERVATION_OUTBOX",
+    lastAttemptAt: new Date("2026-08-11T00:00:00.000Z"),
+    lastSuccessAt: new Date("2026-08-10T00:00:00.000Z"),
+    oldestBacklogAt: new Date("2026-08-09T00:00:00.000Z"),
+    result: "{}",
+    startedAt: new Date("2026-08-11T00:00:00.000Z"),
+    status: "FAILED"
+  };
+}

@@ -1,5 +1,4 @@
 import type { DiscordApplicationConfig } from "./discord-app-config";
-import type { DiscordBotDeliveryResult } from "./discord-bot";
 import { buildDiscordReservationInitialMessage } from "./discord-reservation-messages";
 import type { DiscordReservationSnapshot } from "./discord-reservation-snapshot";
 import { ServerEnvError } from "./env";
@@ -8,8 +7,20 @@ import type { DiscordInitialSendClaim } from "./prisma-discord-reservation-messa
 import type { ReservationCreatedNotificationResult } from "./reservation-created-notification-service";
 import type { Reservation } from "./reservation-service";
 import type { DiscordReservationOutboxDependencies } from "./discord-reservation-outbox-contracts";
+import { evaluateDiscordOperationFence } from "./discord-operations-repair-policy";
+import type { DiscordOperationsControlState } from "./discord-operations-repair-policy";
 
-export type InitialClaimResult = "retried" | "sent" | "terminal";
+// allow: SIZE_OK — This file is the auditable initial-send state machine plus its legacy webhook boundary.
+const INITIAL_POST_DEADLINE_MS = 10_000;
+
+export type InitialClaimResult = "retried" | "review" | "sent" | "terminal";
+
+export async function reconcileExpiredDiscordInitialPosts(
+  dependencies: DiscordReservationOutboxDependencies,
+  now: Date
+): Promise<number> {
+  return (await getReconciliationRepository(dependencies.repository)?.reconcileExpiredInitialPosts(now)) ?? 0;
+}
 
 export async function processDiscordInitialClaim(
   dependencies: DiscordReservationOutboxDependencies,
@@ -48,35 +59,48 @@ export async function processDiscordInitialClaim(
     if (config === null) {
       return finishWebhookDelivery(dependencies, claim, snapshotResult.snapshot, settings, now, "WEBHOOK");
     }
-    const delivery = await dependencies.bot.createChannelMessage({
-      channelId: config.channelId,
-      payload: buildDiscordReservationInitialMessage(messageInput(snapshotResult.snapshot)),
-      reservationId: claim.reservationId
+    const operationsRepository = getOperationsRepository(dependencies.repository);
+    const control = await operationsRepository?.readOperationsControl() ?? {
+      enabled: true,
+      epoch: 0,
+      pendingRemoteCleanup: false
+    };
+    const fence = evaluateDiscordOperationFence({
+      control,
+      expectedEpoch: control.epoch,
+      stage: "INITIAL_POST"
     });
-    switch (delivery.kind) {
-      case "sent":
-        await dependencies.repository.saveInitialSendSuccess({
-          channelId: config.channelId,
+    switch (fence.kind) {
+      case "allowed":
+        break;
+      case "disabled":
+      case "draining":
+      case "stale_epoch":
+        await dependencies.repository.saveInitialSendFailure({
+          attempts: claim.attempts,
           claimId: claim.claimId,
-          guildId: config.guildId,
-          messageId: delivery.messageId,
-          reservationId: claim.reservationId,
-          sentAt: now
-        });
-        return "sent";
-      case "unknown":
-        await saveRetryableInitial(dependencies, claim, now, delivery);
-        return "retried";
-      case "failed":
-        return finishWebhookDelivery(
-          dependencies,
-          claim,
-          snapshotResult.snapshot,
-          settings,
+          error: fence.kind,
           now,
-          "WEBHOOK_FALLBACK"
-        );
+          outcome: fence.kind.toUpperCase(),
+          reservationId: claim.reservationId,
+          retryable: true
+        });
+        return "retried";
     }
+    const posting = await operationsRepository?.beginInitialSendPost({
+      boundary: "INITIAL_CREATE",
+      claimId: claim.claimId,
+      deadlineAt: new Date(now.getTime() + INITIAL_POST_DEADLINE_MS),
+      epoch: fence.epoch,
+      nonce: claim.nonce,
+      operationId: claim.claimId,
+      reservationId: claim.reservationId
+    }) ?? true;
+    if (!posting) {
+      await markPendingReview(dependencies, claim, "POSTING_CAS_REJECTED");
+      return "review";
+    }
+    return deliverInitialPost(dependencies, claim, snapshotResult.snapshot, config, now);
   } catch (error) {
     await dependencies.repository.saveInitialSendFailure({
       attempts: claim.attempts,
@@ -89,6 +113,128 @@ export async function processDiscordInitialClaim(
     });
     return "retried";
   }
+}
+
+async function deliverInitialPost(
+  dependencies: DiscordReservationOutboxDependencies,
+  claim: DiscordInitialSendClaim,
+  snapshot: DiscordReservationSnapshot,
+  config: DiscordApplicationConfig,
+  now: Date
+): Promise<InitialClaimResult> {
+  try {
+    const delivery = await dependencies.bot.createChannelMessage({
+      channelId: config.channelId,
+      payload: buildDiscordReservationInitialMessage(messageInput(snapshot)),
+      reservationId: claim.reservationId
+    });
+    switch (delivery.kind) {
+      case "sent": {
+        const saved = await dependencies.repository.saveInitialSendSuccess({
+          channelId: config.channelId,
+          claimId: claim.claimId,
+          guildId: config.guildId,
+          messageId: delivery.messageId,
+          reservationId: claim.reservationId,
+          sentAt: now
+        });
+        if (saved) {
+          return "sent";
+        }
+        await markPendingReview(dependencies, claim, "RESULT_PERSISTENCE_FAILED");
+        return "review";
+      }
+      case "unknown":
+        await markPendingReview(dependencies, claim, delivery.outcome);
+        return "review";
+      case "failed": {
+        const saved = await dependencies.repository.saveInitialSendFailure({
+          attempts: claim.attempts,
+          claimId: claim.claimId,
+          error: delivery.message,
+          now,
+          outcome: delivery.outcome,
+          reservationId: claim.reservationId,
+          retryable: true
+        });
+        if (saved) {
+          return "retried";
+        }
+        await markPendingReview(dependencies, claim, "RESULT_PERSISTENCE_FAILED");
+        return "review";
+      }
+    }
+  } catch {
+    await markPendingReview(dependencies, claim, "RESULT_PERSISTENCE_FAILED");
+    return "review";
+  }
+}
+
+async function markPendingReview(
+  dependencies: DiscordReservationOutboxDependencies,
+  claim: DiscordInitialSendClaim,
+  reason: string
+): Promise<void> {
+  const operationsRepository = getOperationsRepository(dependencies.repository);
+  if (operationsRepository === null) {
+    return;
+  }
+  await Promise.allSettled([
+    operationsRepository.markInitialSendPendingReview({
+      claimId: claim.claimId,
+      reason,
+      reservationId: claim.reservationId
+    })
+  ]);
+}
+
+type OutboxRepository = DiscordReservationOutboxDependencies["repository"];
+type OperationsRepository = OutboxRepository & {
+  readonly beginInitialSendPost: (input: {
+    readonly boundary: string;
+    readonly claimId: string;
+    readonly deadlineAt: Date;
+    readonly epoch: number;
+    readonly nonce: string;
+    readonly operationId: string;
+    readonly reservationId: string;
+  }) => Promise<boolean>;
+  readonly markInitialSendPendingReview: (input: {
+    readonly claimId: string;
+    readonly reason: string;
+    readonly reservationId: string;
+  }) => Promise<boolean>;
+  readonly readOperationsControl: () => Promise<DiscordOperationsControlState>;
+};
+type ReconciliationRepository = OutboxRepository & {
+  readonly reconcileExpiredInitialPosts: (now: Date) => Promise<number>;
+};
+
+function getOperationsRepository(repository: OutboxRepository): OperationsRepository | null {
+  return isOperationsRepository(repository) ? repository : null;
+}
+
+function isOperationsRepository(repository: OutboxRepository): repository is OperationsRepository {
+  if (
+    "beginInitialSendPost" in repository
+    && typeof repository.beginInitialSendPost === "function"
+    && "markInitialSendPendingReview" in repository
+    && typeof repository.markInitialSendPendingReview === "function"
+    && "readOperationsControl" in repository
+    && typeof repository.readOperationsControl === "function"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function getReconciliationRepository(repository: OutboxRepository): ReconciliationRepository | null {
+  return isReconciliationRepository(repository) ? repository : null;
+}
+
+function isReconciliationRepository(repository: OutboxRepository): repository is ReconciliationRepository {
+  return "reconcileExpiredInitialPosts" in repository
+    && typeof repository.reconcileExpiredInitialPosts === "function";
 }
 
 async function finishWebhookDelivery(
@@ -194,23 +340,6 @@ async function saveTerminalInitial(
     outcome,
     reservationId: claim.reservationId,
     retryable: false
-  });
-}
-
-async function saveRetryableInitial(
-  dependencies: DiscordReservationOutboxDependencies,
-  claim: DiscordInitialSendClaim,
-  now: Date,
-  delivery: Extract<DiscordBotDeliveryResult, { readonly kind: "unknown" }>
-): Promise<void> {
-  await dependencies.repository.saveInitialSendFailure({
-    attempts: claim.attempts,
-    claimId: claim.claimId,
-    error: delivery.message,
-    now,
-    outcome: delivery.outcome,
-    reservationId: claim.reservationId,
-    retryable: true
   });
 }
 

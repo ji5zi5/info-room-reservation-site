@@ -13,6 +13,7 @@ type SimpleReadinessCheck = {
 
 export type ReadinessSnapshot = {
   readonly closedPeriodNotificationsEnabled: boolean;
+  readonly discordOperationsEnabled?: boolean;
   readonly jobs: readonly (OperationalJobState & { readonly job: OperationalJobName })[];
 };
 
@@ -53,6 +54,18 @@ export async function getReadinessReport(input: {
       policy: OPERATIONAL_JOB_POLICIES.CLOSED_PERIOD_NOTIFICATIONS,
       state: byJob.get("CLOSED_PERIOD_NOTIFICATIONS") ?? null
     }),
+    DISCORD_INTERACTIONS: evaluateOperationalJobReadiness({
+      enabled: snapshot.discordOperationsEnabled ?? false,
+      now: input.now,
+      policy: OPERATIONAL_JOB_POLICIES.DISCORD_INTERACTIONS,
+      state: byJob.get("DISCORD_INTERACTIONS") ?? null
+    }),
+    DISCORD_RESERVATION_OUTBOX: evaluateOperationalJobReadiness({
+      enabled: snapshot.discordOperationsEnabled ?? false,
+      now: input.now,
+      policy: OPERATIONAL_JOB_POLICIES.DISCORD_RESERVATION_OUTBOX,
+      state: byJob.get("DISCORD_RESERVATION_OUTBOX") ?? null
+    }),
     MAINTENANCE: evaluateOperationalJobReadiness({
       enabled: true,
       now: input.now,
@@ -78,6 +91,8 @@ function unavailableReport(config: SimpleReadinessCheck, database: SimpleReadine
       database,
       jobs: {
         CLOSED_PERIOD_NOTIFICATIONS: NOT_CHECKED_JOB,
+        DISCORD_INTERACTIONS: NOT_CHECKED_JOB,
+        DISCORD_RESERVATION_OUTBOX: NOT_CHECKED_JOB,
         MAINTENANCE: NOT_CHECKED_JOB
       }
     },

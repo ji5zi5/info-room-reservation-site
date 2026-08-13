@@ -55,7 +55,7 @@ describe("Prisma Discord reservation message initial sends", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           initialSendClaimId: "stale-claim",
-          initialSendStatus: { in: ["CLAIMED", "POSTING"] }
+          initialSendStatus: "POSTING"
         })
       })
     );
