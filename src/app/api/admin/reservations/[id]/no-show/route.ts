@@ -1,25 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { canMarkReservationNoShow } from "@/lib/admin-reservation-transition";
-import { selectCancellableConfirmedReservationIds } from "@/lib/admin-cancellable-reservations";
-import {
-  databaseActorFromSessionUser,
-  isSerializableTransactionConflict,
-  TransactionRetryExhaustedError,
-  userMutationLockKey,
-  withDatabaseContext,
-  withDatabaseMutation
-} from "@/lib/db-context";
-import { prisma } from "@/lib/db";
-import { toKstDate } from "@/lib/date";
+import { markAdministratorReservationNoShow } from "@/lib/admin-no-show-operations";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
-import { periodSettingReadDates } from "@/lib/period-setting-values";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
 import { requireMutatingRequestSafety } from "@/lib/request-security";
 import { hashRequestClientIp } from "@/lib/request-source";
-import { buildNoShowBan } from "@/lib/reservation-service";
 import { enforceAdminMutationRateLimit } from "@/lib/route-rate-limit";
 import { requireAdminSession, ForbiddenSessionError, UnauthorizedSessionError } from "@/lib/session";
 
@@ -52,157 +39,32 @@ export async function POST(request: Request, context: { readonly params: Promise
     if (parsed.kind === "error") {
       return parsed.response;
     }
-    const ipHash = hashRequestClientIp(request);
-    const now = new Date();
 
-    const targetReservation = await withDatabaseContext({
-      actor: databaseActorFromSessionUser(admin),
-      client: prisma,
-      operation: (transaction) => transaction.reservation.findUnique({
-        select: { userId: true },
-        where: { id: params.id }
-      })
+    const result = await markAdministratorReservationNoShow({
+      actor: { id: admin.id, role: "ADMIN" },
+      ipHash: hashRequestClientIp(request),
+      now: new Date(),
+      reason: parsed.data.reason,
+      reservationId: params.id
     });
-    if (!targetReservation) {
-      return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");
+    switch (result.kind) {
+      case "not_found":
+        return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");
+      case "admin_target":
+        return jsonError(403, "admin_target", "관리자 계정은 노쇼 제재 대상이 아닙니다.");
+      case "not_closed":
+        return jsonError(409, "not_closed", "마감된 예약만 노쇼 처리할 수 있습니다.");
+      case "invalid_status":
+        return jsonNoShowConflict("invalid_status", "확정 상태가 아닌 예약은 노쇼 처리할 수 없습니다.");
+      case "conflict":
+        return jsonNoShowConflict("conflict", "다른 요청이 예약을 먼저 처리했습니다.");
+      case "ok":
+        return NextResponse.json({
+          cancelledFutureReservationCount: result.cancelledFutureReservationCount,
+          reservation: result.reservation,
+          user: result.user
+        });
     }
-
-    const result = await withDatabaseMutation({
-      actor: databaseActorFromSessionUser(admin),
-      client: prisma,
-      lockKeys: [userMutationLockKey(targetReservation.userId)],
-      operation: async (transaction) => {
-      const reservation = await transaction.reservation.findUnique({ where: { id: params.id } });
-      if (!reservation) {
-        return { kind: "not_found" } as const;
-      }
-      if (!canMarkReservationNoShow(reservation.status)) {
-        return { kind: "invalid_status" } as const;
-      }
-      const target = await transaction.user.findUnique({ where: { id: reservation.userId } });
-      if (!target) {
-        return { kind: "not_found" } as const;
-      }
-      if (target.role === "ADMIN") {
-        return { kind: "admin_target" } as const;
-      }
-
-      const transition = await transaction.reservation.updateMany({
-        data: { status: "NO_SHOW" },
-        where: { id: reservation.id, status: "CONFIRMED" }
-      });
-      if (transition.count !== 1) {
-        return { kind: "invalid_status" } as const;
-      }
-      const updatedReservation = { ...reservation, status: "NO_SHOW" } as const;
-      const today = toKstDate(now);
-      const candidates = await transaction.reservation.findMany({
-        where: {
-          date: { gte: today },
-          id: { not: reservation.id },
-          status: "CONFIRMED",
-          userId: reservation.userId
-        }
-      });
-      const settings = await transaction.periodSetting.findMany({
-        where: { date: { in: [...periodSettingReadDates(today)] } }
-      });
-      const cancellableReservationIds = selectCancellableConfirmedReservationIds({
-        now,
-        reservations: candidates,
-        settings
-      });
-      const cancelledFutureReservationCount =
-        cancellableReservationIds.length === 0
-          ? 0
-          : (
-              await transaction.reservation.updateMany({
-                data: { status: "CANCELLED" },
-                where: { id: { in: [...cancellableReservationIds] }, status: "CONFIRMED" }
-              })
-            ).count;
-      const restriction = buildNoShowBan(parsed.data.reason);
-      const user = await transaction.user.update({
-        data: restriction,
-        where: { id: reservation.userId }
-      });
-      const action = await transaction.adminAction.create({
-        data: {
-          action: "NO_SHOW_BAN",
-          actorId: admin.id,
-          after: JSON.stringify({
-            bookingStatus: user.bookingStatus,
-            cancelledFutureReservationCount,
-            reservationStatus: updatedReservation.status,
-            restrictionReason: user.restrictionReason,
-            restrictedUntil: user.restrictedUntil
-          }),
-          before: JSON.stringify({
-            bookingStatus: target.bookingStatus,
-            reservationStatus: reservation.status,
-            restrictionReason: target.restrictionReason,
-            restrictedUntil: target.restrictedUntil
-          }),
-          ipHash,
-          reason: parsed.data.reason,
-          reservationId: reservation.id,
-          targetUserId: user.id
-        }
-      });
-      await transaction.userSanction.updateMany({
-        data: {
-          revokedAt: new Date(),
-          revokedById: admin.id,
-          revokedReason: "노쇼 제재로 대체",
-          status: "REVOKED"
-        },
-        where: {
-          status: "ACTIVE",
-          userId: user.id
-        }
-      });
-      await transaction.userSanction.create({
-        data: {
-          actorId: admin.id,
-          endsAt: null,
-          reason: parsed.data.reason,
-          sourceActionId: action.id,
-          status: "ACTIVE",
-          type: "NO_SHOW_BAN",
-          userId: user.id
-        }
-      });
-      await transaction.auditLog.create({
-        data: {
-          action: "NO_SHOW_BAN",
-          actorId: admin.id,
-          detail: JSON.stringify({
-            actionId: action.id,
-            cancelledFutureReservationCount,
-            reason: parsed.data.reason,
-            reservationId: reservation.id
-          }),
-          userId: user.id
-        }
-      });
-      return { cancelledFutureReservationCount, kind: "ok", reservation: updatedReservation, user } as const;
-      }
-    });
-
-    if (result.kind === "not_found") {
-      return jsonError(404, "not_found", "예약을 찾을 수 없습니다.");
-    }
-    if (result.kind === "invalid_status") {
-      return jsonError(409, "bad_request", "확정 상태가 아닌 예약은 노쇼 처리할 수 없습니다.");
-    }
-    if (result.kind === "admin_target") {
-      return jsonError(403, "admin_target", "관리자 계정은 노쇼 제재 대상이 아닙니다.");
-    }
-    return NextResponse.json({
-      cancelledFutureReservationCount: result.cancelledFutureReservationCount,
-      reservation: result.reservation,
-      user: result.user
-    });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {
       return jsonError(401, "unauthorized", error.message);
@@ -210,9 +72,10 @@ export async function POST(request: Request, context: { readonly params: Promise
     if (error instanceof ForbiddenSessionError) {
       return jsonError(403, "forbidden", error.message);
     }
-    if (error instanceof TransactionRetryExhaustedError && isSerializableTransactionConflict(error.cause)) {
-      return jsonError(409, "bad_request", "확정 상태가 아닌 예약은 노쇼 처리할 수 없습니다.");
-    }
     return jsonError(500, "server_error", "예약 노쇼 처리 중 오류가 발생했습니다.");
   }
+}
+
+function jsonNoShowConflict(code: "conflict" | "invalid_status", message: string): NextResponse {
+  return NextResponse.json({ error: { code, message } }, { status: 409 });
 }
