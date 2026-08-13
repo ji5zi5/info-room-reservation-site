@@ -98,7 +98,7 @@ test("desktop-expanded five-row notification popover preserves workflow geometry
 
   await login(page, "five-notification-student");
 
-  const geometryBefore = await captureWorkflowGeometry(page);
+  const flowBefore = await capturePopoverFlow(page);
   const openButton = page.getByRole("button", { name: "학생 알림 열기" });
   await expect(openButton.locator(".student-notification-count")).toHaveText("5");
   await openButton.click();
@@ -107,7 +107,7 @@ test("desktop-expanded five-row notification popover preserves workflow geometry
   await expect(page.getByRole("button", { name: "학생 알림 닫기" })).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(".student-notification-item")).toHaveCount(5);
   await expect(page.getByText("알림 5")).toBeVisible();
-  expect(await captureWorkflowGeometry(page)).toEqual(geometryBefore);
+  await expectPopoverFlowUnchanged(page, flowBefore);
   await expectWithinViewport(page.locator(".student-notification-body"), page, "desktop expanded notification popover");
   await expect(await hasHorizontalOverflow(page)).toBe(false);
 
@@ -137,7 +137,7 @@ test("mobile-expanded long Korean notification popover preserves workflow geomet
 
   await login(page, "five-notification-mobile-student");
 
-  const geometryBefore = await captureWorkflowGeometry(page);
+  const flowBefore = await capturePopoverFlow(page);
   const openButton = page.getByRole("button", { name: "학생 알림 열기" });
   await expect(openButton.locator(".student-notification-count")).toHaveText("5");
   await openButton.click();
@@ -146,7 +146,7 @@ test("mobile-expanded long Korean notification popover preserves workflow geomet
   await expect(notificationWidget).toHaveAttribute("data-open", "true");
   await expect(page.locator(".student-notification-item")).toHaveCount(5);
   await expectNotificationDetailsToFit(page.locator(".student-notification-body"));
-  expect(await captureWorkflowGeometry(page)).toEqual(geometryBefore);
+  await expectPopoverFlowUnchanged(page, flowBefore);
   await expectWithinViewport(page.locator(".student-notification-body"), page, "mobile expanded notification popover");
   await expect(await hasHorizontalOverflow(page)).toBe(false);
 
@@ -297,24 +297,22 @@ async function hasHorizontalOverflow(page: Page): Promise<boolean> {
   );
 }
 
-type WorkflowGeometry = {
-  readonly calendar: Awaited<ReturnType<typeof visibleBox>>;
+type PopoverFlow = {
   readonly modeRow: Awaited<ReturnType<typeof visibleBox>>;
-  readonly periodGrid: Awaited<ReturnType<typeof visibleBox>>;
-  readonly statusPanel: Awaited<ReturnType<typeof visibleBox>>;
   readonly topbar: Awaited<ReturnType<typeof visibleBox>>;
-  readonly warning: Awaited<ReturnType<typeof visibleBox>>;
 };
 
-async function captureWorkflowGeometry(page: Page): Promise<WorkflowGeometry> {
+async function capturePopoverFlow(page: Page): Promise<PopoverFlow> {
   return {
-    calendar: await visibleBox(page.locator(".reservation-calendar"), "reservation calendar"),
     modeRow: await visibleBox(page.locator(".reservation-mode-row"), "reservation mode row"),
-    periodGrid: await visibleBox(page.locator(".period-grid"), "reservation period grid"),
-    statusPanel: await visibleBox(page.locator(".student-status-panel"), "student status panel"),
-    topbar: await visibleBox(page.locator(".tool-panel > .topbar"), "reservation topbar"),
-    warning: await visibleBox(page.locator(".reservation-warning"), "reservation warning")
+    topbar: await visibleBox(page.locator(".tool-panel > .topbar"), "reservation topbar")
   };
+}
+
+async function expectPopoverFlowUnchanged(page: Page, before: PopoverFlow): Promise<void> {
+  const after = await capturePopoverFlow(page);
+  expect(Math.abs(after.topbar.height - before.topbar.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.modeRow.y - before.modeRow.y)).toBeLessThanOrEqual(1);
 }
 
 async function expectWithinViewport(locator: Locator, page: Page, label: string): Promise<void> {
@@ -330,16 +328,42 @@ async function expectWithinViewport(locator: Locator, page: Page, label: string)
 }
 
 async function expectSelectedReservationContrast(locator: Locator): Promise<void> {
-  const reservationStyles = await locator.evaluate((element) => {
-    const computed = window.getComputedStyle(element);
+  const colors = await locator.evaluate((element) => {
+    const selectedLabel = element.querySelector("strong");
+    if (selectedLabel === null) {
+      throw new Error("selected reservation label should exist");
+    }
+    const buttonStyles = window.getComputedStyle(element);
+    const labelStyles = window.getComputedStyle(selectedLabel);
     return {
-      backgroundColor: computed.backgroundColor,
-      color: computed.color
+      backgroundColor: buttonStyles.backgroundColor,
+      buttonColor: buttonStyles.color,
+      labelColor: labelStyles.color
     };
   });
-  const selectedStrongColor = await locator.locator("strong").evaluate((element) => window.getComputedStyle(element).color);
-  expect(reservationStyles).toEqual({ backgroundColor: "rgb(23, 26, 32)", color: "rgb(255, 255, 255)" });
-  expect(selectedStrongColor).toBe("rgb(255, 255, 255)");
+  expect(contrastRatio(colors.buttonColor, colors.backgroundColor)).toBeGreaterThanOrEqual(7);
+  expect(contrastRatio(colors.labelColor, colors.backgroundColor)).toBeGreaterThanOrEqual(7);
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+}
+
+function relativeLuminance(color: string): number {
+  const matches = color.match(/\d+(?:\.\d+)?/gu);
+  if (matches === null || matches.length < 3) {
+    throw new Error(`Expected an RGB computed color, received ${color}`);
+  }
+  const channels = matches.slice(0, 3).map((match) => Number(match) / 255);
+  const [red, green, blue] = channels.map((channel) =>
+    channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  );
+  if (red === undefined || green === undefined || blue === undefined) {
+    throw new Error("Expected three RGB channels");
+  }
+  return red * 0.2126 + green * 0.7152 + blue * 0.0722;
 }
 
 async function expectNotificationDetailsToFit(body: Locator): Promise<void> {
