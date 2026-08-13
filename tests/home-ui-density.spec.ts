@@ -119,7 +119,7 @@ test("student reservation mobile topbar avoids icon-only rows and horizontal ove
   await expect(page.locator(".applicant-toggle")).toHaveCount(0);
 });
 
-test("student notification panel opens and closes latest notification", async ({ page }) => {
+test("student notification panel opens and closes all counted notifications", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
   await mockAuth(page);
@@ -131,13 +131,15 @@ test("student notification panel opens and closes latest notification", async ({
 
   const openButton = page.getByRole("button", { name: "학생 알림 열기" });
   await expect(openButton).toBeVisible();
+  await expect(openButton.locator(".student-notification-count")).toHaveText("5");
   await expect(page.getByText("관리자 취소 안내")).toBeHidden();
 
   await openButton.click();
 
   const closeButton = page.getByRole("button", { name: "학생 알림 닫기" });
   await expect(closeButton).toBeVisible();
-  await expect(page.getByText("관리자 취소 안내")).toBeVisible();
+  await expect(page.locator(".student-notification-item")).toHaveCount(5);
+  await expect(page.getByText("관리자 취소 안내")).toHaveCount(5);
   await expect(page.getByText("2026-06-12 8면학 신청이 취소되었습니다.")).toBeVisible();
 
   await closeButton.click();
@@ -213,13 +215,13 @@ async function mockNotifications(page: Page): Promise<void> {
       contentType: "application/json",
       json: {
         notifications: [
-          {
-            createdAt: "2026-06-11T09:00:00.000Z",
-            id: "notification-1",
-            message: "2026-06-12 8면학 신청이 취소되었습니다.",
+          ...Array.from({ length: 5 }, (_, index) => ({
+            createdAt: `2026-06-11T0${index}:00:00.000Z`,
+            id: `notification-${index}`,
+            message: `2026-06-${12 - index} ${index % 2 === 0 ? "8면학" : "1면학"} 신청이 취소되었습니다.`,
             reason: "관리자 조정",
             title: "관리자 취소 안내"
-          }
+          }))
         ]
       }
     });

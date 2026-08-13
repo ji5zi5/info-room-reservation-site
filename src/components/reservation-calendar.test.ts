@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ReservationCalendar } from "./reservation-calendar";
+import { StudentReservationStatusPanel } from "./student-reservation-status-panel";
 
 const availablePolicy = {
   kind: "available",
@@ -23,6 +24,44 @@ describe("ReservationCalendar", () => {
 
     expect(markup).toContain("calendar-day-marker");
     expect(markup).not.toContain("calendar-selection-label");
+  });
+});
+
+describe("StudentReservationStatusPanel", () => {
+  it("renders current reservations as direct accessible navigation targets", () => {
+    const markup = renderToStaticMarkup(
+      createElement(StudentReservationStatusPanel, {
+        currentReservationId: "reservation-first",
+        ariaLabel: "현재 예약 상태",
+        onSelectReservation: noop,
+        reservations: [
+          {
+            date: "2026-07-02",
+            label: "8면학",
+            reservationId: "reservation-eighth",
+            studyPeriod: "EIGHTH"
+          },
+          {
+            date: "2026-07-03",
+            label: "1면학",
+            reservationId: "reservation-first",
+            studyPeriod: "FIRST"
+          }
+        ],
+        user: {
+          bookingStatus: "ACTIVE",
+          id: "student-1",
+          restrictionReason: null,
+          restrictedUntil: null,
+          studentNumber: "31001"
+        }
+      })
+    );
+
+    expect(markup).toContain('aria-label="2026-07-02 8면학 예약 보기"');
+    expect(markup).toContain('aria-label="2026-07-03 1면학 예약 보기"');
+    expect(markup).toContain('aria-current="true"');
+    expect(markup).not.toContain("예약 취소");
   });
 });
 

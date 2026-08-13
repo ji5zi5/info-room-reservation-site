@@ -338,7 +338,7 @@ async function fulfillPeriods(route: Route, reservationId: string | null): Promi
       json: {
         dates: SCHOOL_WEEK_DATES.map((date) => ({
           date,
-          periods: [weekPeriod("EIGHTH", reservationId), weekPeriod("FIRST", null)]
+          periods: [weekPeriod(date, "EIGHTH", reservationId), weekPeriod(date, "FIRST", null)]
         }))
       },
       status: 200
@@ -417,15 +417,16 @@ function studentUser(id: string): SessionUser {
   };
 }
 
-function weekPeriod(studyPeriod: "EIGHTH" | "FIRST", reservationId: string | null): StudentPeriodWeekPeriod {
+function weekPeriod(date: string, studyPeriod: "EIGHTH" | "FIRST", reservationId: string | null): StudentPeriodWeekPeriod {
+  const weeklyReservationId = reservationId === null || date === FIXED_THURSDAY_DATE ? reservationId : `${reservationId}-${date}`;
   return {
-    availability: reservationId === null ? 10 : 9,
+    availability: weeklyReservationId === null ? 10 : 9,
     capacity: 10,
     closeTime: "23:59",
     enabled: true,
-    myReservationId: reservationId,
+    myReservationId: weeklyReservationId,
     openTime: "00:00",
-    reservedCount: reservationId === null ? 0 : 1,
+    reservedCount: weeklyReservationId === null ? 0 : 1,
     studyPeriod
   };
 }

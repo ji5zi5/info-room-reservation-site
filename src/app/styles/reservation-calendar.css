@@ -136,11 +136,119 @@
   width: min(var(--space-13), 100%);
 }
 
+.student-status-panel {
+  background: transparent;
+  border: 0;
+  gap: var(--space-2);
+  padding: 0;
+}
+
+.student-status-head {
+  align-items: end;
+}
+
+.student-status-head p {
+  font-size: var(--text-xs);
+}
+
+.student-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.student-status-list li {
+  min-width: 0;
+}
+
+.student-status-reservation {
+  align-items: center;
+  background: var(--white);
+  border: var(--stroke-width) solid var(--fog);
+  border-radius: var(--radius);
+  color: var(--graphite);
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--text-xs);
+  gap: var(--space-2);
+  min-height: var(--icon-size-lg);
+  max-width: 100%;
+  padding: 0 var(--space-3);
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    color var(--motion);
+}
+
+.student-status-reservation svg {
+  color: var(--blue);
+  flex: 0 0 auto;
+}
+
+.student-status-reservation span,
+.student-status-reservation strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.student-status-reservation strong {
+  color: var(--ink);
+  font-weight: var(--weight-medium);
+}
+
+.student-status-reservation[data-current="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--white);
+}
+
+.student-status-reservation[data-current="true"] svg,
+.student-status-reservation[data-current="true"] strong {
+  color: var(--white);
+}
+
+.student-status-summary {
+  background: transparent;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0;
+}
+
+.student-notification-list {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.student-notification-item + .student-notification-item {
+  border-top: var(--stroke-width) solid var(--fog);
+  padding-top: var(--space-2);
+}
+
 @media (max-width: 850px) {
+  .student-status-panel {
+    order: 3;
+  }
+
   .reservation-calendar {
     gap: var(--space-3);
-    order: 3;
+    order: 4;
     padding: var(--space-4);
+  }
+
+  .reservation-warning {
+    order: 5;
+  }
+
+  .period-grid,
+  .advance-unavailable {
+    order: 6;
   }
 
   .calendar-grid {
@@ -152,6 +260,10 @@
     min-width: 0;
     padding: var(--space-2);
     row-gap: var(--space-1);
+  }
+
+  .student-status-reservation {
+    width: 100%;
   }
 
 }
