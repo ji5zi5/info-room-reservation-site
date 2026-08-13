@@ -25,7 +25,11 @@ export function StudentReservationStatusPanel({
   onSelectReservation,
   reservations,
   user
-}: StudentReservationStatusPanelProps): ReactElement {
+}: StudentReservationStatusPanelProps): ReactElement | null {
+  if (!onSelectReservation) {
+    return null;
+  }
+
   const restricted = isStudentRestrictionActive(user);
   const reservationSummary = reservations.length > 0 ? `${reservations.length}건 확정` : "현재 예약 없음";
   const statusLabel = studentReservationStatusLabel(user);

@@ -2,6 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { ReservationHomeView } from "../app/reservation-home-view";
+import { StudentCurrentReservation } from "../lib/student-reservation-status";
+import type { ReservationActionOutcome } from "./reservation-action-dialog";
 import { ReservationCalendar } from "./reservation-calendar";
 import { StudentReservationStatusPanel } from "./student-reservation-status-panel";
 
@@ -62,6 +65,58 @@ describe("StudentReservationStatusPanel", () => {
     expect(markup).toContain('aria-label="2026-07-03 1면학 예약 보기"');
     expect(markup).toContain('aria-current="true"');
     expect(markup).not.toContain("예약 취소");
+  });
+});
+
+describe("ReservationHomeView", () => {
+  it("renders each current reservation as one direct navigation control", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ReservationHomeView, {
+        advancePolicy: availablePolicy,
+        advanceUnavailable: false,
+        currentReservations: [new StudentCurrentReservation("2026-07-02", "EIGHTH", "reservation-eighth")],
+        id: "student-1",
+        lastRefreshedAt: null,
+        loading: false,
+        onCancel: noop,
+        onClosePendingAction: noop,
+        onCloseProfile: noop,
+        onConfirmPendingAction: async (): Promise<ReservationActionOutcome> => ({ kind: "success" }),
+        onIdChange: noop,
+        onLogin: noop,
+        onLogout: noop,
+        onOpenProfile: noop,
+        onPasswordChange: noop,
+        onProfileRetry: noop,
+        onReserve: noop,
+        onSelectCalendarDate: noop,
+        onSelectCurrentReservation: noop,
+        onSidebarToggle: noop,
+        onTabChange: noop,
+        password: "",
+        pendingAction: null,
+        periods: [],
+        periodsRefreshing: false,
+        profileState: { errorMessage: null, loading: false, open: false, profile: null },
+        reservationSubmitting: false,
+        sidebarOpen: true,
+        tab: "advance",
+        targetDate: "2026-07-02",
+        toast: null,
+        user: {
+          bookingStatus: "ACTIVE",
+          generation: 1,
+          id: "student-1",
+          name: "학생",
+          restrictionReason: null,
+          restrictedUntil: null,
+          role: "STUDENT",
+          studentNumber: "31001"
+        }
+      })
+    );
+
+    expect(markup.match(/aria-label="2026-07-02 8면학 예약 보기"/gu)).toHaveLength(1);
   });
 });
 

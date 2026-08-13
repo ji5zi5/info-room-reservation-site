@@ -39,8 +39,9 @@ test("student reservation controls keep date selection compact", async ({ page }
   expect(Math.round(todayTabBox.height)).toBe(Math.round(advanceTabBox.height));
   await expect(page.getByLabel("예약 날짜")).toHaveCount(0);
 
-  const statusPanel = page.getByLabel("내 예약 상태");
+  const statusPanel = page.getByLabel("현재 예약 상태");
   await expect(statusPanel).toBeVisible();
+  await expect(page.getByLabel("내 예약 상태")).toHaveCount(0);
   await expect(statusPanel.getByText("취소 가능 여부")).toHaveCount(0);
   await expect(statusPanel.getByText("문의 코드")).toHaveCount(0);
 

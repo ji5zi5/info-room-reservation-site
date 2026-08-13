@@ -59,6 +59,29 @@ test("current reservation band stays visible with collapsed sidebar and navigate
   });
 });
 
+test("desktop current reservation band has one working control per reservation", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
+  await installRoutes(page, { notifications: fiveNotifications() });
+
+  await login(page, "current-band-desktop-student");
+
+  const todayReservation = page.getByRole("button", { name: "2026-06-11 8면학 예약 보기", exact: true });
+  const futureReservation = page.getByRole("button", { name: "2026-06-12 1면학 예약 보기", exact: true });
+  await expect(todayReservation).toHaveCount(1);
+  await expect(futureReservation).toHaveCount(1);
+
+  await futureReservation.click();
+
+  await expect(futureReservation).toHaveAttribute("aria-current", "true");
+  await expect(page.locator(".topbar .muted").first()).toHaveText(FIXED_FRIDAY);
+  await expect(page.locator(".period-card").filter({ hasText: "1면학" }).getByRole("button", { name: "예약 취소" })).toBeVisible();
+
+  await page.screenshot({
+    path: path.join(requiredEvidenceDir(), "task-18-current-reservations-desktop-1440x900.png")
+  });
+});
+
 test("student notification badge count matches five rendered rows and error state remains compact", async ({ page }) => {
   let notificationStatus: 200 | 500 = 200;
   await page.setViewportSize({ width: 1440, height: 900 });
