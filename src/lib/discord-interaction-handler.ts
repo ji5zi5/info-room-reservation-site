@@ -19,20 +19,18 @@ import {
 import { dispatchDiscordReservationOperation } from "./discord-reservation-outbox-runtime";
 import type { DiscordReservationOperationCommand } from "./discord-reservation-operations";
 import {
-  abandonUnacknowledgedDiscordInteractionJob,
   activateDiscordInteractionJob,
   prismaDiscordInteractionJobStore,
-  readDiscordInteractionHandshake,
+  settleDiscordInteractionHandshake,
   stageDiscordInteractionJob,
-  type DiscordInteractionAbandonResult,
   type DiscordInteractionActivationResult,
   type DiscordInteractionEnqueueResult,
-  type DiscordInteractionHandshakeSnapshot,
+  type DiscordInteractionSettlementResult,
   type DiscordInteractionStageInput
 } from "./prisma-discord-interaction-job-store";
 
 const ACK_DEADLINE_MS = 1_500;
-const ACK_FINALIZATION_GRACE_MS = 800;
+const HANDSHAKE_TRANSACTION_OPTIONS = { maxWait: 100, timeout: 800 } as const;
 const persistedIntentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("accept"), studentNumber: z.string().min(1) }),
   z.object({ kind: z.literal("admin_cancel"), reason: z.string().min(1).max(200), studentNumber: z.string().min(1) }),
@@ -51,10 +49,10 @@ type AuthorizedContext = {
   readonly renderedEpoch: number;
   readonly reservationId: string;
   readonly studentNumber: string;
+  readonly databaseNow: Date;
 };
 
 type HandlerDependencies = {
-  readonly abandon: (input: { readonly commandDigest: string; readonly interactionId: string }) => Promise<DiscordInteractionAbandonResult>;
   readonly activate: (input: { readonly commandDigest: string; readonly interactionId: string }) => Promise<DiscordInteractionActivationResult>;
   readonly clockMs: () => number;
   readonly dispatch: (input: { readonly command: DiscordReservationOperationCommand; readonly ipHash: string; readonly now: Date }) => Promise<DiscordInteractionDispatchResult>;
@@ -65,7 +63,6 @@ type HandlerDependencies = {
     readonly payload: DiscordBotMessagePayload;
   }) => Promise<DiscordBotDeliveryResult>;
   readonly loadContext: (input: { readonly messageId: string; readonly studentNumber: string }) => Promise<AuthorizedContext | null>;
-  readonly read: (interactionId: string) => Promise<DiscordInteractionHandshakeSnapshot | null>;
   readonly runJobs: (input: {
     readonly dispatch: (claim: DiscordInteractionJobClaim) => Promise<DiscordInteractionDispatchResult>;
     readonly interactionId?: string;
@@ -73,6 +70,7 @@ type HandlerDependencies = {
     readonly store: typeof prismaDiscordInteractionJobStore;
   }) => Promise<DiscordInteractionJobRunResult>;
   readonly stage: (input: DiscordInteractionStageInput) => Promise<DiscordInteractionEnqueueResult>;
+  readonly settle: (input: { readonly commandDigest: string; readonly interactionId: string }) => Promise<DiscordInteractionSettlementResult>;
   readonly waitForDeadline: (milliseconds: number, signal: AbortSignal) => Promise<boolean>;
 };
 
@@ -105,16 +103,15 @@ export function createDiscordInteractionHandler(dependencies: HandlerDependencie
 }
 
 const defaultHandler = createDiscordInteractionHandler({
-  abandon: abandonUnacknowledgedDiscordInteractionJob,
   activate: activateDiscordInteractionJob,
   clockMs: () => performance.now(),
   dispatch: dispatchDiscordReservationOperation,
   editCompletion: async ({ applicationId, botToken, interactionToken, payload }) =>
     createDiscordBotClient({ applicationId, botToken }).editOriginalEphemeralResponse({ interactionToken, payload }),
   loadContext: loadAuthorizedContext,
-  read: readDiscordInteractionHandshake,
   runJobs: runDiscordInteractionJobs,
   stage: stageDiscordInteractionJob,
+  settle: settleDiscordInteractionHandshake,
   waitForDeadline
 });
 
@@ -130,21 +127,34 @@ async function acknowledge(
   const abortController = new AbortController();
   let timedOut = false;
   let stagedIdentity: { readonly commandDigest: string; readonly interactionId: string } | null = null;
+  let settlement: Promise<DiscordInteractionAcknowledgement> | null = null;
+
+  const settle = (): Promise<DiscordInteractionAcknowledgement> => {
+    const identity = stagedIdentity;
+    if (identity === null) return Promise.resolve({ kind: "rejected" });
+    settlement ??= dependencies.settle(identity).then((result) =>
+      result.kind === "pending" ? { kind: "acknowledged" } : { kind: "rejected" }
+    );
+    return settlement;
+  };
 
   const pipeline = async (): Promise<DiscordInteractionAcknowledgement> => {
     try {
-      const command = await resolveCommand(dependencies, input);
+      const resolved = await resolveCommand(dependencies, input);
       const remainingBeforeStage = ACK_DEADLINE_MS - (dependencies.clockMs() - startedAt);
-      if (command === null || timedOut || remainingBeforeStage <= 0) return { kind: "rejected" };
-      const staged = stageInput(command, input.ipHash, remainingBeforeStage);
+      if (resolved === null || timedOut || remainingBeforeStage <= 0) return { kind: "rejected" };
+      const staged = stageInput(resolved.command, input.ipHash, new Date(
+        resolved.databaseNow.getTime() + remainingBeforeStage
+      ));
       stagedIdentity = { commandDigest: staged.commandDigest, interactionId: staged.interactionId };
       const result = await dependencies.stage(staged);
-      if (result.kind === "security_conflict" || timedOut) return { kind: "rejected" };
+      if (result.kind === "security_conflict") return { kind: "rejected" };
+      if (timedOut) return settle();
       const activation = await dependencies.activate(stagedIdentity);
-      return activation.kind === "pending" ? { kind: "acknowledged" } : { kind: "rejected" };
+      return activation.kind === "pending" ? { kind: "acknowledged" } : settle();
     } catch (error) {
       reportBoundaryFailure("discord_interaction_ack_failed", input.interaction.interactionId, error);
-      return { kind: "rejected" };
+      return stagedIdentity === null ? { kind: "rejected" } : settle();
     }
   };
 
@@ -152,27 +162,7 @@ async function acknowledge(
     const elapsed = await dependencies.waitForDeadline(ACK_DEADLINE_MS, abortController.signal);
     if (!elapsed) return { kind: "rejected" };
     timedOut = true;
-    const identity = stagedIdentity;
-    if (identity === null) return { kind: "rejected" };
-    const cleanupAbortController = new AbortController();
-    const settle = async (): Promise<DiscordInteractionAcknowledgement> => {
-      try {
-        const abandoned = await dependencies.abandon(identity);
-        if (abandoned.kind !== "pending") return { kind: "rejected" };
-        const durable = await dependencies.read(identity.interactionId);
-        return durable?.handshakeStatus === "ACKNOWLEDGED" && durable.status === "PENDING"
-          ? { kind: "acknowledged" }
-          : { kind: "rejected" };
-      } catch (error) {
-        reportBoundaryFailure("discord_interaction_abandon_failed", input.interaction.interactionId, error);
-        return { kind: "rejected" };
-      }
-    };
-    const hardStop = dependencies.waitForDeadline(ACK_FINALIZATION_GRACE_MS, cleanupAbortController.signal)
-      .then((): DiscordInteractionAcknowledgement => ({ kind: "rejected" }));
-    const settled = await Promise.race([settle(), hardStop]);
-    cleanupAbortController.abort();
-    return settled;
+    return settle();
   };
 
   const result = await Promise.race([pipeline(), deadline()]);
@@ -183,11 +173,11 @@ async function acknowledge(
 async function resolveCommand(
   dependencies: HandlerDependencies,
   input: { readonly config: DiscordApplicationConfig; readonly interaction: ActionInteraction }
-): Promise<DiscordReservationOperationCommand | null> {
+): Promise<{ readonly command: DiscordReservationOperationCommand; readonly databaseNow: Date } | null> {
   const context = await loadAuthorizedInteractionContext(dependencies, input);
   if (context === null) return null;
   const { interaction } = input;
-  return adaptDiscordReservationOperationCommand({
+  const command = adaptDiscordReservationOperationCommand({
     command: interaction.command,
     discordActorId: interaction.discordUserId,
     expectedSourceIdentity: context.nonce,
@@ -199,6 +189,11 @@ async function resolveCommand(
     sourceMessageId: interaction.messageId,
     studentNumber: context.studentNumber
   });
+  if (command === null) return null;
+  return {
+    command,
+    databaseNow: context.databaseNow
+  };
 }
 
 async function loadAuthorizedInteractionContext(
@@ -225,7 +220,7 @@ async function loadAuthorizedInteractionContext(
 function stageInput(
   command: DiscordReservationOperationCommand,
   ipHash: string,
-  activationWindowMs: number
+  activationDeadline: Date
 ): DiscordInteractionStageInput {
   const intent = serializeIntent(command);
   const durable = {
@@ -244,7 +239,7 @@ function stageInput(
   };
   return {
     ...durable,
-    activationWindowMs: Math.max(1, Math.min(ACK_DEADLINE_MS, Math.floor(activationWindowMs))),
+    activationDeadline,
     commandDigest: commandDigest(durable)
   };
 }
@@ -259,7 +254,7 @@ function serializeIntent(command: DiscordReservationOperationCommand): string {
   }
 }
 
-function commandDigest(input: Omit<DiscordInteractionStageInput, "activationWindowMs" | "commandDigest"> & { readonly commandDigest: string }): string {
+function commandDigest(input: Omit<DiscordInteractionStageInput, "activationDeadline" | "commandDigest"> & { readonly commandDigest: string }): string {
   const canonical = JSON.stringify({
     discordActorId: input.discordActorId,
     interactionId: input.interactionId,
@@ -354,16 +349,17 @@ async function loadAuthorizedContext(input: {
     actor: systemDatabaseActor(),
     client: prisma,
     operation: async (transaction) => {
-      const [message, actor] = await Promise.all([
+      const [message, actor, clock] = await Promise.all([
         transaction.discordReservationMessage.findUnique({
           select: { channelId: true, guildId: true, messageId: true, nonce: true, renderedSourceEpoch: true, reservationId: true },
           where: { messageId: input.messageId }
         }),
-        transaction.user.findUnique({ select: { id: true, role: true, studentNumber: true }, where: { studentNumber: input.studentNumber } })
+        transaction.user.findUnique({ select: { id: true, role: true, studentNumber: true }, where: { studentNumber: input.studentNumber } }),
+        transaction.$queryRaw<readonly { readonly now: Date }[]>`SELECT CURRENT_TIMESTAMP AS "now"`
       ]);
       if (
         message?.channelId == null || message.guildId === null || message.messageId === null ||
-        actor === null || actor.role !== "ADMIN"
+        actor === null || actor.role !== "ADMIN" || !(clock[0]?.now instanceof Date)
       ) return null;
       return {
         channelId: message.channelId,
@@ -373,9 +369,11 @@ async function loadAuthorizedContext(input: {
         nonce: message.nonce,
         renderedEpoch: message.renderedSourceEpoch,
         reservationId: message.reservationId,
+        databaseNow: clock[0].now,
         studentNumber: actor.studentNumber
       };
-    }
+    },
+    options: HANDSHAKE_TRANSACTION_OPTIONS
   });
 }
 

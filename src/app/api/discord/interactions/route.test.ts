@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 import { performance } from "node:perf_hooks";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PrismaClient } from "@prisma/client";
+import { Client } from "pg";
 
 import { buildDiscordReservationCustomId } from "@/lib/discord-interactions";
 import { DISCORD_INTERACTION_MAX_BODY_BYTES } from "@/lib/discord-interaction-security";
@@ -175,72 +177,178 @@ describe("Discord interaction HTTP route", () => {
     expect(handlerMocks.runExactPendingDiscordInteraction).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["timeout abandonment", { kind: "rejected" }, 4, false],
-    ["activation-won timeout race", { kind: "acknowledged" }, 5, true]
-  ] as const)("keeps the full signed %s response below 2500 ms", async (scenario, outcome, responseType, schedulesAfter) => {
-    // Given
-    handlerMocks.acknowledgeDiscordReservationInteraction.mockImplementation(
-      () => new Promise((resolve) => setTimeout(() => resolve(outcome), 1_501))
-    );
-
-    // When
-    const startedAt = performance.now();
-    const response = await POST(signedJsonRequest(componentPayload(customIdFor("accept"))));
-    const elapsedMs = performance.now() - startedAt;
-
-    // Then
-    console.warn(`SIGNED_RACE_SCENARIO=${scenario} ELAPSED_MS=${elapsedMs.toFixed(3)}`);
-    expect((await response.json()).type).toBe(responseType);
-    expect(elapsedMs).toBeLessThan(2_500);
-    expect(nextServerMocks.callback !== undefined).toBe(schedulesAfter);
-  }, 10_000);
-
-  it("keeps every full signed response in a 100-request production-like loopback below 2500 ms", async () => {
-    // Given
-    const server = createServer(async (incoming, outgoing) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(incoming.headers)) {
-        if (Array.isArray(value)) {
-          for (const item of value) headers.append(name, item);
-        } else if (value !== undefined) {
-          headers.set(name, value);
+  it.runIf(Boolean(process.env.INTEGRATION_DATABASE_URL))(
+    "runs cold, 100-request, timeout-abandonment, and activation-won signed routes through real Prisma",
+    async () => {
+      // Given: migrated disposable PostgreSQL and only external Discord context represented by fixture rows.
+      const database = new PrismaClient();
+      const realHandler = await vi.importActual<typeof import("@/lib/discord-interaction-handler")>(
+        "@/lib/discord-interaction-handler"
+      );
+      const realStore = await vi.importActual<typeof import("@/lib/prisma-discord-interaction-job-store")>(
+        "@/lib/prisma-discord-interaction-job-store"
+      );
+      handlerMocks.acknowledgeDiscordReservationInteraction.mockImplementation(
+        realHandler.acknowledgeDiscordReservationInteraction
+      );
+      const timeoutId = "423456789012349900";
+      const activationWonId = "423456789012349901";
+      const normalIds = Array.from(
+        { length: 100 },
+        (_, index) => String(423_456_789_012_340_000n + BigInt(index))
+      );
+      const server = createServer(async (incoming, outgoing) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          if (Array.isArray(value)) {
+            for (const item of value) headers.append(name, item);
+          } else if (value !== undefined) {
+            headers.set(name, value);
+          }
         }
-      }
-      const request = new Request("http://127.0.0.1/api/discord/interactions", {
-        body: Buffer.concat(chunks), headers, method: "POST"
+        const response = await POST(new Request("http://127.0.0.1/api/discord/interactions", {
+          body: Buffer.concat(chunks), headers, method: "POST"
+        }));
+        outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+        outgoing.end(Buffer.from(await response.arrayBuffer()));
       });
-      const response = await POST(request);
-      outgoing.writeHead(response.status, Object.fromEntries(response.headers));
-      outgoing.end(Buffer.from(await response.arrayBuffer()));
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (address === null || typeof address === "string") throw new TypeError("Loopback server did not bind a TCP port");
-    const elapsed: number[] = [];
+      const elapsed: number[] = [];
 
-    try {
-      // When
-      for (let index = 0; index < 100; index += 1) {
-        const body = JSON.stringify(componentPayload(customIdFor("accept"), String(4_234_567_890_123_450_00n + BigInt(index))));
-        const startedAt = performance.now();
-        const response = await fetch(`http://127.0.0.1:${address.port}/api/discord/interactions`, signedFetchInit(body));
-        elapsed.push(performance.now() - startedAt);
-        expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ data: { flags: 64 }, type: 5 });
+      try {
+        await database.discordInteractionJob.deleteMany({
+          where: { interactionId: { in: [...normalIds, timeoutId, activationWonId] } }
+        });
+        await database.discordReservationMessage.deleteMany({ where: { reservationId: "reservation-1" } });
+        await database.reservation.deleteMany({ where: { id: "reservation-1" } });
+        await database.user.deleteMany({ where: { studentNumber: "31001" } });
+        const admin = await database.user.create({
+          data: { generation: 31, id: "todo8-admin", name: "Todo8 Admin", role: "ADMIN", studentNumber: "31001" }
+        });
+        await database.reservation.create({
+          data: {
+            date: "2026-08-13", id: "reservation-1", reason: "fixture", studyPeriod: "EIGHTH", userId: admin.id
+          }
+        });
+        await database.discordReservationMessage.create({
+          data: {
+            channelId: ids.channel, guildId: ids.guild, initialSendStatus: "SENT", messageId: ids.message,
+            nonce: "source-message-1", renderedSourceEpoch: 7, reservationId: "reservation-1"
+          }
+        });
+        await database.$executeRawUnsafe(`
+          CREATE OR REPLACE FUNCTION todo8_stage_delay() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF NEW."interactionId" IN ('${timeoutId}', '${activationWonId}') THEN
+              PERFORM pg_sleep(0.65);
+            END IF;
+            RETURN NEW;
+          END $$
+        `);
+        await database.$executeRawUnsafe(`
+          CREATE OR REPLACE FUNCTION todo8_activation_delay() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF NEW."handshakeStatus" = 'ACKNOWLEDGED' AND OLD."handshakeStatus" = 'STAGED' THEN
+              IF NEW."interactionId" = '${timeoutId}' THEN PERFORM pg_sleep(1.0); END IF;
+              IF NEW."interactionId" = '${activationWonId}' THEN PERFORM pg_sleep(0.65); END IF;
+            END IF;
+            RETURN NEW;
+          END $$
+        `);
+        await database.$executeRawUnsafe(`
+          CREATE TRIGGER todo8_stage_delay BEFORE INSERT ON "DiscordInteractionJob"
+            FOR EACH ROW EXECUTE FUNCTION todo8_stage_delay()
+        `);
+        await database.$executeRawUnsafe(`
+          CREATE TRIGGER todo8_activation_delay BEFORE UPDATE ON "DiscordInteractionJob"
+            FOR EACH ROW EXECUTE FUNCTION todo8_activation_delay()
+        `);
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const address = server.address();
+        if (address === null || typeof address === "string") throw new TypeError("Loopback server did not bind a TCP port");
+
+        // When: the first request is cold, 100 requests traverse the signed route/store, then both deadline races run.
+        for (const interactionId of normalIds) {
+          const body = JSON.stringify(componentPayload(customIdFor("accept"), interactionId));
+          const startedAt = performance.now();
+          const response = await fetch(`http://127.0.0.1:${address.port}/api/discord/interactions`, signedFetchInit(body));
+          elapsed.push(performance.now() - startedAt);
+          expect(await response.json()).toEqual({ data: { flags: 64 }, type: 5 });
+        }
+        nextServerMocks.callback = undefined;
+        for (const [interactionId, expectedType] of [[timeoutId, 4], [activationWonId, 5]] as const) {
+          const body = JSON.stringify(componentPayload(customIdFor("accept"), interactionId));
+          const startedAt = performance.now();
+          const response = await fetch(`http://127.0.0.1:${address.port}/api/discord/interactions`, signedFetchInit(body));
+          elapsed.push(performance.now() - startedAt);
+          expect((await response.json()).type).toBe(expectedType);
+          if (expectedType === 4) expect(nextServerMocks.callback).toBeUndefined();
+        }
+
+        // Then: every response is bounded and exact durable rows identify the race winner.
+        const rows = await database.discordInteractionJob.findMany({
+          select: {
+            commandDigest: true, handshakeStatus: true, intent: true, interactionId: true, ipHash: true, status: true
+          },
+          where: { interactionId: { in: [...normalIds, timeoutId, activationWonId] } }
+        });
+        const maximumMs = Math.max(...elapsed);
+        console.warn(
+          `REAL_PRISMA_SIGNED_REQUESTS=${elapsed.length} COLD_MS=${elapsed[0]?.toFixed(3)} MAXIMUM_MS=${maximumMs.toFixed(3)}`
+        );
+        expect(elapsed).toHaveLength(102);
+        expect(elapsed.every((value) => value < 2_500)).toBe(true);
+        expect(rows).toHaveLength(102);
+        expect(rows.filter(({ interactionId }) => normalIds.includes(interactionId)).every(
+          ({ handshakeStatus, status }) => handshakeStatus === "ACKNOWLEDGED" && status === "PENDING"
+        )).toBe(true);
+        expect(rows.find(({ interactionId }) => interactionId === timeoutId)).toMatchObject({
+          handshakeStatus: "ABANDONED_UNACKED", status: "ABANDONED"
+        });
+        expect(rows.find(({ interactionId }) => interactionId === activationWonId)).toMatchObject({
+          handshakeStatus: "ACKNOWLEDGED", status: "PENDING"
+        });
+        expect(JSON.stringify(rows)).not.toContain("interaction-token");
+
+        const blocker = new Client({ connectionString: process.env.INTEGRATION_DATABASE_URL });
+        await blocker.connect();
+        try {
+          await blocker.query("BEGIN");
+          await blocker.query('LOCK TABLE "DiscordInteractionJob" IN ACCESS EXCLUSIVE MODE');
+          const outageStartedAt = performance.now();
+          await expect(realStore.settleDiscordInteractionHandshake({
+            commandDigest: rows[0]?.commandDigest ?? "",
+            interactionId: rows[0]?.interactionId ?? ""
+          })).rejects.toBeInstanceOf(Error);
+          const outageElapsedMs = performance.now() - outageStartedAt;
+          console.warn(`REAL_PRISMA_BOUNDED_OUTAGE_MS=${outageElapsedMs.toFixed(3)}`);
+          expect(outageElapsedMs).toBeLessThan(2_500);
+        } finally {
+          await blocker.query("ROLLBACK");
+          await blocker.end();
+        }
+      } finally {
+        if (server.listening) {
+          await new Promise<void>((resolve, reject) =>
+            server.close((error) => error === undefined ? resolve() : reject(error))
+          );
+        }
+        await database.$executeRawUnsafe('DROP TRIGGER IF EXISTS todo8_activation_delay ON "DiscordInteractionJob"');
+        await database.$executeRawUnsafe('DROP TRIGGER IF EXISTS todo8_stage_delay ON "DiscordInteractionJob"');
+        await database.$executeRawUnsafe("DROP FUNCTION IF EXISTS todo8_activation_delay()");
+        await database.$executeRawUnsafe("DROP FUNCTION IF EXISTS todo8_stage_delay()");
+        await database.discordInteractionJob.deleteMany({
+          where: { interactionId: { in: [...normalIds, timeoutId, activationWonId] } }
+        });
+        await database.discordReservationMessage.deleteMany({ where: { reservationId: "reservation-1" } });
+        await database.reservation.deleteMany({ where: { id: "reservation-1" } });
+        await database.user.deleteMany({ where: { studentNumber: "31001" } });
+        await database.$disconnect();
       }
-    } finally {
-      await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
-    }
-
-    // Then
-    expect(elapsed).toHaveLength(100);
-    const maximumMs = Math.max(...elapsed);
-    console.warn(`SIGNED_LOOPBACK_REQUESTS=100 MAXIMUM_MS=${maximumMs.toFixed(3)}`);
-    expect(maximumMs).toBeLessThan(2_500);
-  }, 30_000);
+    },
+    120_000
+  );
 });
 
 function customIdFor(action: "accept" | "admin_cancel" | "no_show" | "reject"): string {

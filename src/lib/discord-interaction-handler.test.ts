@@ -50,7 +50,7 @@ describe("Discord interaction durable handler", () => {
     expect(events).toEqual(["stage", "activate"]);
     const staged = dependencies.stage.mock.calls[0]?.[0];
     expect(staged).toMatchObject({
-      activationWindowMs: 1_500,
+      activationDeadline: new Date("2026-08-13T00:00:01.500Z"),
       discordActorId: "723456789012345678",
       interactionId: "423456789012345678",
       intent: "{\"kind\":\"accept\",\"studentNumber\":\"31001\"}",
@@ -74,7 +74,7 @@ describe("Discord interaction durable handler", () => {
     dependencies.waitForDeadline.mockImplementation(() => new Promise((resolve) => {
       reachDeadline = () => resolve(true);
     }));
-    dependencies.abandon.mockResolvedValue({ kind: "abandoned" });
+    dependencies.settle.mockResolvedValue({ kind: "abandoned" });
     const handler = createDiscordInteractionHandler(dependencies);
 
     // When
@@ -84,7 +84,7 @@ describe("Discord interaction durable handler", () => {
 
     // Then
     expect(result).toEqual({ kind: "rejected" });
-    expect(dependencies.abandon).toHaveBeenCalledOnce();
+    expect(dependencies.settle).toHaveBeenCalledOnce();
     expect(dependencies.activate).not.toHaveBeenCalled();
     expect(dependencies.runJobs).not.toHaveBeenCalled();
   });
@@ -100,8 +100,7 @@ describe("Discord interaction durable handler", () => {
     dependencies.waitForDeadline.mockImplementation(() => new Promise((resolve) => {
       reachDeadline = () => resolve(true);
     }));
-    dependencies.abandon.mockResolvedValue({ kind: "pending" });
-    dependencies.read.mockResolvedValue({ commandDigest: "ignored", handshakeStatus: "ACKNOWLEDGED", status: "PENDING" });
+    dependencies.settle.mockResolvedValue({ kind: "pending" });
     const handler = createDiscordInteractionHandler(dependencies);
 
     // When
@@ -109,20 +108,22 @@ describe("Discord interaction durable handler", () => {
 
     // Then
     expect(result).toEqual({ kind: "acknowledged" });
-    expect(dependencies.read).toHaveBeenCalledOnce();
+    expect(dependencies.settle).toHaveBeenCalledOnce();
     expect(dependencies.runJobs).not.toHaveBeenCalled();
   });
 
-  it("fails closed within the final response budget when deadline abandonment also stalls", async () => {
+  it("does not return while deadline settlement is unresolved", async () => {
     // Given
     let reachRouteDeadline: (() => void) | undefined;
+    let finishSettlement: ((value: { readonly kind: "abandoned" }) => void) | undefined;
+    let completed = false;
     let waits = 0;
     const dependencies = dependenciesFor();
     dependencies.stage.mockImplementation(() => {
       reachRouteDeadline?.();
       return new Promise(() => undefined);
     });
-    dependencies.abandon.mockImplementation(() => new Promise(() => undefined));
+    dependencies.settle.mockImplementation(() => new Promise((resolve) => { finishSettlement = resolve; }));
     dependencies.waitForDeadline.mockImplementation(() => {
       waits += 1;
       return waits === 1
@@ -132,12 +133,51 @@ describe("Discord interaction durable handler", () => {
     const handler = createDiscordInteractionHandler(dependencies);
 
     // When
+    const acknowledgement = handler.acknowledge({ config, interaction: componentInteraction("accept"), ipHash })
+      .then((result) => { completed = true; return result; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    // Then: no application timer may outrun the durable settlement call.
+    expect(completed).toBe(false);
+    finishSettlement?.({ kind: "abandoned" });
+    const result = await acknowledgement;
+    expect(result).toEqual({ kind: "rejected" });
+    expect(dependencies.activate).not.toHaveBeenCalled();
+  });
+
+  it("settles a failed stage durably before returning the generic outcome", async () => {
+    // Given: the bounded stage call fails after its identity may have reached PostgreSQL.
+    const events: string[] = [];
+    const dependencies = dependenciesFor();
+    dependencies.stage.mockImplementation(async () => {
+      events.push("stage_failed");
+      throw new TypeError("bounded stage failure");
+    });
+    dependencies.settle.mockImplementation(async () => {
+      events.push("settled");
+      return { kind: "abandoned" };
+    });
+    const handler = createDiscordInteractionHandler(dependencies);
+
+    // When
     const result = await handler.acknowledge({ config, interaction: componentInteraction("accept"), ipHash });
 
     // Then
     expect(result).toEqual({ kind: "rejected" });
-    expect(waits).toBe(2);
-    expect(dependencies.activate).not.toHaveBeenCalled();
+    expect(events).toEqual(["stage_failed", "settled"]);
+  });
+
+  it("propagates bounded settlement failure instead of returning an unresolved generic outcome", async () => {
+    // Given: both the stage and the repository settlement contract report failure.
+    const dependencies = dependenciesFor();
+    dependencies.stage.mockRejectedValue(new TypeError("bounded stage failure"));
+    dependencies.settle.mockRejectedValue(new TypeError("bounded settlement failure"));
+    const handler = createDiscordInteractionHandler(dependencies);
+
+    // When / Then
+    await expect(handler.acknowledge({
+      config, interaction: componentInteraction("accept"), ipHash
+    })).rejects.toThrow("bounded settlement failure");
   });
 
   it("fails closed for a digest collision and never activates", async () => {
@@ -216,13 +256,13 @@ describe("Discord interaction durable handler", () => {
 
 function dependenciesFor() {
   return {
-    abandon: vi.fn().mockResolvedValue({ kind: "abandoned" }),
     activate: vi.fn().mockResolvedValue({ kind: "pending" }),
     clockMs: vi.fn().mockReturnValue(10_000),
     dispatch: vi.fn().mockResolvedValue({ kind: "succeeded", terminalResult: { kind: "accepted" } }),
     editCompletion: vi.fn().mockResolvedValue({ kind: "sent", messageId: "ephemeral" }),
     loadContext: vi.fn().mockResolvedValue({
       channelId: config.channelId,
+      databaseNow: new Date("2026-08-13T00:00:00.000Z"),
       guildId: config.guildId,
       localActorId: "admin-1",
       messageId: "523456789012345678",
@@ -231,9 +271,9 @@ function dependenciesFor() {
       reservationId: "reservation-1",
       studentNumber: "31001"
     }),
-    read: vi.fn().mockResolvedValue(null),
     runJobs: vi.fn().mockResolvedValue({ abandoned: 0, claimed: 0, retried: 0, stale: 0, succeeded: 0 }),
     stage: vi.fn().mockResolvedValue({ kind: "enqueued" }),
+    settle: vi.fn().mockResolvedValue({ kind: "abandoned" }),
     waitForDeadline: vi.fn().mockImplementation(() => new Promise(() => undefined))
   };
 }
