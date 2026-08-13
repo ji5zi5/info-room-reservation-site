@@ -16,9 +16,9 @@ import {
   dispatchPendingReservationAction,
   isReservationActionAuthorized,
   type OwnedPendingReservationAction,
-  type PeriodFetchResult,
   type ReservationActionAuthorization
 } from "./reservation-home-period-contracts";
+import type { ReservationStateRefreshResult } from "./reservation-home-period-refresh";
 import { reservationRestrictionMessage } from "./reservation-home-helpers";
 import type { ReservationSidebarUser } from "./reservation-sidebar";
 import { useReservationSubmit } from "./use-reservation-submit";
@@ -29,7 +29,10 @@ type StudentReservationActionsInput = {
   readonly periods: readonly PeriodSummary[];
   readonly profileOpen: boolean;
   readonly refreshMe: () => Promise<void>;
-  readonly refreshPeriods: (date: string) => Promise<PeriodFetchResult>;
+  readonly refreshPeriods: (
+    date: string,
+    getFreshness: () => ReservationActionAuthorization
+  ) => Promise<ReservationStateRefreshResult>;
   readonly refreshProfile: () => Promise<void>;
   readonly setLoading: (loading: boolean) => void;
   readonly setToast: (message: string) => void;
@@ -74,13 +77,23 @@ export function useStudentReservationActions(input: StudentReservationActionsInp
         }
       );
       const errorMessage = await readApiErrorMessage(response);
-      input.setToast(response.ok ? "예약이 취소되었습니다. 3일간 예약이 제한됩니다." : errorMessage ?? "예약 취소에 실패했습니다.");
-      await Promise.all([
-        input.refreshMe(),
-        input.refreshPeriods(input.targetDate),
+      const [refreshResult] = await Promise.all([
+        input.refreshPeriods(input.targetDate, input.getReservationActionAuthorization),
         ...(response.ok && input.profileOpen ? [input.refreshProfile()] : [])
       ]);
-      return response.ok ? { kind: "success" } : { kind: "error" };
+      if (!response.ok) {
+        input.setToast(errorMessage ?? "예약 취소에 실패했습니다.");
+        return { kind: "error" };
+      }
+      if (
+        refreshResult.kind !== "settled" ||
+        !isReservationActionAuthorized(authorization, input.getReservationActionAuthorization())
+      ) {
+        input.setToast("예약은 취소되었지만 최신 정보를 불러오지 못했습니다.");
+        return { kind: "error" };
+      }
+      input.setToast("예약이 취소되었습니다. 3일간 예약이 제한됩니다.");
+      return { kind: "success" };
     } catch {
       input.setToast(NETWORK_ERROR_MESSAGE);
       return { kind: "error" };
@@ -100,8 +113,11 @@ export function useStudentReservationActions(input: StudentReservationActionsInp
       input.setToast(restrictionMessage);
       return;
     }
-    const refreshResult = await input.refreshPeriods(input.targetDate);
-    if (refreshResult.kind === "error") {
+    const refreshResult = await input.refreshPeriods(
+      input.targetDate,
+      input.getReservationActionAuthorization
+    );
+    if (refreshResult.kind === "stale") {
       input.setToast("최신 좌석 정보를 불러오지 못했습니다.");
       return;
     }
@@ -110,7 +126,7 @@ export function useStudentReservationActions(input: StudentReservationActionsInp
       input.setToast("최신 정보를 확인한 뒤 다시 시도해주세요.");
       return;
     }
-    const refreshedPeriods = refreshResult.kind === "ok" ? refreshResult.periods : input.periods;
+    const refreshedPeriods = refreshResult.periods ?? input.periods;
     const period = refreshedPeriods.find((candidate) => candidate.studyPeriod === studyPeriod);
     if (!canReservePeriod(period)) {
       input.setToast("최신 좌석 수를 반영했습니다. 다시 확인하세요.");

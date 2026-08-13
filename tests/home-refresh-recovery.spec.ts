@@ -20,7 +20,7 @@ type SessionUser = {
   readonly id: string;
   readonly name: string;
   readonly restrictionReason: null;
-  readonly restrictedUntil: null;
+  readonly restrictedUntil: string | null;
   readonly role: "STUDENT";
   readonly studentNumber: string;
 };
@@ -207,6 +207,142 @@ test("held CSRF cannot POST a confirmed reserve after period freshness becomes s
   await expect(reasonInput).toHaveValue("CSRF 대기 중 권한 변경 검증");
 });
 
+test("reserve and cancel await the coordinated week and session refresh before settled success", async ({ page }) => {
+  const serverRestrictedUntil = "2026-06-30T03:15:00.000Z";
+  let currentUser: SessionUser | null = null;
+  let reservationId: string | null = null;
+  let phase: "cancel" | "idle" | "reserve" = "idle";
+  let reservePeriodRequests = 0;
+  let reserveSessionRequests = 0;
+  let cancelPeriodRequests = 0;
+  let cancelSessionRequests = 0;
+  const reservePeriodGate = deferred<void>();
+  const reserveSessionGate = deferred<void>();
+  const cancelPeriodGate = deferred<void>();
+  const cancelSessionGate = deferred<void>();
+
+  await page.route("**/api/me", async (route) => {
+    if (phase === "reserve") {
+      reserveSessionRequests += 1;
+      await reserveSessionGate.promise;
+    } else if (phase === "cancel") {
+      cancelSessionRequests += 1;
+      await cancelSessionGate.promise;
+    }
+    await route.fulfill({ json: { user: currentUser }, status: 200 });
+  });
+  await installLoginAndStudentRoutes(page, (user) => {
+    currentUser = user;
+  });
+  await page.route("**/api/periods**", async (route) => {
+    if (phase === "reserve") {
+      reservePeriodRequests += 1;
+      await reservePeriodGate.promise;
+    } else if (phase === "cancel") {
+      cancelPeriodRequests += 1;
+      await cancelPeriodGate.promise;
+    }
+    await fulfillPeriods(route, reservationId ? 3 : 4, reservationId);
+  });
+  await page.route("**/api/reservations", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    reservationId = "reservation-new";
+    phase = "reserve";
+    await route.fulfill({ json: { reservation: { id: reservationId } }, status: 201 });
+  });
+  await page.route("**/api/reservations/*", async (route) => {
+    reservationId = null;
+    if (currentUser) {
+      currentUser = { ...currentUser, restrictedUntil: serverRestrictedUntil };
+    }
+    phase = "cancel";
+    await route.fulfill({ status: 204 });
+  });
+
+  await login(page, "coordinated-student");
+  const eighth = page.locator(".period-card").filter({ hasText: "8면학" });
+  await eighth.getByRole("button", { name: "8면학 예약" }).click();
+  await page.getByPlaceholder("이용 사유를 직접 입력").fill("상태 동기화 검증");
+  await page.getByRole("button", { name: "신청하기" }).click();
+  await expect.poll(() => ({ reservePeriodRequests, reserveSessionRequests })).toEqual({
+    reservePeriodRequests: 1,
+    reserveSessionRequests: 1
+  });
+  await expect(page.getByText("예약이 확정되었습니다.")).toHaveCount(0);
+
+  reservePeriodGate.resolve();
+  await expect(page.getByText("예약이 확정되었습니다.")).toHaveCount(0);
+  reserveSessionGate.resolve();
+  await expect(page.getByText("예약이 확정되었습니다.")).toBeVisible();
+  await expect(eighth.getByRole("button", { name: "예약 취소" })).toBeVisible();
+
+  await eighth.getByRole("button", { name: "예약 취소" }).click();
+  await page.getByLabel("정말 취소하려면 이 확인란을 선택하세요.").check();
+  await page.getByRole("button", { name: "취소 확정" }).click();
+  await expect.poll(() => ({ cancelPeriodRequests, cancelSessionRequests })).toEqual({
+    cancelPeriodRequests: 1,
+    cancelSessionRequests: 1
+  });
+  await expect(page.getByText("예약이 취소되었습니다. 3일간 예약이 제한됩니다.")).toHaveCount(0);
+
+  cancelPeriodGate.resolve();
+  await expect(page.getByText("예약이 취소되었습니다. 3일간 예약이 제한됩니다.")).toHaveCount(0);
+  cancelSessionGate.resolve();
+  await expect(page.getByText("예약이 취소되었습니다. 3일간 예약이 제한됩니다.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "내 예약 상태" })).toContainText("2026. 6. 30.");
+  expect(reservePeriodRequests).toBe(1);
+  expect(reserveSessionRequests).toBe(1);
+  expect(cancelPeriodRequests).toBe(1);
+  expect(cancelSessionRequests).toBe(1);
+});
+
+test("failed post-cancel week refresh preserves visible data and never emits settled success", async ({ page }) => {
+  let currentUser: SessionUser | null = null;
+  let cancelSettled = false;
+  let failedWeekRequests = 0;
+  let mutationSessionRequests = 0;
+  await page.route("**/api/me", async (route) => {
+    if (cancelSettled) {
+      mutationSessionRequests += 1;
+    }
+    await route.fulfill({ json: { user: currentUser }, status: 200 });
+  });
+  await installLoginAndStudentRoutes(page, (user) => {
+    currentUser = user;
+  });
+  await page.route("**/api/periods**", async (route) => {
+    if (cancelSettled) {
+      failedWeekRequests += 1;
+      await route.fulfill({ json: { error: { message: "temporary" } }, status: 500 });
+      return;
+    }
+    await fulfillPeriods(route, 3, "reservation-a");
+  });
+  await page.route("**/api/reservations/*", async (route) => {
+    if (currentUser) {
+      currentUser = { ...currentUser, restrictedUntil: "2026-06-30T03:15:00.000Z" };
+    }
+    cancelSettled = true;
+    await route.fulfill({ status: 204 });
+  });
+
+  await login(page, "failed-cancel-refresh");
+  const eighth = page.locator(".period-card").filter({ hasText: "8면학" });
+  await eighth.getByRole("button", { name: "예약 취소" }).click();
+  await page.getByLabel("정말 취소하려면 이 확인란을 선택하세요.").check();
+  await page.getByRole("button", { name: "취소 확정" }).click();
+
+  await expect(page.getByText("예약은 취소되었지만 최신 정보를 불러오지 못했습니다.")).toBeVisible();
+  await expect(page.getByText("예약이 취소되었습니다. 3일간 예약이 제한됩니다.")).toHaveCount(0);
+  await expect(eighth).toContainText("남은 자리 3/10");
+  await expect(eighth.getByRole("button", { name: "예약 취소" })).toBeDisabled();
+  expect(failedWeekRequests).toBe(1);
+  expect(mutationSessionRequests).toBe(1);
+});
+
 test("held CSRF cannot DELETE a confirmed cancellation after session freshness becomes stale", async ({ page }) => {
   let currentUser: SessionUser | null = null;
   let sessionFailure = false;
@@ -267,13 +403,13 @@ test("owner change during reservation preflight cannot open a dialog or POST", a
   let currentUser: SessionUser | null = null;
   let swapOwnerOnNextSessionRead = false;
   let reservationPosts = 0;
-  let markDateRequestStarted = (): void => undefined;
-  let releaseOldDateRequest = (): void => undefined;
-  const dateRequestStarted = new Promise<void>((resolve) => {
-    markDateRequestStarted = resolve;
+  let markWeekRequestStarted = (): void => undefined;
+  let releaseOldWeekRequest = (): void => undefined;
+  const weekRequestStarted = new Promise<void>((resolve) => {
+    markWeekRequestStarted = resolve;
   });
-  const oldDateRequestGate = new Promise<void>((resolve) => {
-    releaseOldDateRequest = resolve;
+  const oldWeekRequestGate = new Promise<void>((resolve) => {
+    releaseOldWeekRequest = resolve;
   });
 
   await page.route("**/api/me", async (route) => {
@@ -288,9 +424,9 @@ test("owner change during reservation preflight cannot open a dialog or POST", a
   });
   await page.route("**/api/periods**", async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.has("date") && currentUser?.id === "student-a") {
-      markDateRequestStarted();
-      await oldDateRequestGate;
+    if (url.searchParams.has("weekStart") && currentUser?.id === "student-a") {
+      markWeekRequestStarted();
+      await oldWeekRequestGate;
     }
     await fulfillPeriods(route, currentUser?.id === userB.id ? 7 : 2);
   });
@@ -303,12 +439,12 @@ test("owner change during reservation preflight cannot open a dialog or POST", a
 
   await login(page, "student-a");
   await page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: "8면학 예약" }).click();
-  await dateRequestStarted;
+  await weekRequestStarted;
 
   swapOwnerOnNextSessionRead = true;
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await expect(page.getByText("student-b", { exact: true })).toBeVisible();
-  releaseOldDateRequest();
+  releaseOldWeekRequest();
 
   await expect(page.getByRole("dialog", { name: "8면학 예약할까요?" })).toHaveCount(0);
   expect(reservationPosts).toBe(0);
@@ -581,4 +717,12 @@ function requiredEvidenceDir(): string {
     throw new Error("EVIDENCE_DIR is required for final student screenshots.");
   }
   return value;
+}
+
+function deferred<Value>() {
+  let resolvePromise: (value: Value) => void = () => undefined;
+  const promise = new Promise<Value>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return { promise, resolve: resolvePromise };
 }

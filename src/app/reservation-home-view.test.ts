@@ -176,6 +176,33 @@ describe("ReservationHomeView", () => {
 
     expect(markup).not.toContain('aria-label="다시 불러오기"');
   });
+
+  it("preserves visible seat data but disables mutation controls while required freshness is unknown", () => {
+    // Given / When
+    const markup = renderToStaticMarkup(createElement(ReservationHomeView, {
+      ...reservationActionViewProps(false),
+      pendingAction: null,
+      periods: [{
+        capacity: 10,
+        closeTime: "16:20",
+        confirmedCount: 6,
+        date: "2026-08-10",
+        enabled: true,
+        label: "8면학",
+        myReservationId: null,
+        openTime: "13:00",
+        remaining: 4,
+        studyPeriod: "EIGHTH" as const,
+        windowState: "open" as const
+      }],
+      resourcesFresh: false
+    }));
+
+    // Then
+    expect(markup).toContain("남은 자리 4/10");
+    expect(markup).toContain(">8면학 예약</button>");
+    expect(markup).toContain('disabled=""');
+  });
 });
 
 function reservationActionViewProps(refreshError: boolean) {
