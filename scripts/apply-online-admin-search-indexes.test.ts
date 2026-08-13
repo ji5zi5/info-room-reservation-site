@@ -28,25 +28,34 @@ const EXACT_BASE_WRITER_SOURCE = String.raw`
     process.stdin.on("data", (chunk) => { if (chunk.includes("STOP")) stopping = true; });
     const errors = [];
     let successfulWrites = 0;
+    let transientRetries = 0;
     process.stdout.write("READY " + commit.stdout.trim() + "\n");
     while (!stopping) {
       const userNumber = successfulWrites % 5000 + 1;
       const cycle = Math.floor(successfulWrites / 10000);
       const studyPeriod = Math.floor(successfulWrites / 5000) % 2 === 0 ? "EIGHTH" : "FIRST";
       try {
-        const reservation = await prisma.reservation.create({
-          data: {
-            date: "writer-date-" + cycle,
-            reason: "rollout",
-            status: "CONFIRMED",
-            studyPeriod,
-            userId: "writer-user-" + userNumber
-          }
+        const reservation = await prisma.$transaction(async (transaction) => {
+          await transaction.$executeRawUnsafe("SET LOCAL lock_timeout='100ms'");
+          return transaction.reservation.create({
+            data: {
+              date: "writer-date-" + cycle,
+              reason: "rollout",
+              status: "CONFIRMED",
+              studyPeriod,
+              userId: "writer-user-" + userNumber
+            }
+          });
         });
         if (reservation.userId !== "writer-user-" + userNumber) throw new Error("exact-base writer returned wrong user");
         successfulWrites += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (/canceling statement due to lock timeout|deadlock detected|could not serialize access|P2034/u.test(message)) {
+          transientRetries += 1;
+          await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+          continue;
+        }
         errors.push(message);
         stopping = true;
       }
@@ -57,6 +66,7 @@ const EXACT_BASE_WRITER_SOURCE = String.raw`
     process.stdout.write(JSON.stringify({
       commitSha: commit.stdout.trim(),
       successfulWrites,
+      transientRetries,
       writerErrors: errors
     }) + "\n");
   }
@@ -258,6 +268,10 @@ describe("online admin search index runner", () => {
     expect(parsed.rollout.exactBaseSha).toBe(expectedExactBaseSha);
     expect(parsed.rollout.persistedReservations).toBe(parsed.rollout.successfulWrites);
     expect(parsed.rollout.successfulWrites).toBeGreaterThan(0);
+    expect(parsed.rollout.reservationsAfterMigration).toBeGreaterThan(parsed.rollout.reservationsBeforeMigration);
+    expect(parsed.rollout.reservationsAfterIndexes).toBeGreaterThan(parsed.rollout.reservationsAfterMigration);
+    expect(parsed.rollout.transientRetries).toEqual(expect.any(Number));
+    expect(parsed.rollout.transientRetries).toBeGreaterThanOrEqual(0);
     expect(parsed.plan).toContain("User_name_trgm_idx");
     expect(parsed.cleanup).toBe("cleaned");
   }, 180_000);
@@ -467,7 +481,11 @@ function runPostgresScenario(): string {
               migrationExitCode: migrated.status,
               onlineIndexExitCode: applied.status,
               persistedReservations: Number(persisted.rows[0].count),
+              reservationsAfterIndexes: afterIndexes,
+              reservationsAfterMigration: afterMigration,
+              reservationsBeforeMigration: beforeMigration,
               successfulWrites: writerResult.successfulWrites,
+              transientRetries: writerResult.transientRetries,
               writerErrors: writerResult.writerErrors,
               writesAdvancedDuringIndexes: afterIndexes > afterMigration,
               writesAdvancedDuringMigration: afterMigration > beforeMigration
