@@ -104,19 +104,16 @@
 
 .admin-stat-strip {
   align-items: center;
-  background: var(--fog);
-  border-radius: var(--radius);
+  border-bottom: var(--stroke-width) solid var(--fog);
+  border-top: var(--stroke-width) solid var(--fog);
   display: grid;
-  gap: var(--space-3);
   grid-template-columns: repeat(5, minmax(0, 1fr));
   min-width: 0;
-  padding: var(--space-4);
 }
 
 .admin-stat-strip span {
   align-items: center;
-  background: var(--white);
-  border-radius: var(--radius);
+  border-left: var(--stroke-width) solid var(--fog);
   color: var(--graphite);
   display: inline-flex;
   gap: var(--space-2);
@@ -126,6 +123,10 @@
   overflow-wrap: anywhere;
   padding: var(--space-2) var(--space-3);
   text-align: center;
+}
+
+.admin-stat-strip span:first-child {
+  border-left: 0;
 }
 
 .metric-card {
@@ -219,6 +220,140 @@
 
 .admin-notification-review-actions {
   justify-content: flex-end;
+}
+
+.admin-operations-panel {
+  border-top: var(--stroke-width) solid var(--fog);
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
+  padding-top: var(--space-6);
+}
+
+.admin-operations-heading,
+.admin-operation-backlog-heading,
+.admin-job-health-title {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.admin-job-health-list {
+  border-top: var(--stroke-width) solid var(--fog);
+  display: grid;
+}
+
+.admin-job-health-row {
+  align-items: start;
+  border-bottom: var(--stroke-width) solid var(--fog);
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, var(--admin-detail-min-width)) minmax(0, 1fr);
+  padding: var(--space-4) 0;
+}
+
+.admin-operation-facts {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+}
+
+.admin-operation-facts div {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.admin-operation-facts dt {
+  color: var(--pewter);
+  font-size: var(--text-sm);
+}
+
+.admin-operation-facts dd {
+  color: var(--graphite);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-operation-backlog {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.admin-operation-backlog-heading {
+  background: var(--fog);
+  border-radius: var(--radius);
+  min-height: var(--control-height-md);
+  padding: var(--space-2) var(--space-4);
+}
+
+.admin-operation-backlog-heading span {
+  color: var(--graphite);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-operation-row {
+  align-items: center;
+  border-bottom: var(--stroke-width) solid var(--fog);
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-width: 0;
+  padding: var(--space-4) 0;
+}
+
+.admin-operation-summary {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.admin-operation-summary code {
+  color: var(--graphite);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.admin-operation-links,
+.admin-operation-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.admin-operation-links .text-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--graphite);
+  display: inline-flex;
+  gap: var(--space-1);
+  min-height: var(--control-height-xs);
+  padding: var(--space-1) var(--space-2);
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+}
+
+.admin-operation-links .text-button:hover {
+  background: var(--fog);
+  color: var(--ink);
+}
+
+.notification-pill[data-status="ok"] {
+  color: var(--graphite);
+}
+
+.notification-pill[data-status="degraded"],
+.notification-pill[data-status="unready"] {
+  color: var(--blue);
 }
 
 .metric-grid {
@@ -823,6 +958,16 @@
     grid-template-columns: 1fr;
   }
 
+  .admin-job-health-row,
+  .admin-operation-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-operation-links,
+  .admin-operation-actions {
+    justify-content: flex-start;
+  }
+
   .admin-content {
     padding: var(--space-11);
   }
@@ -961,6 +1106,28 @@
 
   .admin-notification-review-actions .primary-button {
     grid-column: 1 / -1;
+  }
+
+  .admin-operation-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-operation-backlog-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-operation-links,
+  .admin-operation-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .admin-operation-links .text-button,
+  .admin-operation-actions button {
+    justify-content: center;
+    width: 100%;
   }
 
   .admin-stat-strip span:last-child,

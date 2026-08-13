@@ -15,23 +15,35 @@ import type {
   AdminDashboardPeriod,
   AdminNotificationBacklogItem,
   AdminNotificationReconciliationAction,
+  AdminOperationItem,
+  AdminOperationRepairAction,
+  AdminOperationsPayload,
   AdminStatistics
 } from "./admin-types";
+import type { AdminMutationResult } from "./admin-api-client";
+import type { AdminConsoleDeepLinkTarget } from "./admin-console-url";
+import { AdminOperationsPanel } from "./admin-operations-panel";
 import { buildStatisticsCsv } from "./admin-csv";
 
 export function AdminDashboardPanel({
   notificationBacklog,
+  onNavigateOperationTarget,
+  onRepairOperation,
   onReconcileNotification,
   onSendNotification,
+  operations,
   periods,
   statistics
 }: {
   readonly notificationBacklog: readonly AdminNotificationBacklogItem[];
+  readonly onNavigateOperationTarget: (target: AdminConsoleDeepLinkTarget) => void;
   readonly onReconcileNotification: (
     item: AdminNotificationBacklogItem,
     action: AdminNotificationReconciliationAction
   ) => void;
   readonly onSendNotification: (period: AdminDashboardPeriod) => void;
+  readonly onRepairOperation: (item: AdminOperationItem, action: AdminOperationRepairAction) => Promise<AdminMutationResult<unknown>>;
+  readonly operations: AdminOperationsPayload | null;
   readonly periods: readonly AdminDashboardPeriod[];
   readonly statistics: AdminStatistics | null;
 }): React.ReactElement {
@@ -71,6 +83,13 @@ export function AdminDashboardPanel({
             {statistics.totals.uniqueStudentCount}명
           </span>
         </div>
+      ) : null}
+      {operations ? (
+        <AdminOperationsPanel
+          operations={operations}
+          onNavigate={onNavigateOperationTarget}
+          onRepair={onRepairOperation}
+        />
       ) : null}
       {notificationBacklog.length > 0 ? (
         <section className="admin-notification-review" aria-label="확인이 필요한 Discord 알림">

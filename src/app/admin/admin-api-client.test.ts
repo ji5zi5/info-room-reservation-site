@@ -5,15 +5,17 @@ import {
   cancelAdminReservation,
   fetchAdminDashboard,
   fetchAdminNotificationSettings,
+  fetchAdminOperations,
   fetchAdminSettings,
   markReservationNoShow,
   reconcileClosedPeriodNotification,
+  repairDiscordOperation,
   removeUserRestriction,
   saveAdminNotificationSettings,
   saveAdminSettings,
   sendClosedPeriodNotification
 } from "./admin-api-client";
-import type { AdminDashboardPeriod } from "./admin-types";
+import { AdminOperationItemSchema, AdminOperationsPayloadSchema, type AdminDashboardPeriod } from "./admin-types";
 
 const csrfFetchMock = vi.hoisted(() =>
   vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
@@ -35,6 +37,55 @@ describe("admin api client", () => {
     await expect(fetchAdminSettings("2026-06-14")).resolves.toEqual({
       kind: "error",
       message: "관리자 데이터를 불러오지 못했습니다."
+    });
+  });
+
+  it("parses the strict operations payload and rejects malformed job health", async () => {
+    // Given: one valid response followed by a payload missing the required health code.
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(operationsPayload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...operationsPayload, jobs: [{ ...operationsPayload.jobs[0], health: { status: "ok" } }] }), { status: 200 }))
+    );
+
+    // When / Then: valid network data crosses Zod once and malformed data is rejected.
+    await expect(fetchAdminOperations()).resolves.toEqual({ data: operationsPayload, kind: "ok" });
+    await expect(fetchAdminOperations()).resolves.toEqual({ kind: "error", message: "운영 작업 응답 형식이 올바르지 않습니다." });
+  });
+
+  it("sends expected state and reservation-bound confirmation for repairs", async () => {
+    // Given: one destructive action that passed the visible confirmation dialog.
+    csrfFetchMock.mockResolvedValue(new Response(JSON.stringify({ result: { auditActionId: "audit-new", kind: "repaired" } }), { status: 200 }));
+
+    // When: the operation repair client submits the row contract.
+    await expect(repairDiscordOperation(AdminOperationItemSchema.parse(operationsPayload.backlogs.initialSends.items[0]), "abandon", "reservation-initial")).resolves.toEqual({
+      data: { result: { auditActionId: "audit-new", kind: "repaired" } },
+      kind: "ok"
+    });
+
+    // Then: CSRF transport carries the stale-state guard and destructive confirmation.
+    expect(csrfFetchMock).toHaveBeenCalledWith("/api/admin/discord/reservations/reconcile", expect.objectContaining({
+      body: JSON.stringify({
+        action: "abandon",
+        confirmation: "reservation-initial",
+        expectedControlEpoch: 7,
+        expectedState: "PENDING_REVIEW",
+        reservationId: "reservation-initial"
+      }),
+      method: "POST"
+    }));
+  });
+
+  it("preserves a 409 operation conflict as truthful non-retryable row feedback", async () => {
+    // Given: another operator has already changed the row.
+    csrfFetchMock.mockResolvedValue(new Response(JSON.stringify({ error: { message: "Discord 복구 충돌: stale_state" } }), { status: 409 }));
+
+    // When / Then: the client preserves the conflict and does not pretend the row disappeared.
+    await expect(repairDiscordOperation(AdminOperationItemSchema.parse(operationsPayload.backlogs.interactions.items[0]), "retry")).resolves.toEqual({
+      kind: "error",
+      message: "Discord 복구 충돌: stale_state",
+      retryAfterMs: null,
+      retryable: false,
+      status: 409
     });
   });
 
@@ -515,3 +566,23 @@ const dashboardPeriod: AdminDashboardPeriod = {
   studyPeriod: "EIGHTH",
   windowState: "closed"
 };
+
+const operationCommon = {
+  createdAt: "2026-08-12T22:00:00.000Z",
+  expectedControlEpoch: 7,
+  latestAuditActionId: "audit-1",
+  reservationId: "reservation-initial",
+  updatedAt: "2026-08-12T23:00:00.000Z",
+  userId: "user-1"
+} as const;
+
+const operationsPayload = AdminOperationsPayloadSchema.parse({
+  backlogs: {
+    initialSends: { count: 1, items: [{ ...operationCommon, attempts: 1, expectedState: "PENDING_REVIEW", id: "initial-1", kind: "initial_send", permittedActions: ["verify_remote", "abandon"], remoteVerificationStatus: "ZERO_COMPLETE", status: "PENDING_REVIEW" }], oldestAgeMs: 3_600_000 },
+    interactions: { count: 1, items: [{ ...operationCommon, attempts: 2, errorCode: "discord_http_500", expectedState: "RETRY", id: "interaction-1", kind: "interaction", permittedActions: ["retry"], status: "RETRY" }], oldestAgeMs: 7_200_000 },
+    syncs: { count: 0, items: [], oldestAgeMs: null }
+  },
+  control: { enabled: true, epoch: 7, pendingRemoteCleanup: false },
+  generatedAt: "2026-08-13T00:00:00.000Z",
+  jobs: [{ backlogCount: 0, failureCode: null, health: { code: "healthy", status: "ok" }, job: "CLOSED_PERIOD_NOTIFICATIONS", lastAttemptAt: "2026-08-12T23:59:30.000Z", lastSuccessAt: "2026-08-12T23:59:30.000Z", status: "SUCCEEDED" }, { backlogCount: 1, failureCode: "discord_http_500", health: { code: "last_attempt_failed", status: "degraded" }, job: "DISCORD_INTERACTIONS", lastAttemptAt: "2026-08-12T23:59:00.000Z", lastSuccessAt: null, status: "FAILED" }, { backlogCount: 0, failureCode: null, health: { code: "healthy", status: "ok" }, job: "DISCORD_RESERVATION_OUTBOX", lastAttemptAt: "2026-08-12T23:59:30.000Z", lastSuccessAt: "2026-08-12T23:59:30.000Z", status: "SUCCEEDED" }]
+});

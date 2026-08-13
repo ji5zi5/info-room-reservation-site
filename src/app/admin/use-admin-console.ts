@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   applyUserRestriction,
@@ -9,9 +9,14 @@ import {
   type CancelReservationData,
   type NoShowReservationData,
   cancelAdminReservation,
+  fetchAdminAuditActions,
+  fetchAdminOperations,
+  fetchAdminReservations,
+  fetchAdminUsers,
   markReservationNoShow,
   reconcileClosedPeriodNotification,
   removeUserRestriction,
+  repairDiscordOperation,
   saveAdminNotificationSettings,
   saveAdminSettings,
   sendClosedPeriodNotification,
@@ -20,11 +25,15 @@ import {
 import { todayKst } from "./admin-date";
 import { buildReservationCsv } from "./admin-csv";
 import {
+  parseAdminConsoleDeepLink,
   parseReservationDeepLink,
   readReservationStatusFromLocation,
   replaceReservationDeepLinkSearch,
+  resolveAdminConsoleDeepLink,
   resolveReservationDeepLink,
+  writeAdminConsoleDeepLink,
   writeReservationStatusToHistory,
+  type AdminConsoleDeepLinkTarget,
   type DeepLinkTarget
 } from "./admin-console-url";
 import {
@@ -42,11 +51,15 @@ import {
   type UserRestrictionDraft
 } from "./admin-console-state";
 import {
+  type AdminAuditAction,
   type AdminAuditActionFilter,
   type AdminDashboardPeriod,
   type AdminNotificationBacklogItem,
   type AdminNotificationReconciliationAction,
   type AdminNotificationSettings,
+  type AdminOperationItem,
+  type AdminOperationRepairAction,
+  type AdminOperationsPayload,
   type AdminPeriodSetting,
   type AdminReservation,
   type AdminReservationStatusFilter,
@@ -73,6 +86,13 @@ export function useAdminConsole(): AdminConsoleState {
   const [toast, setToast] = useState<string | null>(null);
   const [deepLinkTarget, setDeepLinkTarget] = useState<DeepLinkTarget | null>(null);
   const [deepLinkCancellation, setDeepLinkCancellation] = useState<AdminReservation | null>(null);
+  const [operations, setOperations] = useState<AdminOperationsPayload | null>(null);
+  const [operationsError, setOperationsError] = useState<string | null>(null);
+  const [operationsRevision, setOperationsRevision] = useState(0);
+  const [operationReservation, setOperationReservation] = useState<AdminReservation | null>(null);
+  const [operationAuditAction, setOperationAuditAction] = useState<AdminAuditAction | null>(null);
+  const operationsRequest = useRef(0);
+  const deepLinkRequest = useRef(0);
   const reads = useAdminConsoleReads({
     activeSection,
     auditActionFilter,
@@ -88,23 +108,56 @@ export function useAdminConsole(): AdminConsoleState {
   });
 
   useEffect(() => {
-    const parsed = parseReservationDeepLink(window.location.search);
-    switch (parsed.kind) {
-      case "absent":
-        setStatusFilter(readReservationStatusFromLocation(window.location));
-        return;
-      case "invalid":
-        replaceReservationDeepLinkSearch(window.location, window.history, parsed.cleanedSearch);
-        setToast("예약 링크가 올바르지 않습니다.");
-        return;
-      case "valid":
-        setActiveSection("reservations");
-        setDate(parsed.target.date);
-        setStatusFilter("CONFIRMED");
-        setDeepLinkTarget(parsed.target);
-        return;
+    const parameters = new URLSearchParams(window.location.search);
+    if (parameters.has("date") || parameters.has("status")) {
+      const parsed = parseReservationDeepLink(window.location.search);
+      switch (parsed.kind) {
+        case "absent":
+          setStatusFilter(readReservationStatusFromLocation(window.location));
+          return;
+        case "invalid":
+          replaceReservationDeepLinkSearch(window.location, window.history, parsed.cleanedSearch);
+          setToast("예약 링크가 올바르지 않습니다.");
+          return;
+        case "valid":
+          setActiveSection("reservations");
+          setDate(parsed.target.date);
+          setStatusFilter("CONFIRMED");
+          setDeepLinkTarget(parsed.target);
+          return;
+      }
     }
+    const exact = parseAdminConsoleDeepLink(window.location.search);
+    if (exact.kind === "invalid") {
+      replaceReservationDeepLinkSearch(window.location, window.history, exact.cleanedSearch);
+      setToast("운영 링크가 올바르지 않습니다.");
+      return;
+    }
+    if (exact.kind === "valid") {
+      void openOperationTarget(exact.target, false);
+      return;
+    }
+    setStatusFilter(readReservationStatusFromLocation(window.location));
   }, []);
+
+  useEffect(() => {
+    const request = operationsRequest.current + 1;
+    operationsRequest.current = request;
+    if (activeSection !== "dashboard") {
+      return;
+    }
+    setOperationsError(null);
+    void fetchAdminOperations().then((result) => {
+      if (operationsRequest.current !== request) {
+        return;
+      }
+      if (result.kind === "ok") {
+        setOperations(result.data);
+        return;
+      }
+      setOperationsError(result.message);
+    });
+  }, [activeSection, operationsRevision]);
 
   useEffect(() => {
     if (deepLinkTarget === null) {
@@ -178,6 +231,93 @@ export function useAdminConsole(): AdminConsoleState {
     applyFeedback(
       reconcileClosedPeriodNotificationFeedback(await reconcileClosedPeriodNotification(item, action), action)
     );
+  }
+
+  async function repairOperation(
+    item: AdminOperationItem,
+    action: AdminOperationRepairAction
+  ) {
+    const result = await repairDiscordOperation(
+      item,
+      action,
+      action === "remove_controls" || action === "abandon" ? item.reservationId : undefined
+    );
+    if (result.kind === "error") {
+      setToast(result.message);
+      return result;
+    }
+    setToast(operationRepairSuccessLabel(action));
+    setOperationsRevision((current) => current + 1);
+    return result;
+  }
+
+  async function navigateToOperationTarget(target: AdminConsoleDeepLinkTarget): Promise<void> {
+    await openOperationTarget(target, true);
+  }
+
+  async function openOperationTarget(target: AdminConsoleDeepLinkTarget, writeHistory: boolean): Promise<void> {
+    const request = deepLinkRequest.current + 1;
+    deepLinkRequest.current = request;
+    if (writeHistory) {
+      const search = writeAdminConsoleDeepLink(window.location.search, target);
+      replaceReservationDeepLinkSearch(window.location, window.history, search);
+    }
+    switch (target.kind) {
+      case "reservation": {
+        const result = await fetchAdminReservations({
+          date,
+          query: "",
+          reservationId: target.reservationId,
+          status: "ALL",
+          studyPeriod: "ALL"
+        });
+        if (deepLinkRequest.current !== request) return;
+        const reservation = result.kind === "ok"
+          ? result.data.items.find((candidate) => candidate.id === target.reservationId) ?? null
+          : null;
+        finishOperationDeepLink(target, reservation !== null);
+        if (reservation === null) return;
+        setOperationReservation(reservation);
+        setDate(reservation.date);
+        setStatusFilter(reservationStatusFilter(reservation.status));
+        setActiveSection("reservations");
+        return;
+      }
+      case "user": {
+        const result = await fetchAdminUsers({ query: "", status: "ALL", userId: target.userId });
+        if (deepLinkRequest.current !== request) return;
+        const found = result.kind === "ok" && result.data.items.some((candidate) => candidate.id === target.userId);
+        finishOperationDeepLink(target, found);
+        if (!found) return;
+        setSelectedUserId(target.userId);
+        setActiveSection("students");
+        return;
+      }
+      case "audit": {
+        const result = await fetchAdminAuditActions({ action: "ALL", actionId: target.actionId, query: "" });
+        if (deepLinkRequest.current !== request) return;
+        const action = result.kind === "ok"
+          ? result.data.items.find((candidate) => candidate.id === target.actionId) ?? null
+          : null;
+        finishOperationDeepLink(target, action !== null);
+        if (action === null) return;
+        setOperationAuditAction(action);
+        setActiveSection("audit");
+        return;
+      }
+    }
+  }
+
+  function finishOperationDeepLink(target: AdminConsoleDeepLinkTarget, found: boolean): void {
+    const resolution = resolveAdminConsoleDeepLink(window.location.search, (candidate) => (
+      sameAdminConsoleTarget(candidate, target) && found
+    ));
+    if (resolution.kind === "found" || resolution.kind === "missing") {
+      replaceReservationDeepLinkSearch(window.location, window.history, resolution.cleanedSearch);
+    }
+    if (!found) {
+      setToast("관련 운영 기록을 찾을 수 없습니다.");
+    }
   }
 
   async function markNoShow(reservationId: string): Promise<AdminMutationResult<NoShowReservationData>> {
@@ -288,7 +428,7 @@ export function useAdminConsole(): AdminConsoleState {
   return {
     activeSection,
     auditActionFilter,
-    auditActions: reads.auditActions,
+    auditActions: prependExact(reads.auditActions, operationAuditAction),
     auditQuery,
     applyRestriction,
     applyShadowBan,
@@ -302,13 +442,16 @@ export function useAdminConsole(): AdminConsoleState {
     markNoShow,
     notificationBacklog: reads.notificationBacklog,
     notificationSettings: reads.notificationSettings,
+    operations,
     periods: reads.periods,
     refresh,
     reconcileNotification,
+    repairOperation,
+    navigateToOperationTarget,
     removeRestriction,
     reservationPeriodFilter,
     reservationQuery,
-    reservations: reads.reservations,
+    reservations: prependExact(reads.reservations, operationReservation),
     restrictionDrafts,
     saveSettings,
     selectedUserDetail: reads.selectedUserDetail,
@@ -326,7 +469,7 @@ export function useAdminConsole(): AdminConsoleState {
     setUserStatusFilter,
     statusFilter,
     statistics: reads.statistics,
-    toast: reads.error ?? toast,
+    toast: reads.error ?? operationsError ?? toast,
     updateNotificationSettings,
     updatePeriod,
     userQuery,
@@ -338,4 +481,36 @@ export function useAdminConsole(): AdminConsoleState {
 
 function sameDeepLinkTarget(left: DeepLinkTarget, right: DeepLinkTarget): boolean {
   return left.date === right.date && left.reservationId === right.reservationId;
+}
+
+function sameAdminConsoleTarget(left: AdminConsoleDeepLinkTarget, right: AdminConsoleDeepLinkTarget): boolean {
+  if (left.kind !== right.kind) return false;
+  switch (left.kind) {
+    case "reservation": return right.kind === "reservation" && left.reservationId === right.reservationId;
+    case "user": return right.kind === "user" && left.userId === right.userId;
+    case "audit": return right.kind === "audit" && left.actionId === right.actionId;
+  }
+}
+
+function prependExact<T extends { readonly id: string }>(items: readonly T[], exact: T | null): readonly T[] {
+  return exact === null ? items : [exact, ...items.filter((item) => item.id !== exact.id)];
+}
+
+function operationRepairSuccessLabel(action: AdminOperationRepairAction): string {
+  switch (action) {
+    case "verify_remote": return "원격 메시지 확인을 반영했습니다.";
+    case "retry": return "작업을 다시 대기열에 넣었습니다.";
+    case "sync": return "메시지 동기화를 요청했습니다.";
+    case "remove_controls": return "Discord 컨트롤 제거를 요청했습니다.";
+    case "abandon": return "운영 작업을 종료했습니다.";
+  }
+}
+
+function reservationStatusFilter(status: string): AdminReservationStatusFilter {
+  switch (status) {
+    case "CANCELLED": return "CANCELLED";
+    case "CONFIRMED": return "CONFIRMED";
+    case "NO_SHOW": return "NO_SHOW";
+    default: return "ALL";
+  }
 }

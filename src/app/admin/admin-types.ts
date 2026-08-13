@@ -95,6 +95,99 @@ export const AdminDashboardPayloadSchema = z
   })
   .strict();
 
+export const AdminOperationRepairActionSchema = z.enum([
+  "verify_remote",
+  "retry",
+  "sync",
+  "remove_controls",
+  "abandon"
+]);
+
+const AdminOperationItemCommonSchema = z.object({
+  createdAt: z.string().datetime(),
+  expectedControlEpoch: z.number().int().nonnegative(),
+  expectedState: z.string(),
+  latestAuditActionId: z.string().nullable(),
+  permittedActions: z.array(AdminOperationRepairActionSchema),
+  reservationId: z.string(),
+  status: z.string(),
+  updatedAt: z.string().datetime(),
+  userId: z.string()
+});
+
+const AdminOperationInteractionItemSchema = AdminOperationItemCommonSchema.extend({
+  attempts: z.number().int().nonnegative(),
+  errorCode: z.string().nullable(),
+  id: z.string(),
+  kind: z.literal("interaction")
+}).strict();
+
+const AdminOperationInitialSendItemSchema = AdminOperationItemCommonSchema.extend({
+  attempts: z.number().int().nonnegative(),
+  id: z.string(),
+  kind: z.literal("initial_send"),
+  remoteVerificationStatus: z.string().nullable()
+}).strict();
+
+const AdminOperationSyncItemSchema = AdminOperationItemCommonSchema.extend({
+  id: z.string(),
+  kind: z.literal("sync"),
+  messageRevision: z.number().int().nonnegative(),
+  syncedRevision: z.number().int().nonnegative()
+}).strict();
+
+export const AdminOperationItemSchema = z.discriminatedUnion("kind", [
+  AdminOperationInteractionItemSchema,
+  AdminOperationInitialSendItemSchema,
+  AdminOperationSyncItemSchema
+]);
+
+const AdminOperationBacklogSchema = <T extends z.ZodType>(item: T) => z.object({
+  count: z.number().int().nonnegative(),
+  items: z.array(item).max(50),
+  oldestAgeMs: z.number().int().nonnegative().nullable()
+}).strict();
+
+export const AdminOperationsPayloadSchema = z.object({
+  backlogs: z.object({
+    initialSends: AdminOperationBacklogSchema(AdminOperationInitialSendItemSchema),
+    interactions: AdminOperationBacklogSchema(AdminOperationInteractionItemSchema),
+    syncs: AdminOperationBacklogSchema(AdminOperationSyncItemSchema)
+  }).strict(),
+  control: z.object({
+    enabled: z.boolean(),
+    epoch: z.number().int().nonnegative(),
+    pendingRemoteCleanup: z.boolean()
+  }).strict(),
+  generatedAt: z.string().datetime(),
+  jobs: z.array(z.object({
+    backlogCount: z.number().int().nonnegative(),
+    failureCode: z.string().nullable(),
+    health: z.object({
+      code: z.enum([
+        "disabled",
+        "healthy",
+        "last_attempt_failed",
+        "never_run",
+        "never_succeeded",
+        "repeated_failures",
+        "running",
+        "running_timeout",
+        "stale"
+      ]),
+      status: z.enum(["degraded", "ok", "unready"])
+    }).strict(),
+    job: z.enum([
+      "CLOSED_PERIOD_NOTIFICATIONS",
+      "DISCORD_INTERACTIONS",
+      "DISCORD_RESERVATION_OUTBOX"
+    ]),
+    lastAttemptAt: z.string().datetime().nullable(),
+    lastSuccessAt: z.string().datetime().nullable(),
+    status: z.enum(["FAILED", "RUNNING", "SUCCEEDED"]).nullable()
+  }).strict()).length(3)
+}).strict();
+
 const AdminPageMetadataShape = { cutoff: z.string().datetime({ offset: true }), currentTotalCount: z.number().int().nonnegative(), expiresAt: z.string().datetime({ offset: true }), nextCursor: z.string().min(1).nullable() } as const;
 
 export const AdminReservationsPayloadSchema = z.object({ ...AdminPageMetadataShape, items: z.array(AdminReservationSchema) }).strict();
@@ -257,6 +350,9 @@ export type AdminDashboardPeriod = z.infer<typeof AdminDashboardPeriodSchema>;
 export type AdminDashboardPayload = z.infer<typeof AdminDashboardPayloadSchema>;
 export type AdminNotificationBacklogItem = z.infer<typeof AdminNotificationBacklogItemSchema>;
 export type AdminNotificationReconciliationAction = "abandon" | "confirm_sent" | "retry";
+export type AdminOperationItem = z.infer<typeof AdminOperationItemSchema>;
+export type AdminOperationRepairAction = z.infer<typeof AdminOperationRepairActionSchema>;
+export type AdminOperationsPayload = z.infer<typeof AdminOperationsPayloadSchema>;
 export type AdminAuditAction = z.infer<typeof AdminAuditActionSchema>;
 export type AdminNotificationSettings = z.input<typeof AdminNotificationSettingsSchema>;
 export type AdminPeriodSetting = z.infer<typeof AdminPeriodSettingSchema>;

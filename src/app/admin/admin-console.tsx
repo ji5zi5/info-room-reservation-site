@@ -84,12 +84,15 @@ export function AdminConsole(): ReactElement {
             {consoleState.activeSection === "dashboard" ? (
               <AdminDashboardPanel
                 notificationBacklog={consoleState.notificationBacklog}
+                operations={consoleState.operations}
                 periods={consoleState.dashboardPeriods}
                 statistics={consoleState.statistics}
                 onReconcileNotification={(item, action) =>
                   void consoleState.reconcileNotification(item, action)
                 }
                 onSendNotification={(period) => void consoleState.sendNotification(period)}
+                onNavigateOperationTarget={(target) => void consoleState.navigateToOperationTarget(target)}
+                onRepairOperation={consoleState.repairOperation}
               />
             ) : null}
             {consoleState.activeSection === "reservations" ? (

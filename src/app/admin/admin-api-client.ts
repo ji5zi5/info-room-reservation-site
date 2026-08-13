@@ -4,11 +4,15 @@ import { readApiErrorMessage } from "../client-api-response";
 import { csrfFetch } from "../csrf-fetch";
 import {
   AdminNotificationSettingsPayloadSchema,
+  AdminOperationsPayloadSchema,
   AdminSettingsPayloadSchema,
   type AdminDashboardPeriod,
   type AdminNotificationBacklogItem,
   type AdminNotificationReconciliationAction,
   type AdminNotificationSettings,
+  type AdminOperationItem,
+  type AdminOperationRepairAction,
+  type AdminOperationsPayload,
   type AdminPeriodSetting,
   type StudyPeriod
 } from "./admin-types";
@@ -106,6 +110,16 @@ const ApplyRestrictionSchema = z.object({
   user: UserMutationSchema
 });
 const RemoveRestrictionSchema = z.object({ user: UserMutationSchema });
+const DiscordOperationRepairSchema = z.object({
+  result: z.discriminatedUnion("kind", [
+    z.object({ auditActionId: z.string(), kind: z.literal("repaired") }).strict(),
+    z.object({ kind: z.literal("bound"), messageId: z.string() }).strict(),
+    z.object({
+      kind: z.literal("unresolved"),
+      status: z.enum(["ERROR", "MULTIPLE", "PARTIAL", "UNIQUE", "ZERO_COMPLETE", "ZERO_PARTIAL"])
+    }).strict()
+  ])
+}).strict();
 
 export type SendClosedPeriodNotificationData = z.infer<typeof SendClosedPeriodNotificationSchema>;
 export type ReconcileClosedPeriodNotificationData = z.infer<typeof ReconcileClosedPeriodNotificationSchema>;
@@ -113,6 +127,54 @@ export type CancelReservationData = z.infer<typeof CancelReservationSchema>;
 export type NoShowReservationData = z.infer<typeof NoShowReservationSchema>;
 export type ApplyRestrictionData = z.infer<typeof ApplyRestrictionSchema>;
 export type RemoveRestrictionData = z.infer<typeof RemoveRestrictionSchema>;
+export type DiscordOperationRepairData = z.infer<typeof DiscordOperationRepairSchema>;
+
+export async function fetchAdminOperations(): Promise<
+  { readonly data: AdminOperationsPayload; readonly kind: "ok" }
+  | { readonly kind: "error"; readonly message: string }
+> {
+  try {
+    const response = await fetch("/api/admin/operations");
+    if (!response.ok) {
+      return {
+        kind: "error",
+        message: (await readApiErrorMessage(response)) ?? "운영 작업을 불러오지 못했습니다."
+      };
+    }
+    const body = await response.text();
+    if (!body.trim()) {
+      return { kind: "error", message: "운영 작업 응답 형식이 올바르지 않습니다." };
+    }
+    const parsedJson = parseJson(body);
+    if (parsedJson.kind === "invalid") {
+      return { kind: "error", message: "운영 작업 응답 형식이 올바르지 않습니다." };
+    }
+    const parsed = AdminOperationsPayloadSchema.safeParse(parsedJson.value);
+    return parsed.success
+      ? { data: parsed.data, kind: "ok" }
+      : { kind: "error", message: "운영 작업 응답 형식이 올바르지 않습니다." };
+  } catch {
+    return { kind: "error", message: "운영 작업을 불러오지 못했습니다." };
+  }
+}
+
+export async function repairDiscordOperation(
+  item: AdminOperationItem,
+  action: AdminOperationRepairAction,
+  confirmation?: string
+): Promise<AdminMutationResult<DiscordOperationRepairData>> {
+  return performAdminMutation(() => csrfFetch("/api/admin/discord/reservations/reconcile", {
+    body: JSON.stringify({
+      action,
+      ...(confirmation === undefined ? {} : { confirmation }),
+      expectedControlEpoch: item.expectedControlEpoch,
+      expectedState: item.expectedState,
+      reservationId: item.reservationId
+    }),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  }), DiscordOperationRepairSchema, "Discord 작업 복구에 실패했습니다.");
+}
 
 export async function saveAdminSettings(input: {
   readonly date: string;
@@ -325,4 +387,15 @@ function parseRetryAfter(value: string | null, nowMs: number): number | null {
   }
   const delay = retryAt - nowMs;
   return delay > 0 ? delay : null;
+}
+
+function parseJson(body: string): { readonly kind: "invalid" } | { readonly kind: "valid"; readonly value: unknown } {
+  try {
+    return { kind: "valid", value: JSON.parse(body) };
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return { kind: "invalid" };
+    }
+    throw error;
+  }
 }
