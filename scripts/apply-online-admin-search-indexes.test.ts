@@ -1,5 +1,5 @@
 // allow: SIZE_OK — static protocol guards and the complete catalog mismatch matrix stay auditable together.
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 
@@ -15,6 +15,53 @@ import {
 } from "./apply-online-admin-search-indexes";
 
 const runnerSource = readFileSync(resolve("scripts/apply-online-admin-search-indexes.ts"), "utf8");
+const EXACT_BASE_WRITER_SOURCE = String.raw`
+  import { spawnSync } from "node:child_process";
+  import { PrismaClient } from "@prisma/client";
+
+  async function main() {
+    const commit = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
+    if (commit.status !== 0) throw new Error(commit.stderr || commit.stdout);
+    const prisma = new PrismaClient();
+    let stopping = false;
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => { if (chunk.includes("STOP")) stopping = true; });
+    const errors = [];
+    let successfulWrites = 0;
+    process.stdout.write("READY " + commit.stdout.trim() + "\n");
+    while (!stopping) {
+      const userNumber = successfulWrites % 5000 + 1;
+      const cycle = Math.floor(successfulWrites / 10000);
+      const studyPeriod = Math.floor(successfulWrites / 5000) % 2 === 0 ? "EIGHTH" : "FIRST";
+      try {
+        const reservation = await prisma.reservation.create({
+          data: {
+            date: "writer-date-" + cycle,
+            reason: "rollout",
+            status: "CONFIRMED",
+            studyPeriod,
+            userId: "writer-user-" + userNumber
+          }
+        });
+        if (reservation.userId !== "writer-user-" + userNumber) throw new Error("exact-base writer returned wrong user");
+        successfulWrites += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(message);
+        stopping = true;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 2));
+    }
+    process.stdin.pause();
+    await prisma.$disconnect();
+    process.stdout.write(JSON.stringify({
+      commitSha: commit.stdout.trim(),
+      successfulWrites,
+      writerErrors: errors
+    }) + "\n");
+  }
+  main().catch((error) => { console.error(error); process.exitCode = 1; });
+`;
 
 describe("online admin search index runner", () => {
   it("pins seven named structural definitions and a deterministic checksum", () => {
@@ -165,12 +212,18 @@ describe("online admin search index runner", () => {
     expect(OnlineIndexError).toBeDefined();
   });
 
-  it("builds populated indexes, verifies selective plans, and reapplies idempotently in PostgreSQL 16", () => {
+  it("traverses populated PostgreSQL pages while the exact-base writer survives migration and online indexes", () => {
     // Given: a disposable migrated PostgreSQL 16 database with 127 users/reservations and 227 audits.
     const result = runPostgresScenario();
 
     // When: the separate runner is applied twice and catalog/query-plan truth is captured.
     const parsed = JSON.parse(result);
+    const evidenceDir = process.env.EVIDENCE_DIR;
+    if (evidenceDir !== undefined) {
+      writeFileSync(resolve(evidenceDir, "todo3-postgres-pagination-rollout.json"), `${JSON.stringify(parsed, null, 2)}\n`, {
+        flag: "wx"
+      });
+    }
 
     // Then: the owner ledger and all seven exact indexes converge to APPLIED and cleanup succeeds.
     expect(parsed).toMatchObject({
@@ -178,8 +231,33 @@ describe("online admin search index runner", () => {
       auditRows: 227,
       ledgerState: "APPLIED",
       reservationRows: 127,
+      rollout: {
+        duplicateReservations: 0,
+        lostReservations: 0,
+        migrationExitCode: 0,
+        onlineIndexExitCode: 0,
+        writerErrors: [],
+        writesAdvancedDuringIndexes: true,
+        writesAdvancedDuringMigration: true
+      },
+      traversal: {
+        audits: { pages: 5, rows: 227, terminal: true, unique: 227 },
+        reservations: { pages: 3, rows: 127, terminal: true, unique: 127 },
+        users: { pages: 3, rows: 127, terminal: true, unique: 127 }
+      },
       userRows: 127
     });
+    const foundationCommit = spawnSync(
+      "git",
+      ["log", "-1", "--format=%H", "--", "prisma/migrations/20260811150000_add_discord_ops_v2_foundations/migration.sql"],
+      { cwd: process.cwd(), encoding: "utf8" }
+    ).stdout.trim();
+    const expectedExactBaseSha = spawnSync("git", ["rev-parse", `${foundationCommit}^`], {
+      cwd: process.cwd(), encoding: "utf8"
+    }).stdout.trim();
+    expect(parsed.rollout.exactBaseSha).toBe(expectedExactBaseSha);
+    expect(parsed.rollout.persistedReservations).toBe(parsed.rollout.successfulWrites);
+    expect(parsed.rollout.successfulWrites).toBeGreaterThan(0);
     expect(parsed.plan).toContain("User_name_trgm_idx");
     expect(parsed.cleanup).toBe("cleaned");
   }, 180_000);
@@ -207,45 +285,212 @@ describe("online admin search index runner", () => {
 
 function runPostgresScenario(): string {
   const source = String.raw`
-    import { spawnSync } from 'node:child_process';
+    import { spawn, spawnSync } from 'node:child_process';
+    import { mkdtemp, rm, symlink } from 'node:fs/promises';
     import { fileURLToPath } from 'node:url';
+    import { tmpdir } from 'node:os';
+    import { join } from 'node:path';
     import pg from 'pg';
     import { withOperationalPostgres } from './scripts/operational-fomo-harness.mjs';
     const receipt = await withOperationalPostgres({
       operation: async ({ databaseUrl, directUrl }) => {
+        const repositoryRoot = process.cwd();
         const prismaCli = fileURLToPath(import.meta.resolve('prisma/build/index.js'));
-        const migrated = spawnSync(process.execPath, [prismaCli, 'migrate', 'deploy'], {
-          cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: directUrl }
-        });
-        if (migrated.status !== 0) throw new Error(migrated.stderr || migrated.stdout);
-        const client = new pg.Client({ connectionString: directUrl });
-        await client.connect();
-        try {
-          await client.query('INSERT INTO "User" ("id","name","studentNumber","generation","createdAt","updatedAt") SELECT \'qa-user-\'||g, \'김학생\'||g, \'qa-\'||g, 1, CURRENT_TIMESTAMP - (g||\' seconds\')::interval, CURRENT_TIMESTAMP FROM generate_series(1,127) g');
-          await client.query('INSERT INTO "Reservation" ("id","date","studyPeriod","userId","createdAt","updatedAt") SELECT \'qa-reservation-\'||g, \'2026-08-13\', \'EIGHTH\', \'qa-user-\'||g, CURRENT_TIMESTAMP - (g||\' seconds\')::interval, CURRENT_TIMESTAMP FROM generate_series(1,127) g');
-          await client.query('INSERT INTO "AdminAction" ("id","action","reason","createdAt") SELECT \'qa-audit-\'||g, \'QA_ACTION\', \'qa reason \'||g, CURRENT_TIMESTAMP - (g||\' seconds\')::interval FROM generate_series(1,227) g');
-        } finally { await client.end(); }
         const tsxCli = fileURLToPath(import.meta.resolve('tsx/cli'));
-        for (let run = 0; run < 2; run += 1) {
+        const foundation = spawnSync('git', ['log','-1','--format=%H','--','prisma/migrations/20260811150000_add_discord_ops_v2_foundations/migration.sql'], { cwd: repositoryRoot, encoding: 'utf8' });
+        if (foundation.status !== 0 || foundation.stdout.trim().length === 0) throw new Error(foundation.stderr || 'foundation commit missing');
+        const exactBase = spawnSync('git', ['rev-parse', foundation.stdout.trim() + '^'], { cwd: repositoryRoot, encoding: 'utf8' });
+        if (exactBase.status !== 0) throw new Error(exactBase.stderr || exactBase.stdout);
+        const exactBaseSha = exactBase.stdout.trim();
+        const cloneRoot = await mkdtemp(join(tmpdir(), 'todo3-exact-base-'));
+        const baseRepository = join(cloneRoot, 'repo');
+        let writer;
+        let writerClosed;
+        let writerStdout = '';
+        let writerStderr = '';
+        let observer;
+        let baseClientGenerated = false;
+        try {
+          const cloned = spawnSync('git', ['clone','--local','--no-checkout',repositoryRoot,baseRepository], { encoding: 'utf8' });
+          if (cloned.status !== 0) throw new Error(cloned.stderr || cloned.stdout);
+          const checkedOut = spawnSync('git', ['checkout','--detach',exactBaseSha], { cwd: baseRepository, encoding: 'utf8' });
+          if (checkedOut.status !== 0) throw new Error(checkedOut.stderr || checkedOut.stdout);
+          await symlink(join(repositoryRoot,'node_modules'), join(baseRepository,'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+          const generated = spawnSync(process.execPath, [prismaCli, 'generate'], {
+            cwd: baseRepository, encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: directUrl }
+          });
+          if (generated.status !== 0) throw new Error(generated.stderr || generated.stdout);
+          baseClientGenerated = true;
+          const baseMigrated = spawnSync(process.execPath, [prismaCli, 'migrate', 'deploy'], {
+            cwd: baseRepository, encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: directUrl }
+          });
+          if (baseMigrated.status !== 0) throw new Error(baseMigrated.stderr || baseMigrated.stdout);
+
+          const client = new pg.Client({ connectionString: directUrl });
+          await client.connect();
+          try {
+            await client.query('INSERT INTO "User" ("id","name","studentNumber","generation","createdAt","updatedAt") SELECT \'writer-user-\'||g, \'Writer \'||g, \'writer-\'||g, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM generate_series(1,5000) g');
+          } finally { await client.end(); }
+
+          const writerSource = ${JSON.stringify(EXACT_BASE_WRITER_SOURCE)};
+          writer = spawn(process.execPath, [tsxCli,'--eval',writerSource], {
+            cwd: baseRepository, env: { ...process.env, DATABASE_URL: databaseUrl, DEPLOYMENT_SHA: exactBaseSha, DIRECT_URL: directUrl }, shell: false, windowsHide: true,
+            stdio: ['pipe','pipe','pipe']
+          });
+          let readySettled = false;
+          let resolveReady;
+          let rejectReady;
+          const writerReady = new Promise((resolveHandshake, rejectHandshake) => {
+            resolveReady = resolveHandshake;
+            rejectReady = rejectHandshake;
+          });
+          writer.stdout.on('data', (chunk) => {
+            writerStdout += chunk.toString();
+            if (!readySettled && writerStdout.includes('READY ' + exactBaseSha)) {
+              readySettled = true;
+              resolveReady();
+            }
+          });
+          writer.stderr.on('data', (chunk) => { writerStderr += chunk.toString(); });
+          writerClosed = new Promise((resolveClose) => {
+            writer.once('close', (status) => {
+              const exitCode = status ?? -1;
+              if (!readySettled) {
+                readySettled = true;
+                rejectReady(new Error('exact-base writer exited before readiness: exit=' + exitCode + ' stderr=' + JSON.stringify(writerStderr) + ' stdout=' + JSON.stringify(writerStdout)));
+              }
+              resolveClose(exitCode);
+            });
+            writer.once('error', (error) => {
+              if (!readySettled) {
+                readySettled = true;
+                rejectReady(new Error('exact-base writer failed before readiness: ' + String(error)));
+              }
+              resolveClose(-1);
+            });
+          });
+          const waitFor = async (predicate, label) => {
+            for (let attempt = 0; attempt < 500; attempt += 1) {
+              if (await predicate()) return;
+              await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+            }
+            throw new Error('timed out waiting for ' + label);
+          };
+          await Promise.race([
+            writerReady,
+            new Promise((_, rejectWait) => setTimeout(() => rejectWait(new Error('exact-base writer readiness timed out: stderr=' + JSON.stringify(writerStderr) + ' stdout=' + JSON.stringify(writerStdout))), 5000))
+          ]);
+          observer = new pg.Client({ connectionString: directUrl });
+          await observer.connect();
+          const writerCount = async () => Number((await observer.query('SELECT count(*)::int AS count FROM "Reservation" WHERE reason=\'rollout\'')).rows[0].count);
+          await Promise.race([
+            waitFor(async () => await writerCount() >= 5, 'initial exact-base writes'),
+            writerClosed.then((exitCode) => { throw new Error('exact-base writer exited before initial writes: exit=' + exitCode + ' stderr=' + JSON.stringify(writerStderr) + ' stdout=' + JSON.stringify(writerStdout)); })
+          ]);
+          const beforeMigration = await writerCount();
+
+          const migrated = spawnSync(process.execPath, [prismaCli, 'migrate', 'deploy'], {
+            cwd: repositoryRoot, encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: directUrl }
+          });
+          if (migrated.status !== 0) throw new Error(migrated.stderr || migrated.stdout);
+          await Promise.race([
+            waitFor(async () => await writerCount() > beforeMigration, 'post-migration exact-base write'),
+            writerClosed.then((exitCode) => { throw new Error('exact-base writer exited after migration: exit=' + exitCode + ' stderr=' + JSON.stringify(writerStderr) + ' stdout=' + JSON.stringify(writerStdout)); })
+          ]);
+          const afterMigration = await writerCount();
+          await observer.query('INSERT INTO "User" ("id","name","studentNumber","generation","createdAt","updatedAt") SELECT \'qa-user-\'||g, \'김학생\'||g, \'qa-\'||g, 1, TIMESTAMPTZ \'2026-08-13 00:00:00+00\' + g * INTERVAL \'1 second\', CURRENT_TIMESTAMP FROM generate_series(1,127) g');
+          await observer.query('INSERT INTO "Reservation" ("id","date","studyPeriod","userId","createdAt","updatedAt") SELECT \'qa-reservation-\'||g, \'2026-08-13\', CASE WHEN g <= 64 THEN \'EIGHTH\' ELSE \'FIRST\' END, \'qa-user-\'||g, TIMESTAMPTZ \'2026-08-13 00:00:00+00\' + g * INTERVAL \'1 second\', CURRENT_TIMESTAMP FROM generate_series(1,127) g');
+          await observer.query('INSERT INTO "AdminAction" ("id","action","reason","createdAt") SELECT \'qa-audit-\'||g, \'QA_ACTION\', \'qa reason \'||g, TIMESTAMPTZ \'2026-08-13 00:00:00+00\' + g * INTERVAL \'1 second\' FROM generate_series(1,227) g');
           const applied = spawnSync(process.execPath, [tsxCli, 'scripts/apply-online-admin-search-indexes.ts'], {
-            cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, DIRECT_URL: directUrl }
+            cwd: repositoryRoot, encoding: 'utf8', env: { ...process.env, DIRECT_URL: directUrl }
           });
           if (applied.status !== 0) throw new Error(applied.stderr || applied.stdout);
-        }
-        const verify = new pg.Client({ connectionString: directUrl });
-        await verify.connect();
-        try {
-          await verify.query('SET enable_seqscan=off');
-          const ledger = await verify.query("SELECT state FROM app_private.online_schema_migrations WHERE name='admin-search-indexes-v1'");
-          const indexes = await verify.query("SELECT count(*)::int AS count FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE c.relname=ANY($1) AND i.indisvalid AND i.indisready", [[
+          await Promise.race([
+            waitFor(async () => await writerCount() > afterMigration, 'post-index exact-base write'),
+            writerClosed.then((exitCode) => { throw new Error('exact-base writer exited after online indexes: exit=' + exitCode + ' stderr=' + JSON.stringify(writerStderr) + ' stdout=' + JSON.stringify(writerStdout)); })
+          ]);
+          const afterIndexes = await writerCount();
+          writer.stdin.write('STOP\\n');
+          writer.stdin.end();
+          const writerExitCode = await writerClosed;
+          if (writerExitCode !== 0) throw new Error(writerStderr || writerStdout);
+          const writerResultMatch = /\{[^\r\n]+\}/u.exec(writerStdout);
+          if (writerResultMatch === null) throw new Error('exact-base writer result missing: ' + JSON.stringify(writerStdout));
+          const writerResult = JSON.parse(writerResultMatch[0]);
+          const persisted = await observer.query('SELECT count(*)::int AS count,count(DISTINCT ("userId",date,"studyPeriod"))::int AS distinct_count FROM "Reservation" WHERE reason=\'rollout\'');
+
+          const traverseUsers = async () => {
+            const seen = []; let after = null; let pages = 0; let terminal = false;
+            while (!terminal) {
+              const result = await observer.query('SELECT id,"createdAt" FROM "User" WHERE "studentNumber" LIKE \'qa-%\' AND "createdAt" <= TIMESTAMPTZ \'2026-08-13 00:02:07+00\' AND ($1::timestamptz IS NULL OR ("createdAt",id) > ($1::timestamptz,$2::text)) ORDER BY "createdAt" ASC,id ASC LIMIT 51',[after?.createdAt ?? null,after?.id ?? null]);
+              const page = result.rows.slice(0,50); pages += 1; seen.push(...page.map(({ id }) => id)); terminal = result.rows.length <= 50;
+              const last = page.at(-1); after = terminal || last === undefined ? null : { createdAt: last.createdAt, id: last.id };
+            }
+            return { pages, rows: seen.length, terminal: after === null, unique: new Set(seen).size };
+          };
+          const traverseReservations = async () => {
+            const seen = []; let after = null; let pages = 0; let terminal = false;
+            while (!terminal) {
+              const result = await observer.query('SELECT id,"studyPeriod","createdAt" FROM "Reservation" WHERE date=\'2026-08-13\' AND "createdAt" <= TIMESTAMPTZ \'2026-08-13 00:02:07+00\' AND ($1::text IS NULL OR ("studyPeriod","createdAt",id) > ($1::text,$2::timestamptz,$3::text)) ORDER BY "studyPeriod" ASC,"createdAt" ASC,id ASC LIMIT 51',[after?.studyPeriod ?? null,after?.createdAt ?? null,after?.id ?? null]);
+              const page = result.rows.slice(0,50); pages += 1; seen.push(...page.map(({ id }) => id)); terminal = result.rows.length <= 50;
+              const last = page.at(-1); after = terminal || last === undefined ? null : { studyPeriod: last.studyPeriod, createdAt: last.createdAt, id: last.id };
+            }
+            return { pages, rows: seen.length, terminal: after === null, unique: new Set(seen).size };
+          };
+          const traverseAudits = async () => {
+            const seen = []; let after = null; let pages = 0; let terminal = false;
+            while (!terminal) {
+              const result = await observer.query('SELECT id,"createdAt" FROM "AdminAction" WHERE action=\'QA_ACTION\' AND "createdAt" <= TIMESTAMPTZ \'2026-08-13 00:03:47+00\' AND ($1::timestamptz IS NULL OR ("createdAt",id) < ($1::timestamptz,$2::text)) ORDER BY "createdAt" DESC,id DESC LIMIT 51',[after?.createdAt ?? null,after?.id ?? null]);
+              const page = result.rows.slice(0,50); pages += 1; seen.push(...page.map(({ id }) => id)); terminal = result.rows.length <= 50;
+              const last = page.at(-1); after = terminal || last === undefined ? null : { createdAt: last.createdAt, id: last.id };
+            }
+            return { pages, rows: seen.length, terminal: after === null, unique: new Set(seen).size };
+          };
+          await observer.query('SET enable_seqscan=off');
+          const ledger = await observer.query("SELECT state FROM app_private.online_schema_migrations WHERE name='admin-search-indexes-v1'");
+          const indexes = await observer.query("SELECT count(*)::int AS count FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE c.relname=ANY($1) AND i.indisvalid AND i.indisready", [[
             'User_name_trgm_idx','User_studentNumber_trgm_idx','AdminAction_action_trgm_idx','AdminAction_reason_trgm_idx',
             'User_createdAt_id_idx','Reservation_date_studyPeriod_createdAt_id_idx','AdminAction_createdAt_id_idx'
           ]]);
-          const plan = await verify.query("EXPLAIN (FORMAT JSON) SELECT id FROM \"User\" WHERE name LIKE '%김학생127%'");
-          const counts = await verify.query('SELECT (SELECT count(*)::int FROM "User") AS users,(SELECT count(*)::int FROM "Reservation") AS reservations,(SELECT count(*)::int FROM "AdminAction") AS audits');
-          return { appliedIndexes: indexes.rows[0].count, auditRows: counts.rows[0].audits, ledgerState: ledger.rows[0].state,
-            plan: JSON.stringify(plan.rows[0]), reservationRows: counts.rows[0].reservations, userRows: counts.rows[0].users };
-        } finally { await verify.end(); }
+          const plan = await observer.query("EXPLAIN (FORMAT JSON) SELECT id FROM \"User\" WHERE name LIKE '%김학생127%'");
+          const counts = await observer.query("SELECT (SELECT count(*)::int FROM \"User\" WHERE \"studentNumber\" LIKE 'qa-%') AS users,(SELECT count(*)::int FROM \"Reservation\" WHERE date='2026-08-13') AS reservations,(SELECT count(*)::int FROM \"AdminAction\" WHERE action='QA_ACTION') AS audits");
+          const traversal = { users: await traverseUsers(), reservations: await traverseReservations(), audits: await traverseAudits() };
+          await observer.end();
+          observer = undefined;
+          return {
+            appliedIndexes: indexes.rows[0].count, auditRows: counts.rows[0].audits, ledgerState: ledger.rows[0].state,
+            plan: JSON.stringify(plan.rows[0]), reservationRows: counts.rows[0].reservations,
+            rollout: {
+              duplicateReservations: Number(persisted.rows[0].count) - Number(persisted.rows[0].distinct_count),
+              exactBaseSha: writerResult.commitSha,
+              lostReservations: writerResult.successfulWrites - Number(persisted.rows[0].count),
+              migrationExitCode: migrated.status,
+              onlineIndexExitCode: applied.status,
+              persistedReservations: Number(persisted.rows[0].count),
+              successfulWrites: writerResult.successfulWrites,
+              writerErrors: writerResult.writerErrors,
+              writesAdvancedDuringIndexes: afterIndexes > afterMigration,
+              writesAdvancedDuringMigration: afterMigration > beforeMigration
+            },
+            traversal, userRows: counts.rows[0].users
+          };
+        } finally {
+          if (writer !== undefined && writer.exitCode === null) {
+            writer.stdin.write('STOP\\n'); writer.stdin.end();
+            if (writerClosed !== undefined) {
+              const closed = await Promise.race([writerClosed.then(() => true), new Promise((resolveWait) => setTimeout(() => resolveWait(false), 5000))]);
+              if (!closed) writer.kill();
+            }
+          }
+          if (observer !== undefined) await observer.end().catch(() => undefined);
+          if (baseClientGenerated) {
+            const restoredClient = spawnSync(process.execPath, [prismaCli, 'generate'], {
+              cwd: repositoryRoot, encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: directUrl }
+            });
+            if (restoredClient.status !== 0) throw new Error(restoredClient.stderr || restoredClient.stdout);
+          }
+          await rm(cloneRoot, { recursive: true, force: true });
+        }
       }, timeoutMs: 90_000
     });
     process.stdout.write(JSON.stringify({ ...receipt, cleanup: 'cleaned' }));
