@@ -25,6 +25,8 @@ import {
   beginSyncPatch,
   markSyncPendingReview,
   readMessageSyncState,
+  reconcileExpiredSyncPatches,
+  saveLeasedSyncSuccess,
   saveSyncFailure,
   saveSyncSuccess
 } from "./prisma-discord-reservation-message-sync";
@@ -63,10 +65,12 @@ export const prismaDiscordReservationMessageRepository = {
   readMessageSyncState,
   readOperationsControl,
   reconcileExpiredInitialPosts,
+  reconcileExpiredSyncPatches,
   markInitialSendPendingReview,
   markSyncPendingReview,
   saveInitialSendFailure,
   saveInitialSendSuccess,
+  saveLeasedSyncSuccess,
   saveSyncFailure,
   saveSyncSuccess
 } as const;
