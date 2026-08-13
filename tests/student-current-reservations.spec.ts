@@ -104,7 +104,7 @@ test("desktop-expanded five-row notification popover preserves workflow geometry
   await openButton.click();
   const notificationWidget = page.locator(".student-notification-widget");
   await expect(notificationWidget).toHaveAttribute("data-open", "true");
-  await expect(openButton).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "학생 알림 닫기" })).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(".student-notification-item")).toHaveCount(5);
   await expect(page.getByText("알림 5")).toBeVisible();
   expect(await captureWorkflowGeometry(page)).toEqual(geometryBefore);
