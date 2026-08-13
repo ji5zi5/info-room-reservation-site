@@ -90,8 +90,12 @@ describe("Postgres row level security policy migration", () => {
     expect(sql).toContain('ALTER TABLE "DiscordInteractionJob" FORCE ROW LEVEL SECURITY;');
     expect(sql).toContain('OLD."sourceApplicationId"');
     expect(sql).toContain('NEW."sourceApplicationId"');
-    expect(sql).toContain("ALTER FUNCTION app_private.require_bound_discord_interaction_jobs()\n  OWNER TO info_room_activation_owner;");
-    expect(sql).toContain("REVOKE ALL ON FUNCTION app_private.require_bound_discord_interaction_jobs()\n  FROM PUBLIC, info_room_runtime;");
+    expect(sql).toMatch(
+      /ALTER FUNCTION app_private\.require_bound_discord_interaction_jobs\(\)\s+OWNER TO info_room_activation_owner;/u
+    );
+    expect(sql).toMatch(
+      /REVOKE ALL ON FUNCTION app_private\.require_bound_discord_interaction_jobs\(\)\s+FROM PUBLIC, info_room_runtime;/u
+    );
     expect(sql).toContain('GRANT SELECT ON TABLE "DiscordInteractionJob" TO info_room_activation_owner;');
     expect(sql).toContain('CREATE POLICY "discord_interaction_job_admin_system_all"');
     expect(sql.indexOf('CREATE TRIGGER "ApplicationDeploymentReceipt_bound_interaction_jobs"'))
