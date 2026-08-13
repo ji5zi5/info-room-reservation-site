@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getAdvanceReservationPolicy, isSelectableAdvanceDate } from "@/lib/advance-reservation-policy";
-import { collectStudentCurrentReservations } from "@/lib/student-reservation-status";
+import { collectStudentCurrentReservations, type StudentCurrentReservation } from "@/lib/student-reservation-status";
 import { AdminConsole } from "./admin/admin-console";
 import { consumeAdminRedirectMessage } from "./reservation-home-helpers";
 import { useReservationPeriodRefresh } from "./reservation-home-period-refresh";
@@ -24,6 +24,7 @@ export function ReservationHomePage(): React.ReactElement {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [selectedCurrentReservationId, setSelectedCurrentReservationId] = useState<string | null>(null);
   const clearPeriodsRef = useRef<() => void>(() => undefined);
   const clearPendingActionRef = useRef<() => void>(() => undefined);
   const {
@@ -121,7 +122,16 @@ export function ReservationHomePage(): React.ReactElement {
     }
   }, [user?.id, user?.role]);
 
-  function selectCalendarDate(date: string): void {
+  useEffect(() => {
+    if (
+      selectedCurrentReservationId !== null &&
+      !currentReservations.some((reservation) => reservation.reservationId === selectedCurrentReservationId)
+    ) {
+      setSelectedCurrentReservationId(null);
+    }
+  }, [currentReservations, selectedCurrentReservationId]);
+
+  function showReservationDate(date: string): void {
     if (!advancePolicy) {
       return;
     }
@@ -133,6 +143,16 @@ export function ReservationHomePage(): React.ReactElement {
       setAdvanceDate(date);
       setTab("advance");
     }
+  }
+
+  function selectCalendarDate(date: string): void {
+    setSelectedCurrentReservationId(null);
+    showReservationDate(date);
+  }
+
+  function selectCurrentReservation(reservation: StudentCurrentReservation): void {
+    setSelectedCurrentReservationId(reservation.reservationId);
+    showReservationDate(reservation.date);
   }
 
   function retryRefresh(): void {
@@ -160,6 +180,7 @@ export function ReservationHomePage(): React.ReactElement {
       refreshError={sessionError || periodError}
       resourcesFresh={resourcesFresh}
       reservationSubmitting={reservationSubmitting}
+      selectedCurrentReservationId={selectedCurrentReservationId}
       sidebarOpen={sidebarOpen}
       tab={tab}
       targetDate={targetDate}
@@ -178,6 +199,7 @@ export function ReservationHomePage(): React.ReactElement {
       onRefreshRetry={retryRefresh}
       onReserve={(studyPeriod) => void requestReserve(studyPeriod)}
       onSelectCalendarDate={selectCalendarDate}
+      onSelectCurrentReservation={selectCurrentReservation}
       onSidebarToggle={() => setSidebarOpen((open) => !open)}
       onTabChange={setTab}
     />
