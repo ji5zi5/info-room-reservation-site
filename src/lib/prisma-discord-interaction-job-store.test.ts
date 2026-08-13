@@ -38,6 +38,7 @@ const command = {
   localActorId: "admin-1",
   renderedEpoch: 7,
   reservationId: "reservation-1",
+  sourceApplicationId: "application-1",
   sourceChannelId: "channel-1",
   sourceGuildId: "guild-1",
   sourceMessageId: "message-1"
@@ -160,6 +161,7 @@ describe("Prisma Discord interaction job store", () => {
     expect(batch).toHaveLength(20);
     expect(exact).toHaveLength(1);
     expect(exact[0]?.interactionId).toBe("interaction-9");
+    expect(exact[0]?.sourceApplicationId).toBe("application-1");
     expect(mocks.transaction.discordInteractionJob.findMany.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({ take: 1, where: expect.objectContaining({ interactionId: "interaction-9" }) })
     );
@@ -188,6 +190,36 @@ describe("Prisma Discord interaction job store", () => {
     expect(stale).toBe(false);
   });
 
+  it("persists an unbound legacy claim as stale application-binding review", async () => {
+    mocks.transaction.discordInteractionJob.updateMany.mockResolvedValue({ count: 1 });
+    const claim = {
+      ...command,
+      attempts: 1,
+      claimId: "claim-unbound",
+      sourceApplicationId: null
+    };
+
+    await prismaDiscordInteractionJobStore.completeStale({
+      claim,
+      errorCode: "discord_source_application_missing",
+      terminalResult: { code: "discord_source_application_missing" }
+    });
+
+    expect(mocks.transaction.discordInteractionJob.updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        errorCode: "discord_source_application_missing",
+        lastError: "APPLICATION_BINDING_REVIEW",
+        nextAttemptAt: null,
+        status: "STALE"
+      }),
+      where: {
+        claimId: "claim-unbound",
+        interactionId: command.interactionId,
+        status: "PROCESSING"
+      }
+    });
+  });
+
   it("summarizes counts and the oldest backlog age", async () => {
     // Given: three actionable jobs with a ten-minute-old oldest row.
     mocks.transaction.discordInteractionJob.aggregate.mockResolvedValue({ _count: { _all: 3 }, _min: { createdAt: new Date(now.getTime() - 600_000) } });
@@ -209,6 +241,7 @@ describe("Prisma Discord interaction job store", () => {
 
     // Then: serialized durable input has no token, raw body, raw IP, or request-role snapshot field.
     const persisted = mocks.transaction.discordInteractionJob.createMany.mock.calls[0]?.[0]?.data;
+    expect(persisted.sourceApplicationId).toBe("application-1");
     expect(Object.keys(persisted)).toEqual(expect.arrayContaining(Object.keys(command)));
     expect(Object.keys(persisted)).not.toEqual(expect.arrayContaining(["token", "rawBody", "rawIp", "requestRoleIds"]));
   });

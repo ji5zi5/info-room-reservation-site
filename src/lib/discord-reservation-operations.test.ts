@@ -40,6 +40,7 @@ import {
 } from "./discord-reservation-operations";
 
 const now = new Date("2026-08-11T03:00:00.000Z");
+const currentApplicationId = "application-1";
 const ipHash = "transport-derived-ip-hash";
 const reservation: Reservation = {
   createdAt: now,
@@ -55,6 +56,7 @@ const transaction = {
   $queryRaw: vi.fn(),
   adminAction: { create: vi.fn() },
   auditLog: { create: vi.fn() },
+  discordInteractionJob: { findUnique: vi.fn() },
   discordReservationMessage: { findUnique: vi.fn() },
   discordOperationsControl: { findUnique: vi.fn() },
   reservation: { findUnique: vi.fn() },
@@ -91,12 +93,13 @@ describe("Discord reservation decisions", () => {
     transaction.discordReservationMessage.findUnique.mockResolvedValue({
       channelId: "channel-1", decision: null, guildId: "guild-1", messageId: "message-1", renderedSourceEpoch: 7
     });
+    transaction.discordInteractionJob.findUnique.mockResolvedValue({ sourceApplicationId: currentApplicationId });
     transaction.discordOperationsControl.findUnique.mockResolvedValue({ enabled: true, epoch: 7 });
     transaction.$queryRaw.mockResolvedValue([{ enabled: true, epoch: 7 }]);
   });
 
   it("persists the exact transport-derived ipHash when accepting once", async () => {
-    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), currentApplicationId, ipHash, now });
 
     expect(result).toEqual({ kind: "accepted", reservationId: "reservation-1" });
     expect(mocks.withDatabaseMutation).toHaveBeenCalledWith(expect.objectContaining({
@@ -136,7 +139,7 @@ describe("Discord reservation decisions", () => {
   });
 
   it("passes the exact transport-derived ipHash to shared rejection cancellation", async () => {
-    const result = await processDiscordReservationDecision({ command: command("reject"), ipHash, now });
+    const result = await processDiscordReservationDecision({ command: command("reject"), currentApplicationId, ipHash, now });
 
     expect(result).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
     expect(mocks.recordDecision).toHaveBeenCalledWith(transaction, expect.objectContaining({
@@ -157,7 +160,7 @@ describe("Discord reservation decisions", () => {
     mocks.findReceipt.mockResolvedValue({ kind: "accepted", reservationId: "reservation-1" });
     transaction.discordReservationMessage.findUnique.mockResolvedValue(null);
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), currentApplicationId, ipHash, now });
 
     expect(result).toEqual({ kind: "accepted", reservationId: "reservation-1" });
     expect(mocks.recordReceipt).not.toHaveBeenCalled();
@@ -167,11 +170,25 @@ describe("Discord reservation decisions", () => {
 
   it("does not replay a receipt from a different interaction id", async () => {
 
-    const result = await processDiscordReservationDecision({ command: command("reject"), ipHash, now });
+    const result = await processDiscordReservationDecision({ command: command("reject"), currentApplicationId, ipHash, now });
 
     expect(result).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
     expect(mocks.recordDecision).toHaveBeenCalledOnce();
     expect(mocks.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("binds the legacy direct path to the explicitly supplied current application", async () => {
+    transaction.discordInteractionJob.findUnique.mockResolvedValue(null);
+
+    const result = await processDiscordReservationDecision({
+      command: command("accept"),
+      currentApplicationId,
+      ipHash,
+      now
+    });
+
+    expect(result).toEqual({ kind: "accepted", reservationId: "reservation-1" });
+    expect(mocks.recordDecision).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -187,7 +204,7 @@ describe("Discord reservation decisions", () => {
       reservation: { id: "reservation-1", status: "CONFIRMED", userId: "student-1" }
     });
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), currentApplicationId, ipHash, now });
 
     expect(result).toEqual({ code, kind: "noop" });
     expect(mocks.withDatabaseMutation).not.toHaveBeenCalled();
@@ -196,7 +213,7 @@ describe("Discord reservation decisions", () => {
   it("rejects a stale local admin or source message inside the mutation path", async () => {
     transaction.user.findUnique.mockResolvedValue({ id: "admin-1", role: "STUDENT" });
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), currentApplicationId, ipHash, now });
 
     expect(result).toEqual({ code: "stale_actor", kind: "noop" });
     expect(mocks.recordReceipt).not.toHaveBeenCalled();
@@ -206,7 +223,7 @@ describe("Discord reservation decisions", () => {
   it("returns a typed no-op when the source message disappeared without a receipt", async () => {
     transaction.discordReservationMessage.findUnique.mockResolvedValue(null);
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), currentApplicationId, ipHash, now });
 
     expect(result).toEqual({ code: "stale_message", kind: "noop" });
     expect(mocks.recordReceipt).not.toHaveBeenCalled();
@@ -224,7 +241,7 @@ describe("Discord reservation decisions", () => {
       reservation: null
     });
 
-    const result = await processDiscordReservationDecision({ command: command("accept"), ipHash, now });
+    const result = await processDiscordReservationDecision({ command: command("accept"), currentApplicationId, ipHash, now });
 
     expect(result).toEqual({ code: "reservation_not_found", kind: "noop" });
     expect(mocks.withDatabaseMutation).not.toHaveBeenCalled();
@@ -260,7 +277,7 @@ describe("Discord reservation decisions", () => {
 
     // When
     const result = await processDiscordReservationOperation({
-      command: lifecycleCommand("admin_cancel"), ipHash, now
+      command: lifecycleCommand("admin_cancel"), currentApplicationId: "application-1", ipHash, now
     });
 
     // Then
@@ -287,7 +304,7 @@ describe("Discord reservation decisions", () => {
 
     // When
     const result = await processDiscordReservationOperation({
-      command: lifecycleCommand("no_show"), ipHash, now
+      command: lifecycleCommand("no_show"), currentApplicationId: "application-1", ipHash, now
     });
 
     // Then
@@ -307,7 +324,7 @@ describe("Discord reservation decisions", () => {
 
     // When
     const result = await processDiscordReservationOperation({
-      command: lifecycleCommand("admin_cancel"), ipHash, now
+      command: lifecycleCommand("admin_cancel"), currentApplicationId: "application-1", ipHash, now
     });
 
     // Then
@@ -330,8 +347,8 @@ describe("Discord reservation decisions", () => {
     });
 
     // When
-    const accepted = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), ipHash, now });
-    const cancelled = await processDiscordReservationOperation({ command: operationCommand("admin_cancel", "interaction-cancel"), ipHash, now });
+    const accepted = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), currentApplicationId: "application-1", ipHash, now });
+    const cancelled = await processDiscordReservationOperation({ command: operationCommand("admin_cancel", "interaction-cancel"), currentApplicationId: "application-1", ipHash, now });
 
     // Then
     expect(accepted).toEqual({ kind: "accepted", reservationId: "reservation-1" });
@@ -353,8 +370,8 @@ describe("Discord reservation decisions", () => {
     });
 
     // When
-    const accepted = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), ipHash, now });
-    const noShow = await processDiscordReservationOperation({ command: operationCommand("no_show", "interaction-no-show"), ipHash, now });
+    const accepted = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), currentApplicationId: "application-1", ipHash, now });
+    const noShow = await processDiscordReservationOperation({ command: operationCommand("no_show", "interaction-no-show"), currentApplicationId: "application-1", ipHash, now });
 
     // Then
     expect(accepted).toEqual({ kind: "accepted", reservationId: "reservation-1" });
@@ -372,7 +389,7 @@ describe("Discord reservation decisions", () => {
     mocks.noShow.mockResolvedValue({ kind: "not_closed" });
 
     // When
-    const result = await processDiscordReservationOperation({ command: operationCommand("no_show", "interaction-no-show"), ipHash, now });
+    const result = await processDiscordReservationOperation({ command: operationCommand("no_show", "interaction-no-show"), currentApplicationId: "application-1", ipHash, now });
 
     // Then
     expect(result).toEqual({ code: "not_closed", kind: "noop" });
@@ -385,10 +402,68 @@ describe("Discord reservation decisions", () => {
     transaction.$queryRaw.mockResolvedValue([{ enabled: false, epoch: 7 }]);
 
     // When
-    const result = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), ipHash, now });
+    const result = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), currentApplicationId: "application-1", ipHash, now });
 
     // Then
     expect(result).toEqual({ code: "stale_control", kind: "noop" });
+    expect(mocks.recordDecision).not.toHaveBeenCalled();
+    expect(mocks.recordReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate when the persisted source application differs from current configuration", async () => {
+    // Given / When
+    const result = await processDiscordReservationOperation({
+      command: operationCommand("accept", "interaction-wrong-app"),
+      currentApplicationId: "application-2",
+      ipHash,
+      now
+    });
+
+    // Then
+    expect(result).toEqual({ code: "stale_application", kind: "noop" });
+    expect(mocks.recordDecision).not.toHaveBeenCalled();
+    expect(mocks.recordReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate an unbound legacy command", async () => {
+    const result = await processDiscordReservationOperation({
+      command: { ...operationCommand("accept", "interaction-unbound"), sourceApplicationId: null },
+      currentApplicationId,
+      ipHash,
+      now
+    });
+
+    expect(result).toEqual({ code: "stale_application", kind: "noop" });
+    expect(mocks.recordDecision).not.toHaveBeenCalled();
+    expect(mocks.recordReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate when the durable job application differs from its command", async () => {
+    transaction.discordInteractionJob.findUnique.mockResolvedValue({ sourceApplicationId: "application-2" });
+
+    const result = await processDiscordReservationOperation({
+      command: operationCommand("accept", "interaction-job-mismatch"),
+      currentApplicationId,
+      ipHash,
+      now
+    });
+
+    expect(result).toEqual({ code: "stale_application", kind: "noop" });
+    expect(mocks.recordDecision).not.toHaveBeenCalled();
+    expect(mocks.recordReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate a job-backed command after its durable job disappears", async () => {
+    transaction.discordInteractionJob.findUnique.mockResolvedValue(null);
+
+    const result = await processDiscordReservationOperation({
+      command: operationCommand("accept", "interaction-missing-job"),
+      currentApplicationId,
+      ipHash,
+      now
+    });
+
+    expect(result).toEqual({ code: "stale_application", kind: "noop" });
     expect(mocks.recordDecision).not.toHaveBeenCalled();
     expect(mocks.recordReceipt).not.toHaveBeenCalled();
   });
@@ -413,6 +488,7 @@ function lifecycleCommand(kind: "admin_cancel" | "no_show") {
     localActorId: "admin-1",
     renderedControlEpoch: 7,
     reservationId: "reservation-1",
+    sourceApplicationId: "application-1",
     sourceChannelId: "channel-1",
     sourceGuildId: "guild-1",
     sourceMessageId: "message-1",

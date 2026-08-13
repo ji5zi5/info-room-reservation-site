@@ -16,6 +16,7 @@ const config: DiscordApplicationConfig = {
 const source = {
   discordActorId: "44444444444444444",
   localActorId: "local-admin",
+  sourceApplicationId: config.applicationId,
   sourceChannelId: config.channelId,
   sourceGuildId: config.guildId
 } as const;
@@ -61,6 +62,22 @@ describe("current Discord reservation actor authorization", () => {
       config,
       member: { kind: "found", roleIds: [config.adminRoleId] },
       source: { ...source, sourceChannelId: "99999999999999999" }
+    })).toEqual({ code: "discord_config_mismatch", kind: "terminal_failure" });
+  });
+
+  it("abandons a job persisted for another Discord application", () => {
+    expect(authorizeCurrentDiscordReservationActor({
+      config,
+      member: { kind: "found", roleIds: [config.adminRoleId] },
+      source: { ...source, sourceApplicationId: "99999999999999999" }
+    })).toEqual({ code: "discord_config_mismatch", kind: "terminal_failure" });
+  });
+
+  it("abandons an unbound legacy job", () => {
+    expect(authorizeCurrentDiscordReservationActor({
+      config,
+      member: { kind: "found", roleIds: [config.adminRoleId] },
+      source: { ...source, sourceApplicationId: null }
     })).toEqual({ code: "discord_config_mismatch", kind: "terminal_failure" });
   });
 });

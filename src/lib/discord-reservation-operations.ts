@@ -18,6 +18,7 @@ type OperationBase = {
   readonly localActorId: string;
   readonly renderedControlEpoch: number;
   readonly reservationId: string;
+  readonly sourceApplicationId: string | null;
   readonly sourceChannelId: string;
   readonly sourceGuildId: string;
   readonly sourceMessageId: string;
@@ -45,6 +46,7 @@ export type DiscordReservationOperationResult =
         | "not_closed"
         | "reservation_not_found"
         | "stale_actor"
+        | "stale_application"
         | "stale_control"
         | "stale_message"
         | "stale_receipt"
@@ -69,8 +71,19 @@ const terminalResultSchema = z.discriminatedUnion("kind", [
 
 export async function processDiscordReservationOperation(input: {
   readonly command: DiscordReservationOperationCommand;
+  readonly currentApplicationId: string;
   readonly ipHash: string;
   readonly now: Date;
+}): Promise<DiscordReservationOperationResult> {
+  return processOperation({ ...input, persistedJobRequired: true });
+}
+
+async function processOperation(input: {
+  readonly command: DiscordReservationOperationCommand;
+  readonly currentApplicationId: string;
+  readonly ipHash: string;
+  readonly now: Date;
+  readonly persistedJobRequired: boolean;
 }): Promise<DiscordReservationOperationResult> {
   const resolved = await withDatabaseContext({
     actor: systemDatabaseActor(),
@@ -118,6 +131,7 @@ export async function processDiscordReservationDecision(input: {
     readonly sourceMessageId: string;
     readonly studentNumber: string;
   };
+  readonly currentApplicationId: string;
   readonly ipHash: string;
   readonly now: Date;
 }): Promise<DiscordReservationDecisionResult> {
@@ -129,17 +143,20 @@ export async function processDiscordReservationDecision(input: {
     localActorId: legacy.localActorId,
     renderedControlEpoch: legacy.renderedControlEpoch,
     reservationId: input.command.reservationId,
+    sourceApplicationId: input.currentApplicationId,
     sourceChannelId: legacy.channelId,
     sourceGuildId: legacy.guildId,
     sourceMessageId: input.command.sourceMessageId,
     studentNumber: input.command.studentNumber
   };
-  const result = await processDiscordReservationOperation({
+  const result = await processOperation({
     command: input.command.kind === "accept"
       ? { ...base, kind: "accept" }
       : { ...base, kind: "reject", reason: input.command.reason ?? "Discord 관리자 거절" },
+    currentApplicationId: input.currentApplicationId,
     ipHash: input.ipHash,
-    now: input.now
+    now: input.now,
+    persistedJobRequired: false
   });
   if (result.kind === "no_show") {
     throw new DiscordReservationDecisionVariantError(result.kind);
@@ -167,25 +184,40 @@ export function selectDiscordReservationSourceMessageTerminalState(input: {
 type TransactionInput = {
   readonly actor: { readonly id: string; readonly role: "ADMIN" };
   readonly command: DiscordReservationOperationCommand;
+  readonly currentApplicationId: string;
   readonly ipHash: string;
   readonly now: Date;
+  readonly persistedJobRequired: boolean;
   readonly targetUserId: string;
   readonly transaction: Prisma.TransactionClient;
 };
 
 async function processInTransaction(input: TransactionInput): Promise<DiscordReservationOperationResult> {
-  const [currentActor, reservation, message, controls] = await Promise.all([
+  const [currentActor, reservation, message, job, controls] = await Promise.all([
     input.transaction.user.findUnique({ select: { id: true, role: true, studentNumber: true }, where: { id: input.actor.id } }),
     input.transaction.reservation.findUnique({ where: { id: input.command.reservationId } }),
     input.transaction.discordReservationMessage.findUnique({
       select: { channelId: true, decision: true, guildId: true, messageId: true, renderedSourceEpoch: true },
       where: { reservationId: input.command.reservationId }
     }),
+    input.transaction.discordInteractionJob.findUnique({
+      select: { sourceApplicationId: true },
+      where: { interactionId: input.command.interactionId }
+    }),
     input.transaction.$queryRaw<readonly { readonly enabled: boolean; readonly epoch: number }[]>(Prisma.sql`
       SELECT "enabled", "epoch" FROM "DiscordOperationsControl"
       WHERE "id" = 'discord-operations' FOR SHARE
     `)
   ]);
+  if (
+    input.command.sourceApplicationId === null ||
+    input.command.sourceApplicationId !== input.currentApplicationId ||
+    (job === null
+      ? input.persistedJobRequired
+      : job.sourceApplicationId !== input.command.sourceApplicationId)
+  ) {
+    return { code: "stale_application", kind: "noop" };
+  }
   const replay = await findDiscordInteractionTerminalResult(input.transaction, input.command);
   if (replay !== null) return parseTerminalResult(replay);
   if (

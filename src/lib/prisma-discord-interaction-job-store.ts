@@ -21,6 +21,7 @@ export type DiscordInteractionEnqueueInput = {
   readonly localActorId: string;
   readonly renderedEpoch: number;
   readonly reservationId: string;
+  readonly sourceApplicationId: string;
   readonly sourceChannelId: string;
   readonly sourceGuildId: string;
   readonly sourceMessageId: string;
@@ -86,8 +87,8 @@ export const prismaDiscordInteractionJobStore: DiscordInteractionJobStore = {
     status: input.result.status
   }),
   completeStale: (input) => finishClaim(input.claim, {
-    errorCode: "discord_control_stale",
-    lastError: "CONTROL_EPOCH",
+    errorCode: input.errorCode ?? "discord_control_stale",
+    lastError: input.errorCode === undefined ? "CONTROL_EPOCH" : "APPLICATION_BINDING_REVIEW",
     nextAttemptAt: null,
     status: "STALE",
     terminalResult: input.terminalResult
@@ -159,6 +160,7 @@ async function claimDiscordInteractionJobs(
           localActorId: candidate.localActorId,
           renderedEpoch: control.epoch,
           reservationId: candidate.reservationId,
+          sourceApplicationId: candidate.sourceApplicationId,
           sourceChannelId: candidate.sourceChannelId,
           sourceGuildId: candidate.sourceGuildId,
           sourceMessageId: candidate.sourceMessageId

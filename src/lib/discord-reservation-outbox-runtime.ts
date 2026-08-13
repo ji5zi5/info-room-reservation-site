@@ -1,7 +1,10 @@
 import type { DiscordApplicationConfig } from "./discord-app-config";
 import { createDiscordBotClient, type DiscordBotClient, type DiscordGuildMemberClient } from "./discord-bot";
 import type { DiscordInteractionDispatchResult } from "./discord-interaction-job-runner";
-import { authorizeCurrentDiscordReservationActor } from "./discord-interaction-authorization";
+import {
+  authorizeCurrentDiscordReservationActor,
+  isCurrentDiscordReservationSource
+} from "./discord-interaction-authorization";
 import { sendDiscordWebhook } from "./discord-notifications";
 import { loadDiscordReservationSnapshot } from "./discord-reservation-snapshot";
 import { parseServerEnv } from "./env";
@@ -23,6 +26,9 @@ export async function dispatchDiscordReservationOperation(input: {
   if (config === null) {
     return { errorCode: "discord_config_missing", errorType: "CONFIG", kind: "terminal_failure" };
   }
+  if (!isCurrentDiscordReservationSource({ config, source: input.command })) {
+    return { errorCode: "discord_config_mismatch", errorType: "DISCORD_AUTHORIZATION", kind: "terminal_failure" };
+  }
   const authorization = authorizeCurrentDiscordReservationActor({
     config,
     member: await createDiscordBotClient({ applicationId: config.applicationId, botToken: config.botToken })
@@ -37,7 +43,10 @@ export async function dispatchDiscordReservationOperation(input: {
       ) {
         return { terminalResult: { code: "stale_actor_mapping" }, kind: "stale" };
       }
-      const result = await processDiscordReservationOperation(input);
+      const result = await processDiscordReservationOperation({
+        ...input,
+        currentApplicationId: config.applicationId
+      });
       return result.kind === "accepted" || result.kind === "cancelled" || result.kind === "no_show"
         ? { kind: "succeeded", terminalResult: result }
         : { kind: "stale", terminalResult: result };

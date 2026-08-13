@@ -32,6 +32,11 @@ const DISCORD_V2_MIGRATION_PATH = join(
   "20260811150000_add_discord_ops_v2_foundations", "migration.sql"
 );
 
+const DISCORD_APPLICATION_BINDING_MIGRATION_PATH = join(
+  process.cwd(), "prisma", "migrations",
+  "20260813103000_bind_discord_interaction_application", "migration.sql"
+);
+
 const PRISMA_MIGRATION_ROOT = join(process.cwd(), "prisma", "migrations");
 const PRISMA_SCHEMA_PATH = join(process.cwd(), "prisma", "schema.prisma");
 const BAD_RUNTIME_ROLE_MIGRATION = "20260729060000_add_limited_runtime_role";
@@ -67,6 +72,32 @@ function prismaTableNames(): readonly string[] {
 }
 
 describe("Postgres row level security policy migration", () => {
+  it("expands Discord application binding as nullable and gates readiness and activation", () => {
+    const schema = readFileSync(PRISMA_SCHEMA_PATH, "utf8");
+    const sql = readFileSync(DISCORD_APPLICATION_BINDING_MIGRATION_PATH, "utf8");
+
+    expect(schema).toMatch(/sourceApplicationId\s+String\?/u);
+    expect(sql).toMatch(/^BEGIN;/u);
+    expect(sql).toMatch(/COMMIT;\s*$/u);
+    expect(sql).toContain("discord operations v2 schema contract is required");
+    expect(sql).toContain('ADD COLUMN "sourceApplicationId" TEXT;');
+    expect(sql).not.toMatch(/"sourceApplicationId"\s+TEXT\s+NOT NULL/iu);
+    expect(sql).toContain("WHERE \"sourceApplicationId\" IS NULL");
+    expect(sql).toContain("AND \"status\" IN ('PENDING', 'PROCESSING', 'RETRY')");
+    expect(sql).toContain("set_config('app.current_user_role', 'SYSTEM', true)");
+    expect(sql).toContain('CREATE TRIGGER "ApplicationDeploymentReceipt_bound_interaction_jobs"');
+    expect(sql).toContain('CREATE TRIGGER "DiscordOperationsControl_bound_interaction_jobs"');
+    expect(sql).toContain('ALTER TABLE "DiscordInteractionJob" FORCE ROW LEVEL SECURITY;');
+    expect(sql).toContain('OLD."sourceApplicationId"');
+    expect(sql).toContain('NEW."sourceApplicationId"');
+    expect(sql).toContain("ALTER FUNCTION app_private.require_bound_discord_interaction_jobs()\n  OWNER TO info_room_activation_owner;");
+    expect(sql).toContain("REVOKE ALL ON FUNCTION app_private.require_bound_discord_interaction_jobs()\n  FROM PUBLIC, info_room_runtime;");
+    expect(sql).toContain('GRANT SELECT ON TABLE "DiscordInteractionJob" TO info_room_activation_owner;');
+    expect(sql).toContain('CREATE POLICY "discord_interaction_job_admin_system_all"');
+    expect(sql.indexOf('CREATE TRIGGER "ApplicationDeploymentReceipt_bound_interaction_jobs"'))
+      .toBeLessThan(sql.indexOf("ALTER FUNCTION app_private.require_bound_discord_interaction_jobs()"));
+  });
+
   it("adds forced-RLS Discord v2 foundations with owner-only activation state", () => {
     const sql = readFileSync(DISCORD_V2_MIGRATION_PATH, "utf8");
     for (const table of ["DiscordInteractionJob", "DiscordOperationsControl", "SchemaCompatibility", "ApplicationDeploymentReceipt"]) {

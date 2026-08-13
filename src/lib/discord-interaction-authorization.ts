@@ -35,20 +35,33 @@ export type CurrentDiscordReservationActorAuthorization =
     }
   | { readonly code: string; readonly kind: "retryable_failure" | "terminal_failure" };
 
+type CurrentDiscordReservationSource = {
+  readonly sourceApplicationId: string | null;
+  readonly sourceChannelId: string;
+  readonly sourceGuildId: string;
+};
+
+export function isCurrentDiscordReservationSource(input: {
+  readonly config: DiscordApplicationConfig;
+  readonly source: CurrentDiscordReservationSource;
+}): boolean {
+  return input.source.sourceApplicationId === input.config.applicationId &&
+    input.source.sourceGuildId === input.config.guildId &&
+    input.source.sourceChannelId === input.config.channelId;
+}
+
 export function authorizeCurrentDiscordReservationActor(input: {
   readonly config: DiscordApplicationConfig;
   readonly member: DiscordGuildMemberLookupResult;
   readonly source: {
     readonly discordActorId: string;
     readonly localActorId: string;
+    readonly sourceApplicationId: string | null;
     readonly sourceChannelId: string;
     readonly sourceGuildId: string;
   };
 }): CurrentDiscordReservationActorAuthorization {
-  if (
-    input.source.sourceGuildId !== input.config.guildId ||
-    input.source.sourceChannelId !== input.config.channelId
-  ) {
+  if (!isCurrentDiscordReservationSource(input)) {
     return { code: "discord_config_mismatch", kind: "terminal_failure" };
   }
   switch (input.member.kind) {
