@@ -1,4 +1,5 @@
-import { STUDY_PERIODS, type StudyPeriod } from "./study-periods";
+import { addDays, toKstDate } from "./date";
+import { getStudyPeriodLabel, STUDY_PERIODS, type StudyPeriod } from "./study-periods";
 
 export type StudentStatusUser = {
   readonly bookingStatus: string;
@@ -9,40 +10,47 @@ export type StudentStatusUser = {
 };
 
 type StudentStatusPeriod = {
-  readonly label: string;
   readonly myReservationId: string | null;
   readonly studyPeriod: StudyPeriod;
 };
 
-export type StudentCurrentReservation = {
-  readonly canCancel: boolean;
-  readonly date: string;
-  readonly label: string;
-  readonly reservationId: string;
-};
+export class StudentCurrentReservation {
+  public constructor(
+    public readonly date: string,
+    public readonly studyPeriod: StudyPeriod,
+    public readonly reservationId: string
+  ) {}
+
+  public get label(): string {
+    return getStudyPeriodLabel(this.studyPeriod);
+  }
+}
 
 export function collectStudentCurrentReservations(
-  periodsByDate: Readonly<Record<string, readonly StudentStatusPeriod[] | undefined>>
+  periodsByDate: Readonly<Record<string, readonly StudentStatusPeriod[] | undefined>>,
+  now: Date = new Date()
 ): readonly StudentCurrentReservation[] {
+  const today = toKstDate(now);
+  const activeWeekStart = addDays(today, mondayOffset(today));
+  const activeWeekEnd = addDays(activeWeekStart, 4);
+
   return Object.entries(periodsByDate)
+    .filter(([date]) => date >= today && date >= activeWeekStart && date <= activeWeekEnd)
     .flatMap(([date, periods]) =>
       (periods ?? [])
-        .filter((period) => period.myReservationId !== null)
-        .map((period) => ({
-          canCancel: true,
-          date,
-          label: period.label,
-          reservationId: period.myReservationId ?? "",
-          studyPeriod: period.studyPeriod
-        }))
+        .flatMap((period) =>
+          period.myReservationId === null
+            ? []
+            : [
+                new StudentCurrentReservation(date, period.studyPeriod, period.myReservationId)
+              ]
+        )
     )
-    .filter((reservation) => reservation.reservationId)
     .sort(
       (left, right) =>
         left.date.localeCompare(right.date) ||
         STUDY_PERIODS.indexOf(left.studyPeriod) - STUDY_PERIODS.indexOf(right.studyPeriod)
-    )
-    .map(({ studyPeriod: _studyPeriod, ...reservation }) => reservation);
+    );
 }
 
 export function isStudentRestrictionActive(user: StudentStatusUser, now = new Date()): boolean {
@@ -128,6 +136,11 @@ export function formatKstTime(value: string | Date): string {
 function compactDateTime(value: string): string {
   const formatted = formatKstDateTime(value);
   return formatted.replace(/\D/gu, "").slice(2);
+}
+
+function mondayOffset(date: string): number {
+  const dayOfWeek = new Date(`${date}T12:00:00+09:00`).getUTCDay();
+  return dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
 }
 
 function part(parts: readonly Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): string {
