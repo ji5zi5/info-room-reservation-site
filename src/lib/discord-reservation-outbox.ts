@@ -1,11 +1,11 @@
-import { processDiscordInitialClaim, type InitialClaimResult } from "./discord-reservation-outbox-initial";
+import { processDiscordInitialClaim } from "./discord-reservation-outbox-initial";
 import { defaultDiscordReservationOutboxDependencies } from "./discord-reservation-outbox-runtime";
 import { processDiscordSyncClaim, type SyncClaimResult } from "./discord-reservation-outbox-sync";
-import type {
-  DiscordReservationOutboxDependencies,
-  DiscordReservationOutboxRunResult,
-  InitialRunSummary,
-  SyncRunSummary
+import {
+  summarizeInitialRun,
+  type DiscordReservationOutboxDependencies,
+  type DiscordReservationOutboxRunResult,
+  type SyncRunSummary
 } from "./discord-reservation-outbox-contracts";
 import type {
   DiscordInitialSendClaim,
@@ -35,7 +35,7 @@ export function createDiscordReservationOutbox(
       syncClaims.map((claim) => processDiscordSyncClaim(dependencies, claim, input.now))
     );
     return {
-      initial: summarizeInitial(initialResults),
+      initial: summarizeInitialRun(initialResults),
       kind: "processed",
       sync: summarizeSync(syncResults)
     };
@@ -50,15 +50,6 @@ export async function runDiscordReservationOutbox(input: {
     return { kind: "skipped", reason: "no_database_mock" };
   }
   return createDiscordReservationOutbox(defaultDiscordReservationOutboxDependencies())(input);
-}
-
-function summarizeInitial(results: readonly InitialClaimResult[]): InitialRunSummary {
-  return {
-    claimed: results.length,
-    retried: results.filter((result) => result === "retried").length,
-    sent: results.filter((result) => result === "sent").length,
-    terminal: results.filter((result) => result === "terminal").length
-  };
 }
 
 function summarizeSync(results: readonly SyncClaimResult[]): SyncRunSummary {

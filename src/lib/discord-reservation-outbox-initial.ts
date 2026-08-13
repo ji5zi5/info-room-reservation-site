@@ -6,14 +6,17 @@ import type { NotificationSettings } from "./notification-settings";
 import type { DiscordInitialSendClaim } from "./prisma-discord-reservation-message-repository";
 import type { ReservationCreatedNotificationResult } from "./reservation-created-notification-service";
 import type { Reservation } from "./reservation-service";
-import type { DiscordReservationOutboxDependencies } from "./discord-reservation-outbox-contracts";
+import type {
+  DiscordReservationOutboxDependencies,
+  InitialClaimResult
+} from "./discord-reservation-outbox-contracts";
 import { evaluateDiscordOperationFence } from "./discord-operations-repair-policy";
 import type { DiscordOperationsControlState } from "./discord-operations-repair-policy";
 
 // allow: SIZE_OK — This file is the auditable initial-send state machine plus its legacy webhook boundary.
 const INITIAL_POST_DEADLINE_MS = 10_000;
 
-export type InitialClaimResult = "retried" | "review" | "sent" | "terminal";
+export type { InitialClaimResult } from "./discord-reservation-outbox-contracts";
 
 export async function reconcileExpiredDiscordInitialPosts(
   dependencies: DiscordReservationOutboxDependencies,

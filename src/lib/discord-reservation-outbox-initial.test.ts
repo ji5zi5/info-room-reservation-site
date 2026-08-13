@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DiscordReservationOutboxDependencies } from "./discord-reservation-outbox-contracts";
 import type { DiscordBotClient, DiscordBotDeliveryResult } from "./discord-bot";
 import type { DiscordReservationSnapshotResult } from "./discord-reservation-snapshot";
+import { createDiscordReservationOutbox } from "./discord-reservation-outbox";
 import {
   processDiscordInitialClaim,
   reconcileExpiredDiscordInitialPosts
@@ -93,11 +94,34 @@ describe("Discord reservation initial POST", () => {
     expect(dependencies.repository.reconcileExpiredInitialPosts).toHaveBeenCalledWith(now);
     expect(dependencies.bot.createChannelMessage).not.toHaveBeenCalled();
   });
+
+  it("reports review outcomes explicitly in the initial run summary", async () => {
+    const dependencies = readyDependencies({
+      delivery: {
+        code: "discord_network_error",
+        kind: "unknown",
+        message: "response lost",
+        outcome: "UNKNOWN"
+      },
+      initialClaims: [claim]
+    });
+
+    const result = await createDiscordReservationOutbox(dependencies)({ now });
+
+    expect(result.initial).toEqual({
+      claimed: 1,
+      retried: 0,
+      review: 1,
+      sent: 0,
+      terminal: 0
+    });
+  });
 });
 
 function readyDependencies(input: Readonly<{
   delivery?: DiscordBotDeliveryResult;
   expiredPostingCount?: number;
+  initialClaims?: readonly (typeof claim)[];
   posting?: boolean;
   saveSuccess?: boolean;
 }> = {}) {
@@ -105,7 +129,7 @@ function readyDependencies(input: Readonly<{
     beginInitialSendPost: vi.fn(async () => input.posting ?? true),
     beginInitialSendTerminalDelivery: vi.fn(async () => true),
     claimInitialSend: vi.fn(async () => null),
-    claimInitialSends: vi.fn(async () => []),
+    claimInitialSends: vi.fn(async () => input.initialClaims ?? []),
     claimMessageSync: vi.fn(async () => null),
     claimMessageSyncs: vi.fn(async () => []),
     markInitialSendPendingReview: vi.fn(async () => true),

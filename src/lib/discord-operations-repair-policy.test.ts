@@ -10,8 +10,20 @@ import {
 describe("Discord operations repair policy", () => {
   it.each([
     [
+      { ambiguity: "definite_non_accepting", attemptsExhausted: false, kind: "initial_send", status: "FAILED" },
+      ["RETRY"]
+    ],
+    [
       { ambiguity: "definite_non_accepting", attemptsExhausted: false, kind: "initial_send", status: "RETRY" },
       ["RETRY"]
+    ],
+    [
+      { ambiguity: "definite_non_accepting", attemptsExhausted: true, kind: "initial_send", status: "FAILED" },
+      []
+    ],
+    [
+      { ambiguity: "definite_non_accepting", attemptsExhausted: true, kind: "initial_send", status: "RETRY" },
+      []
     ],
     [
       { kind: "initial_send", status: "PENDING_REVIEW", verification: "NOT_STARTED" },
@@ -19,8 +31,13 @@ describe("Discord operations repair policy", () => {
     ],
     [{ kind: "source_sync", sourceMessageId: "message", status: "REVISION_LAG" }, ["SYNC"]],
     [{ kind: "source_controls", sourceMessageId: "message", status: "STALE" }, ["REMOVE_CONTROLS"]],
+    [{ kind: "source_controls", sourceMessageId: "message", status: "TERMINAL" }, ["REMOVE_CONTROLS"]],
     [
       { kind: "unresolved", nonceTombstoneRetained: true, status: "EXHAUSTED" },
+      ["ABANDON"]
+    ],
+    [
+      { kind: "unresolved", nonceTombstoneRetained: true, status: "UNRESOLVED" },
       ["ABANDON"]
     ],
     [{ kind: "healthy" }, []]
@@ -31,6 +48,7 @@ describe("Discord operations repair policy", () => {
   it.each([
     "ERROR",
     "MULTIPLE",
+    "NOT_STARTED",
     "PARTIAL",
     "ZERO_COMPLETE",
     "ZERO_PARTIAL"
@@ -55,8 +73,13 @@ describe("Discord operations repair policy", () => {
   });
 
   it.each(["CLAIM", "INITIAL_POST", "MUTATION", "SOURCE_PATCH"] as const)(
-    "fences %s while disabled, draining, or on a stale epoch",
+    "allows or fences %s for current, disabled, draining, and stale control state",
     (stage) => {
+      expect(evaluateDiscordOperationFence({
+        control: { enabled: true, epoch: 4, pendingRemoteCleanup: false },
+        expectedEpoch: 4,
+        stage
+      })).toEqual({ epoch: 4, kind: "allowed" });
       expect(evaluateDiscordOperationFence({
         control: { enabled: false, epoch: 4, pendingRemoteCleanup: false },
         expectedEpoch: 4,

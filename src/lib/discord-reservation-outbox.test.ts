@@ -71,7 +71,7 @@ describe("Discord reservation outbox initial delivery", () => {
     });
   });
 
-  it("retries UNKNOWN bot delivery without webhook fallback", async () => {
+  it("reports UNKNOWN bot delivery for review without webhook fallback", async () => {
     dependencies.bot.createChannelMessage.mockResolvedValue({
       code: "discord_timeout",
       kind: "unknown",
@@ -81,26 +81,21 @@ describe("Discord reservation outbox initial delivery", () => {
 
     const result = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
 
-    expect(result.initial).toMatchObject({ retried: 1 });
+    expect(result.initial).toMatchObject({ retried: 0, review: 1 });
     expect(dependencies.sendWebhook).not.toHaveBeenCalled();
-    expect(dependencies.repository.saveInitialSendFailure).toHaveBeenCalledWith(expect.objectContaining({
-      outcome: "UNKNOWN",
-      retryable: true
-    }));
+    expect(dependencies.repository.saveInitialSendFailure).not.toHaveBeenCalled();
   });
 
-  it("performs exactly one webhook fallback after a definite bot failure", async () => {
+  it("retries a definite bot failure without webhook fallback", async () => {
     dependencies.bot.createChannelMessage.mockResolvedValue(botFailure());
-    dependencies.sendWebhook.mockResolvedValue({ kind: "sent", messageIds: ["fallback-message"] });
 
-    await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
-    dependencies.repository.claimInitialSend.mockResolvedValue(null);
-    await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
+    const result = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
 
-    expect(dependencies.sendWebhook).toHaveBeenCalledTimes(1);
+    expect(result.initial).toMatchObject({ retried: 1, review: 0 });
+    expect(dependencies.sendWebhook).not.toHaveBeenCalled();
     expect(dependencies.repository.saveInitialSendFailure).toHaveBeenCalledWith(expect.objectContaining({
-      outcome: "WEBHOOK_FALLBACK_SENT",
-      retryable: false
+      outcome: "FAILED",
+      retryable: true
     }));
   });
 
@@ -122,11 +117,11 @@ describe("Discord reservation outbox initial delivery", () => {
   });
 
   it("keeps a successful webhook terminal when the terminal database save throws", async () => {
-    dependencies.bot.createChannelMessage.mockResolvedValue(botFailure());
+    dependencies.getApplicationConfig.mockReturnValue(null);
     dependencies.repository.saveInitialSendFailure.mockRejectedValueOnce(new Error("terminal save unavailable"));
     dependencies.repository.claimInitialSend
       .mockResolvedValueOnce(claim)
-      .mockResolvedValueOnce({ ...claim, attempts: 2, outcome: "WEBHOOK_FALLBACK_STARTED" });
+      .mockResolvedValueOnce({ ...claim, attempts: 2, outcome: "WEBHOOK_STARTED" });
 
     const first = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
     const second = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
@@ -138,16 +133,16 @@ describe("Discord reservation outbox initial delivery", () => {
       expect.objectContaining({ retryable: true })
     );
     expect(dependencies.repository.saveInitialSendFailure).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "WEBHOOK_FALLBACK_INTERRUPTED", retryable: false })
+      expect.objectContaining({ outcome: "WEBHOOK_INTERRUPTED", retryable: false })
     );
   });
 
   it("terminalizes an unexpected sender throw without reopening webhook retry", async () => {
-    dependencies.bot.createChannelMessage.mockResolvedValue(botFailure());
+    dependencies.getApplicationConfig.mockReturnValue(null);
     dependencies.sendWebhook.mockRejectedValueOnce(new Error("unexpected sender failure"));
     dependencies.repository.claimInitialSend
       .mockResolvedValueOnce(claim)
-      .mockResolvedValueOnce({ ...claim, attempts: 2, outcome: "WEBHOOK_FALLBACK_STARTED" });
+      .mockResolvedValueOnce({ ...claim, attempts: 2, outcome: "WEBHOOK_STARTED" });
 
     const first = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
     const second = await createDiscordReservationOutbox(dependencies)({ now, reservationId: claim.reservationId });
@@ -159,7 +154,7 @@ describe("Discord reservation outbox initial delivery", () => {
       expect.objectContaining({ retryable: true })
     );
     expect(dependencies.repository.saveInitialSendFailure).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "WEBHOOK_FALLBACK_INTERRUPTED", retryable: false })
+      expect.objectContaining({ outcome: "WEBHOOK_INTERRUPTED", retryable: false })
     );
   });
 
