@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   repositoryMocks,
@@ -9,6 +9,7 @@ import {
   DISCORD_CLEANUP_BATCH_SIZE,
   prismaDiscordReservationMessageRepository
 } from "./prisma-discord-reservation-message-repository";
+import { deleteExpiredInteractionJobs } from "./prisma-discord-reservation-message-cleanup";
 
 describe("Prisma Discord reservation message cleanup", () => {
   beforeEach(resetRepositoryMocks);
@@ -53,6 +54,30 @@ describe("Prisma Discord reservation message cleanup", () => {
         messageId: null,
         reservationId: { in: ["webhook-only"] },
         syncStatus: { in: ["SYNCED", "ABANDONED"] }
+      }
+    });
+  });
+
+  it("deletes only terminal Discord interaction jobs after their 30-day expiry", async () => {
+    // Given: one expired terminal job selected by the retention query.
+    const rows = [{ interactionId: "terminal-job" }];
+    const transaction = {
+      discordInteractionJob: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue(rows)
+      }
+    };
+
+    // When: interaction-job retention runs.
+    const result = await deleteExpiredInteractionJobs(repositoryNow, transaction);
+
+    // Then: only expired succeeded, stale, or abandoned jobs are eligible.
+    expect(result).toEqual({ hasMore: false, processedCount: 1, remainingLowerBound: 0 });
+    expect(transaction.discordInteractionJob.deleteMany).toHaveBeenCalledWith({
+      where: {
+        expiresAt: { lte: repositoryNow },
+        interactionId: { in: ["terminal-job"] },
+        status: { in: ["SUCCEEDED", "STALE", "ABANDONED"] }
       }
     });
   });
