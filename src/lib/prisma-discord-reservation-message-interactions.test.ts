@@ -19,10 +19,13 @@ describe("Prisma Discord reservation message interaction writes", () => {
     const recorded = await recordDiscordReservationDecision(repositoryMocks.transaction, {
       decision: "CANCELLED",
       discordActorId: "discord-user",
+      expectedDecision: null,
       localActorId: "admin",
       now: repositoryNow,
       reservationId: "reservation",
-      revision: "PRESERVE"
+      renderedSourceEpoch: 7,
+      revision: "PRESERVE",
+      sourceMessageId: "message"
     });
 
     expect(recorded).toBe(true);
@@ -33,8 +36,41 @@ describe("Prisma Discord reservation message interaction writes", () => {
         decisionDiscordActorId: "discord-user",
         decisionLocalActorId: "admin"
       },
-      where: { decision: null, reservationId: "reservation" }
+      where: {
+        decision: null,
+        messageId: "message",
+        renderedSourceEpoch: 7,
+        reservationId: "reservation"
+      }
     });
+  });
+
+  it("compares accepted source state, message identity, and rendered epoch for a follow-up transition", async () => {
+    // Given
+    repositoryMocks.transaction.discordReservationMessage.updateMany.mockResolvedValue({ count: 1 });
+
+    // When
+    await recordDiscordReservationDecision(repositoryMocks.transaction, {
+      decision: "NO_SHOW",
+      discordActorId: "discord-user",
+      expectedDecision: "ACCEPTED",
+      localActorId: "admin",
+      now: repositoryNow,
+      reservationId: "reservation",
+      renderedSourceEpoch: 9,
+      revision: "INCREMENT",
+      sourceMessageId: "source-message"
+    });
+
+    // Then
+    expect(repositoryMocks.transaction.discordReservationMessage.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        decision: "ACCEPTED",
+        messageId: "source-message",
+        renderedSourceEpoch: 9,
+        reservationId: "reservation"
+      }
+    }));
   });
 
   it("replays the stored terminal receipt after an interaction-id conflict", async () => {

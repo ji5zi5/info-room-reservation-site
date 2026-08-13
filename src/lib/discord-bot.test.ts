@@ -258,4 +258,46 @@ describe("Discord bot REST transport", () => {
       "Bot [redacted] /webhooks/123/[redacted]"
     );
   });
+
+  it.each([
+    [200, { kind: "found", roleIds: ["33333333333333333"] }],
+    [404, { kind: "missing" }],
+    [429, { code: "discord_http_429", kind: "retryable_failure" }],
+    [500, { code: "discord_http_500", kind: "retryable_failure" }],
+    [401, { code: "discord_http_401", kind: "terminal_failure" }],
+    [403, { code: "discord_http_403", kind: "terminal_failure" }]
+  ] as const)("classifies current guild-member lookup status %s", async (status, expected) => {
+    // Given
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async () => new Response(
+        status === 200 ? JSON.stringify({ roles: ["33333333333333333"] }) : null,
+        { headers: { "content-type": "application/json" }, status }
+      )
+    });
+
+    // When
+    const result = await bot.getGuildMember({ guildId: "555", userId: "444" });
+
+    // Then
+    expect(result).toEqual(expected);
+  });
+
+  it("classifies a current guild-member timeout as retryable", async () => {
+    // Given
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async () => {
+        throw new TimeoutError(new Request("https://discord.com/api/v10/guilds/555/members/444"));
+      }
+    });
+
+    // When / Then
+    await expect(bot.getGuildMember({ guildId: "555", userId: "444" })).resolves.toEqual({
+      code: "discord_timeout",
+      kind: "retryable_failure"
+    });
+  });
 });

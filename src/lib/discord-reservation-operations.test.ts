@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   findReceipt: vi.fn(),
   recordDecision: vi.fn(),
   recordReceipt: vi.fn(),
+  noShow: vi.fn(),
   systemSnapshot: vi.fn(),
   withDatabaseContext: vi.fn(),
   withDatabaseMutation: vi.fn()
@@ -21,13 +22,19 @@ vi.mock("./db-context", () => ({
 vi.mock("./admin-reservation-operations", () => ({
   cancelAdministratorReservationInTransaction: mocks.cancel
 }));
+vi.mock("./admin-no-show-operations", () => ({
+  markAdministratorReservationNoShowInTransaction: mocks.noShow
+}));
 vi.mock("./prisma-discord-reservation-message-repository", () => ({
   findDiscordInteractionTerminalResult: mocks.findReceipt,
-  recordDiscordInteractionReceipt: mocks.recordReceipt,
   recordDiscordReservationDecision: mocks.recordDecision
+}));
+vi.mock("./prisma-discord-reservation-message-interactions", () => ({
+  recordDiscordOperationReceipt: mocks.recordReceipt
 }));
 
 import {
+  processDiscordReservationOperation,
   processDiscordReservationDecision,
   selectDiscordReservationSourceMessageTerminalState
 } from "./discord-reservation-operations";
@@ -45,9 +52,11 @@ const reservation: Reservation = {
   userId: "student-1"
 };
 const transaction = {
+  $queryRaw: vi.fn(),
   adminAction: { create: vi.fn() },
   auditLog: { create: vi.fn() },
   discordReservationMessage: { findUnique: vi.fn() },
+  discordOperationsControl: { findUnique: vi.fn() },
   reservation: { findUnique: vi.fn() },
   user: { findUnique: vi.fn() }
 };
@@ -56,8 +65,14 @@ describe("Discord reservation decisions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.systemSnapshot.mockReturnValue({
-      actor: { id: "admin-1", role: "ADMIN" },
-      message: { decision: null, messageId: "message-1" },
+      actor: { id: "admin-1", role: "ADMIN", studentNumber: "test-admin-1" },
+      message: {
+        channelId: "channel-1",
+        decision: null,
+        guildId: "guild-1",
+        messageId: "message-1",
+        renderedSourceEpoch: 7
+      },
       reservation: { id: "reservation-1", status: "CONFIRMED", userId: "student-1" }
     });
     mocks.withDatabaseContext.mockImplementation(async () => mocks.systemSnapshot());
@@ -69,10 +84,15 @@ describe("Discord reservation decisions", () => {
     }));
     mocks.recordDecision.mockResolvedValue(true);
     mocks.cancel.mockResolvedValue({ kind: "ok", reservation: { ...reservation, status: "CANCELLED" } });
+    mocks.noShow.mockResolvedValue({ kind: "ok", reservation: { ...reservation, status: "NO_SHOW" } });
     transaction.adminAction.create.mockResolvedValue({ id: "accept-action" });
-    transaction.user.findUnique.mockResolvedValue({ id: "admin-1", role: "ADMIN" });
+    transaction.user.findUnique.mockResolvedValue({ id: "admin-1", role: "ADMIN", studentNumber: "test-admin-1" });
     transaction.reservation.findUnique.mockResolvedValue(reservation);
-    transaction.discordReservationMessage.findUnique.mockResolvedValue({ decision: null, messageId: "message-1" });
+    transaction.discordReservationMessage.findUnique.mockResolvedValue({
+      channelId: "channel-1", decision: null, guildId: "guild-1", messageId: "message-1", renderedSourceEpoch: 7
+    });
+    transaction.discordOperationsControl.findUnique.mockResolvedValue({ enabled: true, epoch: 7 });
+    transaction.$queryRaw.mockResolvedValue([{ enabled: true, epoch: 7 }]);
   });
 
   it("persists the exact transport-derived ipHash when accepting once", async () => {
@@ -121,7 +141,7 @@ describe("Discord reservation decisions", () => {
     expect(result).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
     expect(mocks.recordDecision).toHaveBeenCalledWith(transaction, expect.objectContaining({
       decision: "CANCELLED",
-      revision: "PRESERVE"
+      revision: "INCREMENT"
     }));
     expect(mocks.cancel).toHaveBeenCalledWith(transaction, {
       actor: { id: "admin-1", role: "ADMIN" },
@@ -145,17 +165,13 @@ describe("Discord reservation decisions", () => {
     expect(transaction.adminAction.create).not.toHaveBeenCalled();
   });
 
-  it("returns the first reservation outcome when a different interaction loses the receipt race", async () => {
-    mocks.recordReceipt.mockResolvedValue({
-      kind: "replayed",
-      terminalResult: { kind: "accepted", reservationId: "reservation-1" }
-    });
+  it("does not replay a receipt from a different interaction id", async () => {
 
     const result = await processDiscordReservationDecision({ command: command("reject"), ipHash, now });
 
-    expect(result).toEqual({ kind: "accepted", reservationId: "reservation-1" });
-    expect(mocks.recordDecision).not.toHaveBeenCalled();
-    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(result).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
+    expect(mocks.recordDecision).toHaveBeenCalledOnce();
+    expect(mocks.cancel).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -164,7 +180,10 @@ describe("Discord reservation decisions", () => {
   ])("does not enter a mutation for %s", async (_scenario, actor, code) => {
     mocks.systemSnapshot.mockReturnValue({
       actor,
-      message: { decision: null, messageId: "message-1" },
+      message: {
+        channelId: "channel-1", decision: null, guildId: "guild-1",
+        messageId: "message-1", renderedSourceEpoch: 7
+      },
       reservation: { id: "reservation-1", status: "CONFIRMED", userId: "student-1" }
     });
 
@@ -196,7 +215,12 @@ describe("Discord reservation decisions", () => {
 
   it("returns a typed no-op when the reservation disappeared before mutation", async () => {
     mocks.systemSnapshot.mockReturnValue({
-      actor: { id: "admin-1", role: "ADMIN" },
+      actor: { id: "admin-1", role: "ADMIN", studentNumber: "test-admin-1" },
+      message: {
+        channelId: "channel-1",
+        guildId: "guild-1",
+        renderedSourceEpoch: 7
+      },
       reservation: null
     });
 
@@ -223,6 +247,151 @@ describe("Discord reservation decisions", () => {
       reservationStatus: "CONFIRMED"
     })).toEqual({ kind: "accepted" });
   });
+
+  it("cancels an accepted reservation with a second receipt and the exact Discord admin source", async () => {
+    // Given
+    transaction.discordReservationMessage.findUnique.mockResolvedValue({
+      channelId: "channel-1",
+      decision: "ACCEPTED",
+      guildId: "guild-1",
+      messageId: "message-1",
+      renderedSourceEpoch: 7
+    });
+
+    // When
+    const result = await processDiscordReservationOperation({
+      command: lifecycleCommand("admin_cancel"), ipHash, now
+    });
+
+    // Then
+    expect(result).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
+    expect(mocks.cancel).toHaveBeenCalledWith(transaction, expect.objectContaining({
+      ipHash,
+      source: { kind: "DISCORD_ADMIN_CANCEL" }
+    }));
+    expect(mocks.recordReceipt).toHaveBeenCalledWith(transaction, expect.objectContaining({
+      interactionId: "interaction-follow-up",
+      intent: "ADMIN_CANCEL"
+    }));
+  });
+
+  it("marks an accepted closed reservation no-show through the shared service", async () => {
+    // Given
+    transaction.discordReservationMessage.findUnique.mockResolvedValue({
+      channelId: "channel-1",
+      decision: "ACCEPTED",
+      guildId: "guild-1",
+      messageId: "message-1",
+      renderedSourceEpoch: 7
+    });
+
+    // When
+    const result = await processDiscordReservationOperation({
+      command: lifecycleCommand("no_show"), ipHash, now
+    });
+
+    // Then
+    expect(result).toEqual({ kind: "no_show", reservationId: "reservation-1" });
+    expect(mocks.noShow).toHaveBeenCalledWith(transaction, expect.objectContaining({ ipHash, now }));
+  });
+
+  it("does not mutate when the rendered control epoch differs from current control", async () => {
+    // Given
+    transaction.discordReservationMessage.findUnique.mockResolvedValue({
+      channelId: "channel-1",
+      decision: "ACCEPTED",
+      guildId: "guild-1",
+      messageId: "message-1",
+      renderedSourceEpoch: 6
+    });
+
+    // When
+    const result = await processDiscordReservationOperation({
+      command: lifecycleCommand("admin_cancel"), ipHash, now
+    });
+
+    // Then
+    expect(result).toEqual({ code: "stale_control", kind: "noop" });
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(mocks.noShow).not.toHaveBeenCalled();
+    expect(mocks.recordReceipt).not.toHaveBeenCalled();
+  });
+
+  it("records two interaction receipts for accept followed by administrator cancellation", async () => {
+    // Given
+    let message = {
+      channelId: "channel-1", decision: null as string | null, guildId: "guild-1",
+      messageId: "message-1", renderedSourceEpoch: 7
+    };
+    transaction.discordReservationMessage.findUnique.mockImplementation(async () => message);
+    mocks.recordDecision.mockImplementation(async (_transaction, write) => {
+      message = { ...message, decision: write.decision };
+      return true;
+    });
+
+    // When
+    const accepted = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), ipHash, now });
+    const cancelled = await processDiscordReservationOperation({ command: operationCommand("admin_cancel", "interaction-cancel"), ipHash, now });
+
+    // Then
+    expect(accepted).toEqual({ kind: "accepted", reservationId: "reservation-1" });
+    expect(cancelled).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
+    expect(mocks.recordReceipt.mock.calls.map((call) => call[1].intent)).toEqual(["ACCEPT", "ADMIN_CANCEL"]);
+    expect(mocks.cancel).toHaveBeenCalledWith(transaction, expect.objectContaining({ source: { kind: "DISCORD_ADMIN_CANCEL" } }));
+  });
+
+  it("records two interaction receipts for accept followed by closed no-show", async () => {
+    // Given
+    let message = {
+      channelId: "channel-1", decision: null as string | null, guildId: "guild-1",
+      messageId: "message-1", renderedSourceEpoch: 7
+    };
+    transaction.discordReservationMessage.findUnique.mockImplementation(async () => message);
+    mocks.recordDecision.mockImplementation(async (_transaction, write) => {
+      message = { ...message, decision: write.decision };
+      return true;
+    });
+
+    // When
+    const accepted = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), ipHash, now });
+    const noShow = await processDiscordReservationOperation({ command: operationCommand("no_show", "interaction-no-show"), ipHash, now });
+
+    // Then
+    expect(accepted).toEqual({ kind: "accepted", reservationId: "reservation-1" });
+    expect(noShow).toEqual({ kind: "no_show", reservationId: "reservation-1" });
+    expect(mocks.recordReceipt.mock.calls.map((call) => call[1].intent)).toEqual(["ACCEPT", "NO_SHOW"]);
+    expect(mocks.noShow).toHaveBeenCalledOnce();
+  });
+
+  it("rejects pre-close no-show without a source-message transition or receipt", async () => {
+    // Given
+    transaction.discordReservationMessage.findUnique.mockResolvedValue({
+      channelId: "channel-1", decision: "ACCEPTED", guildId: "guild-1",
+      messageId: "message-1", renderedSourceEpoch: 7
+    });
+    mocks.noShow.mockResolvedValue({ kind: "not_closed" });
+
+    // When
+    const result = await processDiscordReservationOperation({ command: operationCommand("no_show", "interaction-no-show"), ipHash, now });
+
+    // Then
+    expect(result).toEqual({ code: "not_closed", kind: "noop" });
+    expect(mocks.recordDecision).not.toHaveBeenCalled();
+    expect(mocks.recordReceipt).not.toHaveBeenCalled();
+  });
+
+  it("rejects operations while Discord controls are disabled", async () => {
+    // Given
+    transaction.$queryRaw.mockResolvedValue([{ enabled: false, epoch: 7 }]);
+
+    // When
+    const result = await processDiscordReservationOperation({ command: operationCommand("accept", "interaction-accept"), ipHash, now });
+
+    // Then
+    expect(result).toEqual({ code: "stale_control", kind: "noop" });
+    expect(mocks.recordDecision).not.toHaveBeenCalled();
+    expect(mocks.recordReceipt).not.toHaveBeenCalled();
+  });
 });
 
 function command(kind: "accept" | "reject") {
@@ -235,4 +404,36 @@ function command(kind: "accept" | "reject") {
     studentNumber: "test-admin-1"
   } as const;
   return kind === "accept" ? { ...base, kind } as const : { ...base, kind, reason: "행사 준비" } as const;
+}
+
+function lifecycleCommand(kind: "admin_cancel" | "no_show") {
+  const base = {
+    discordActorId: "discord-1",
+    interactionId: "interaction-follow-up",
+    localActorId: "admin-1",
+    renderedControlEpoch: 7,
+    reservationId: "reservation-1",
+    sourceChannelId: "channel-1",
+    sourceGuildId: "guild-1",
+    sourceMessageId: "message-1",
+    studentNumber: "test-admin-1"
+  } as const;
+  return kind === "admin_cancel"
+    ? { ...base, kind, reason: "운영 처리" } as const
+    : { ...base, kind } as const;
+}
+
+function operationCommand(
+  kind: "accept" | "admin_cancel" | "no_show",
+  interactionId: string
+) {
+  const base = { ...lifecycleCommand("no_show"), interactionId };
+  switch (kind) {
+    case "accept":
+      return { ...base, kind } as const;
+    case "admin_cancel":
+      return { ...base, kind, reason: "운영 처리" } as const;
+    case "no_show":
+      return { ...base, kind } as const;
+  }
 }

@@ -138,6 +138,24 @@ describe("administrator reservation cancellation", () => {
     });
   });
 
+  it("persists Discord administrator cancellation provenance without masquerading as rejection", async () => {
+    // Given
+    const discordInput: AdministratorCancellationInput = {
+      ...input,
+      source: { kind: "DISCORD_ADMIN_CANCEL" }
+    };
+
+    // When
+    await cancelAdministratorReservationInTransaction(transactionClient(), discordInput);
+
+    // Then
+    expect(mocks.auditLogCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        detail: expect.stringContaining('"source":"DISCORD_ADMIN_CANCEL"')
+      })
+    });
+  });
+
   it("returns invalid_status without writing when the reservation is already terminal", async () => {
     // Given
     mocks.reservationFindUnique.mockResolvedValue({ ...reservation, status: "NO_SHOW" });
