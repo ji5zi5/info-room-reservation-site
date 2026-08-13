@@ -23,13 +23,56 @@ export type StudentNotificationActionRow = {
   } | null;
 };
 
+export type StudentNotificationPresentationInput =
+  | { readonly kind: "loaded"; readonly notifications: readonly StudentNotification[] }
+  | { readonly kind: "loading" }
+  | { readonly kind: "stale"; readonly notifications: readonly StudentNotification[] };
+
+export type StudentNotificationPresentation =
+  | { readonly count: 0; readonly kind: "empty"; readonly notifications: readonly [] }
+  | { readonly count: 0; readonly kind: "loading"; readonly notifications: readonly [] }
+  | {
+      readonly count: number;
+      readonly kind: "ready";
+      readonly notifications: readonly StudentNotification[];
+    }
+  | {
+      readonly count: number;
+      readonly kind: "stale";
+      readonly notifications: readonly StudentNotification[];
+    };
+
 const STUDENT_NOTIFICATION_ACTION_SET = new Set<string>(STUDENT_NOTIFICATION_ACTIONS);
+const STUDENT_NOTIFICATION_LIMIT = 5;
 
 export function buildStudentNotifications(rows: readonly StudentNotificationActionRow[]): readonly StudentNotification[] {
-  return rows.flatMap((row) => {
-    const notification = buildStudentNotification(row);
-    return notification ? [notification] : [];
-  });
+  return boundedRecentNotifications(
+    rows.flatMap((row) => {
+      const notification = buildStudentNotification(row);
+      return notification ? [notification] : [];
+    })
+  );
+}
+
+export function buildStudentNotificationPresentation(
+  input: StudentNotificationPresentationInput
+): StudentNotificationPresentation {
+  switch (input.kind) {
+    case "loading":
+      return { count: 0, kind: "loading", notifications: [] };
+    case "loaded": {
+      const notifications = boundedRecentNotifications(input.notifications);
+      return notifications.length === 0
+        ? { count: 0, kind: "empty", notifications: [] }
+        : { count: notifications.length, kind: "ready", notifications };
+    }
+    case "stale": {
+      const notifications = boundedRecentNotifications(input.notifications);
+      return { count: notifications.length, kind: "stale", notifications };
+    }
+    default:
+      return assertNeverPresentationInput(input);
+  }
 }
 
 function buildStudentNotification(row: StudentNotificationActionRow): StudentNotification | null {
@@ -68,6 +111,14 @@ function notificationReason(reason: string | null): string | null {
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
+function boundedRecentNotifications(
+  notifications: readonly StudentNotification[]
+): readonly StudentNotification[] {
+  return [...notifications]
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, STUDENT_NOTIFICATION_LIMIT);
+}
+
 function assertNever(value: never): never {
   throw new UnreachableStudentNotificationActionError(String(value));
 }
@@ -76,5 +127,16 @@ class UnreachableStudentNotificationActionError extends Error {
   public constructor(value: string) {
     super(`Unhandled student notification action: ${value}`);
     this.name = "UnreachableStudentNotificationActionError";
+  }
+}
+
+function assertNeverPresentationInput(value: never): never {
+  throw new UnreachableStudentNotificationPresentationError(String(value));
+}
+
+class UnreachableStudentNotificationPresentationError extends Error {
+  public constructor(value: string) {
+    super(`Unhandled student notification presentation input: ${value}`);
+    this.name = "UnreachableStudentNotificationPresentationError";
   }
 }
