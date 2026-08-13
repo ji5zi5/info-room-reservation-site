@@ -20,18 +20,20 @@ vi.mock("./prisma-discord-reservation-message-context", () => ({
 }));
 
 import {
+  abandonUnacknowledgedDiscordInteractionJob,
+  activateDiscordInteractionJob,
   DISCORD_INTERACTION_CLAIM_BATCH_SIZE,
   DISCORD_INTERACTION_CLAIM_LEASE_MS,
-  enqueueDiscordInteractionJob,
   getDiscordInteractionBacklogSummary,
-  prismaDiscordInteractionJobStore
+  prismaDiscordInteractionJobStore,
+  readDiscordInteractionHandshake,
+  stageDiscordInteractionJob
 } from "./prisma-discord-interaction-job-store";
 
 const now = new Date("2026-08-13T00:00:00.000Z");
 const command = {
   commandDigest: "sha256:command-a",
   discordActorId: "discord-admin",
-  handshakeStatus: "ACKNOWLEDGED" as const,
   interactionId: "interaction-1",
   intent: "accept",
   ipHash: "sha256:ip",
@@ -48,7 +50,7 @@ describe("Prisma Discord interaction job store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.withContext.mockImplementation(async (operation) => operation(mocks.transaction));
-    mocks.transaction.$queryRaw.mockResolvedValue([{ enabled: true, epoch: 7 }]);
+    mocks.transaction.$queryRaw.mockResolvedValue([{ enabled: true, epoch: 7, now }]);
     mocks.transaction.discordOperationsControl.findUnique.mockResolvedValue({ enabled: true, epoch: 7 });
     mocks.transaction.discordInteractionJob.findMany.mockResolvedValue([]);
     mocks.transaction.discordInteractionJob.updateMany.mockResolvedValue({ count: 0 });
@@ -60,9 +62,9 @@ describe("Prisma Discord interaction job store", () => {
     mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({ commandDigest: command.commandDigest });
 
     // When: the same signed command is delivered twice.
-    const first = await enqueueDiscordInteractionJob(command);
+    const first = await stageDiscordInteractionJob({ ...command, activationWindowMs: 1_500 });
     mocks.transaction.discordInteractionJob.createMany.mockResolvedValue({ count: 0 });
-    const duplicate = await enqueueDiscordInteractionJob(command);
+    const duplicate = await stageDiscordInteractionJob({ ...command, activationWindowMs: 1_500 });
 
     // Then: the caller observes one enqueue and one idempotent replay.
     expect(first).toEqual({ kind: "enqueued" });
@@ -75,10 +77,99 @@ describe("Prisma Discord interaction job store", () => {
     mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({ commandDigest: "sha256:original" });
 
     // When: an attacker reuses the ID with different command bytes.
-    const result = await enqueueDiscordInteractionJob(command);
+    const result = await stageDiscordInteractionJob({ ...command, activationWindowMs: 1_500 });
 
     // Then: conflict is terminal and no update path runs.
     expect(result).toEqual({ kind: "security_conflict" });
+    expect(mocks.transaction.discordInteractionJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("inserts only non-claimable STAGED state with an absolute DB-clock activation deadline", async () => {
+    // Given
+    mocks.transaction.discordInteractionJob.createMany.mockResolvedValue({ count: 1 });
+
+    // When
+    await stageDiscordInteractionJob({ ...command, activationWindowMs: 1_500 });
+
+    // Then
+    expect(mocks.transaction.discordInteractionJob.createMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        handshakeStatus: "STAGED",
+        nextAttemptAt: new Date(now.getTime() + 1_500),
+        status: "PENDING"
+      }),
+      skipDuplicates: true
+    });
+  });
+
+  it("activates only an unexpired matching STAGED row and makes it PENDING at DB now", async () => {
+    // Given
+    mocks.transaction.discordInteractionJob.updateMany.mockResolvedValue({ count: 1 });
+
+    // When
+    const result = await activateDiscordInteractionJob({ commandDigest: command.commandDigest, interactionId: command.interactionId });
+
+    // Then
+    expect(result).toEqual({ kind: "pending" });
+    expect(mocks.transaction.discordInteractionJob.updateMany).toHaveBeenCalledWith({
+      data: { handshakeStatus: "ACKNOWLEDGED", nextAttemptAt: now },
+      where: {
+        commandDigest: command.commandDigest,
+        handshakeStatus: "STAGED",
+        interactionId: command.interactionId,
+        nextAttemptAt: { gt: now },
+        status: "PENDING"
+      }
+    });
+  });
+
+  it("abandons STAGED at the deadline and delayed activation cannot revive it", async () => {
+    // Given
+    mocks.transaction.discordInteractionJob.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({
+      commandDigest: command.commandDigest,
+      handshakeStatus: "ABANDONED_UNACKED",
+      status: "ABANDONED"
+    });
+
+    // When
+    const abandoned = await abandonUnacknowledgedDiscordInteractionJob({
+      commandDigest: command.commandDigest,
+      interactionId: command.interactionId
+    });
+    const activation = await activateDiscordInteractionJob({
+      commandDigest: command.commandDigest,
+      interactionId: command.interactionId
+    });
+
+    // Then
+    expect(abandoned).toEqual({ kind: "abandoned" });
+    expect(activation).toEqual({ kind: "not_pending" });
+    expect(mocks.transaction.discordInteractionJob.updateMany.mock.calls[1]?.[0]?.where).toMatchObject({
+      handshakeStatus: "STAGED",
+      nextAttemptAt: { gt: now }
+    });
+  });
+
+  it("reads durable activation-won state without changing it", async () => {
+    // Given
+    mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({
+      commandDigest: command.commandDigest,
+      handshakeStatus: "ACKNOWLEDGED",
+      status: "PENDING"
+    });
+
+    // When
+    const result = await readDiscordInteractionHandshake(command.interactionId);
+
+    // Then
+    expect(result).toEqual({
+      commandDigest: command.commandDigest,
+      handshakeStatus: "ACKNOWLEDGED",
+      status: "PENDING"
+    });
     expect(mocks.transaction.discordInteractionJob.updateMany).not.toHaveBeenCalled();
   });
 
@@ -237,12 +328,13 @@ describe("Prisma Discord interaction job store", () => {
     mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({ commandDigest: command.commandDigest });
 
     // When: the command is persisted.
-    await enqueueDiscordInteractionJob(command);
+    await stageDiscordInteractionJob({ ...command, activationWindowMs: 1_500 });
 
     // Then: serialized durable input has no token, raw body, raw IP, or request-role snapshot field.
     const persisted = mocks.transaction.discordInteractionJob.createMany.mock.calls[0]?.[0]?.data;
     expect(persisted.sourceApplicationId).toBe("application-1");
     expect(Object.keys(persisted)).toEqual(expect.arrayContaining(Object.keys(command)));
+    expect(persisted.handshakeStatus).toBe("STAGED");
     expect(Object.keys(persisted)).not.toEqual(expect.arrayContaining(["token", "rawBody", "rawIp", "requestRoleIds"]));
   });
 });

@@ -14,7 +14,6 @@ export const DISCORD_INTERACTION_CLAIM_LEASE_MS = 120_000;
 export type DiscordInteractionEnqueueInput = {
   readonly commandDigest: string;
   readonly discordActorId: string;
-  readonly handshakeStatus: "ACKNOWLEDGED" | "STAGED";
   readonly interactionId: string;
   readonly intent: string;
   readonly ipHash: string;
@@ -27,9 +26,30 @@ export type DiscordInteractionEnqueueInput = {
   readonly sourceMessageId: string;
 };
 
+export type DiscordInteractionStageInput = DiscordInteractionEnqueueInput & {
+  readonly activationWindowMs: number;
+};
+
 export type DiscordInteractionEnqueueResult =
   | { readonly kind: "duplicate" }
   | { readonly kind: "enqueued" }
+  | { readonly kind: "security_conflict" };
+
+export type DiscordInteractionHandshakeSnapshot = {
+  readonly commandDigest: string;
+  readonly handshakeStatus: "ABANDONED_UNACKED" | "ACKNOWLEDGED" | "STAGED";
+  readonly status: "ABANDONED" | "PENDING";
+};
+
+export type DiscordInteractionActivationResult =
+  | { readonly kind: "not_pending" }
+  | { readonly kind: "pending" }
+  | { readonly kind: "security_conflict" };
+
+export type DiscordInteractionAbandonResult =
+  | { readonly kind: "abandoned" }
+  | { readonly kind: "missing" }
+  | { readonly kind: "pending" }
   | { readonly kind: "security_conflict" };
 
 export type DiscordInteractionBacklogSummary = {
@@ -41,11 +61,24 @@ export type DiscordInteractionBacklogSummary = {
 const CONTROL_ID = "discord-operations";
 const BACKLOG_STATUSES = ["PENDING", "PROCESSING", "RETRY"] as const;
 
-export function enqueueDiscordInteractionJob(
-  input: DiscordInteractionEnqueueInput
+export function stageDiscordInteractionJob(
+  input: DiscordInteractionStageInput
 ): Promise<DiscordInteractionEnqueueResult> {
   return withDiscordReservationMessageSystemContext(async (transaction) => {
-    const inserted = await transaction.discordInteractionJob.createMany({ data: input, skipDuplicates: true });
+    if (!Number.isFinite(input.activationWindowMs) || input.activationWindowMs <= 0 || input.activationWindowMs > 1_500) {
+      throw new DiscordInteractionActivationWindowError(input.activationWindowMs);
+    }
+    const databaseNow = await readDatabaseNow(transaction);
+    const { activationWindowMs, ...command } = input;
+    const inserted = await transaction.discordInteractionJob.createMany({
+      data: {
+        ...command,
+        handshakeStatus: "STAGED",
+        nextAttemptAt: new Date(databaseNow.getTime() + activationWindowMs),
+        status: "PENDING"
+      },
+      skipDuplicates: true
+    });
     if (inserted.count === 1) {
       return { kind: "enqueued" };
     }
@@ -62,12 +95,71 @@ export function enqueueDiscordInteractionJob(
   });
 }
 
+export function activateDiscordInteractionJob(input: {
+  readonly commandDigest: string;
+  readonly interactionId: string;
+}): Promise<DiscordInteractionActivationResult> {
+  return withDiscordReservationMessageSystemContext(async (transaction) => {
+    const databaseNow = await readDatabaseNow(transaction);
+    const activated = await transaction.discordInteractionJob.updateMany({
+      data: { handshakeStatus: "ACKNOWLEDGED", nextAttemptAt: databaseNow },
+      where: {
+        commandDigest: input.commandDigest,
+        handshakeStatus: "STAGED",
+        interactionId: input.interactionId,
+        nextAttemptAt: { gt: databaseNow },
+        status: "PENDING"
+      }
+    });
+    if (activated.count === 1) return { kind: "pending" };
+    return activationResult(await readHandshakeInTransaction(transaction, input.interactionId), input.commandDigest);
+  });
+}
+
+export function abandonUnacknowledgedDiscordInteractionJob(input: {
+  readonly commandDigest: string;
+  readonly interactionId: string;
+}): Promise<DiscordInteractionAbandonResult> {
+  return withDiscordReservationMessageSystemContext(async (transaction) => {
+    const abandoned = await transaction.discordInteractionJob.updateMany({
+      data: {
+        errorCode: "discord_ack_deadline_exceeded",
+        handshakeStatus: "ABANDONED_UNACKED",
+        lastError: "ACK_DEADLINE",
+        nextAttemptAt: null,
+        status: "ABANDONED"
+      },
+      where: {
+        commandDigest: input.commandDigest,
+        handshakeStatus: "STAGED",
+        interactionId: input.interactionId,
+        status: "PENDING"
+      }
+    });
+    if (abandoned.count === 1) return { kind: "abandoned" };
+    const snapshot = await readHandshakeInTransaction(transaction, input.interactionId);
+    if (snapshot === null) return { kind: "missing" };
+    if (snapshot.commandDigest !== input.commandDigest) return { kind: "security_conflict" };
+    return snapshot.handshakeStatus === "ACKNOWLEDGED" && snapshot.status === "PENDING"
+      ? { kind: "pending" }
+      : { kind: "abandoned" };
+  });
+}
+
+export function readDiscordInteractionHandshake(
+  interactionId: string
+): Promise<DiscordInteractionHandshakeSnapshot | null> {
+  return withDiscordReservationMessageSystemContext((transaction) =>
+    readHandshakeInTransaction(transaction, interactionId)
+  );
+}
+
 export function getDiscordInteractionBacklogSummary(now: Date): Promise<DiscordInteractionBacklogSummary> {
   return withDiscordReservationMessageSystemContext(async (transaction) => {
     const summary = await transaction.discordInteractionJob.aggregate({
       _count: { _all: true },
       _min: { createdAt: true },
-      where: { status: { in: [...BACKLOG_STATUSES] } }
+      where: { handshakeStatus: "ACKNOWLEDGED", status: { in: [...BACKLOG_STATUSES] } }
     });
     const oldestCreatedAt = summary._min.createdAt;
     return {
@@ -176,6 +268,49 @@ type ControlState = {
   readonly epoch: number;
 };
 
+type DatabaseClock = {
+  readonly now: Date;
+};
+
+async function readDatabaseNow(transaction: Prisma.TransactionClient): Promise<Date> {
+  const [clock] = await transaction.$queryRaw<readonly DatabaseClock[]>(Prisma.sql`
+    SELECT CURRENT_TIMESTAMP AS "now"
+  `);
+  if (clock === undefined || !(clock.now instanceof Date)) throw new DiscordInteractionDatabaseClockError();
+  return clock.now;
+}
+
+async function readHandshakeInTransaction(
+  transaction: Prisma.TransactionClient,
+  interactionId: string
+): Promise<DiscordInteractionHandshakeSnapshot | null> {
+  const row = await transaction.discordInteractionJob.findUnique({
+    select: { commandDigest: true, handshakeStatus: true, status: true },
+    where: { interactionId }
+  });
+  if (row === null) return null;
+  if (
+    (row.handshakeStatus === "STAGED" && row.status === "PENDING") ||
+    (row.handshakeStatus === "ACKNOWLEDGED" && row.status === "PENDING") ||
+    (row.handshakeStatus === "ABANDONED_UNACKED" && row.status === "ABANDONED")
+  ) {
+    return { commandDigest: row.commandDigest, handshakeStatus: row.handshakeStatus, status: row.status };
+  }
+  return null;
+}
+
+function activationResult(
+  snapshot: DiscordInteractionHandshakeSnapshot | null,
+  commandDigest: string
+): DiscordInteractionActivationResult {
+  if (snapshot?.commandDigest !== commandDigest) {
+    return snapshot === null ? { kind: "not_pending" } : { kind: "security_conflict" };
+  }
+  return snapshot.handshakeStatus === "ACKNOWLEDGED" && snapshot.status === "PENDING"
+    ? { kind: "pending" }
+    : { kind: "not_pending" };
+}
+
 async function isDiscordInteractionDispatchAllowed(claim: DiscordInteractionJobClaim): Promise<boolean> {
   return withDiscordReservationMessageSystemContext(async (transaction) => {
     const [control, job] = await Promise.all([
@@ -231,5 +366,19 @@ class DiscordInteractionClaimLostError extends Error {
   public override readonly name = "DiscordInteractionClaimLostError";
   public constructor(public readonly interactionId: string) {
     super(`Discord interaction claim for ${interactionId} is no longer current`);
+  }
+}
+
+class DiscordInteractionActivationWindowError extends Error {
+  public override readonly name = "DiscordInteractionActivationWindowError";
+  public constructor(public readonly milliseconds: number) {
+    super("Discord interaction activation window must be within the route deadline");
+  }
+}
+
+class DiscordInteractionDatabaseClockError extends Error {
+  public override readonly name = "DiscordInteractionDatabaseClockError";
+  public constructor() {
+    super("Discord interaction database clock was unavailable");
   }
 }

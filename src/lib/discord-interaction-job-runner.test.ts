@@ -22,6 +22,23 @@ describe("Discord interaction job runner", () => {
     expect(fixture.state).toEqual({ status: "SUCCEEDED", terminalResult: { outcome: "accepted" } });
   });
 
+  it("requests only the named interaction for an immediate post-ACK run", async () => {
+    // Given
+    const fixture = runnerFixture(claim(1));
+    const claimSpy = vi.spyOn(fixture.store, "claim");
+
+    // When
+    await runDiscordInteractionJobs({
+      dispatch: async () => ({ kind: "succeeded", terminalResult: { outcome: "accepted" } }),
+      interactionId: "interaction-1",
+      now,
+      store: fixture.store
+    });
+
+    // Then
+    expect(claimSpy).toHaveBeenCalledWith(now, "interaction-1");
+  });
+
   it.each([
     [1, 1],
     [2, 2],
