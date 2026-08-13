@@ -132,7 +132,7 @@ test("mobile-expanded long Korean notification popover preserves workflow geomet
   await page.setViewportSize({ width: 390, height: 844 });
   await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
   await installRoutes(page, {
-    notifications: fiveNotifications("매우긴한국어사유가좁은모바일화면에서도잘려나가거나가로로넘치지않아야합니다".repeat(4))
+    notifications: fiveNotifications("매우 긴 한국어 사유가 좁은 모바일 화면에서도 잘려나가지 않고 자연스럽게 줄바꿈되어야 합니다".repeat(2))
   });
 
   await login(page, "five-notification-mobile-student");
@@ -145,6 +145,7 @@ test("mobile-expanded long Korean notification popover preserves workflow geomet
   const notificationWidget = page.locator(".student-notification-widget");
   await expect(notificationWidget).toHaveAttribute("data-open", "true");
   await expect(page.locator(".student-notification-item")).toHaveCount(5);
+  await expectNotificationDetailsToFit(page.locator(".student-notification-body"));
   expect(await captureWorkflowGeometry(page)).toEqual(geometryBefore);
   await expectWithinViewport(page.locator(".student-notification-body"), page, "mobile expanded notification popover");
   await expect(await hasHorizontalOverflow(page)).toBe(false);
@@ -339,6 +340,21 @@ async function expectSelectedReservationContrast(locator: Locator): Promise<void
   const selectedStrongColor = await locator.locator("strong").evaluate((element) => window.getComputedStyle(element).color);
   expect(reservationStyles).toEqual({ backgroundColor: "rgb(23, 26, 32)", color: "rgb(255, 255, 255)" });
   expect(selectedStrongColor).toBe("rgb(255, 255, 255)");
+}
+
+async function expectNotificationDetailsToFit(body: Locator): Promise<void> {
+  await expect(body).toHaveCSS("overflow-y", "auto");
+  const dimensions = await body.locator(".student-notification-item p").evaluateAll((elements) =>
+    elements.map((element) => ({
+      clientHeight: element.clientHeight,
+      clientWidth: element.clientWidth,
+      scrollHeight: element.scrollHeight,
+      scrollWidth: element.scrollWidth
+    }))
+  );
+  expect(dimensions).toHaveLength(10);
+  expect(dimensions.every((dimension) => dimension.scrollHeight <= dimension.clientHeight + 1)).toBe(true);
+  expect(dimensions.every((dimension) => dimension.scrollWidth <= dimension.clientWidth)).toBe(true);
 }
 
 function requiredEvidenceDir(): string {

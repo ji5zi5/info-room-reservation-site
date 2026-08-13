@@ -298,11 +298,17 @@
   box-sizing: border-box;
   inset-block-start: calc(100% + var(--space-2));
   inset-inline-end: 0;
-  max-height: min(var(--sidebar-content-max-height), calc(100svh - var(--toolbar-min-height) - var(--space-13)));
+  max-height: min(var(--sidebar-content-max-height), calc(100svh - var(--toolbar-min-height) - var(--space-13) - var(--space-8)));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-5);
   position: absolute;
   width: min(var(--sidebar-card-width), calc(100vw - (var(--space-13) * 2)));
   z-index: var(--z-overlay);
+}
+
+.student-notification-body .student-notification-item p {
+  -webkit-line-clamp: unset;
+  display: block;
+  overflow: visible;
 }
