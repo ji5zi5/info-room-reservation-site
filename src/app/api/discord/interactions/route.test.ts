@@ -177,6 +177,25 @@ describe("Discord interaction HTTP route", () => {
     expect(handlerMocks.runExactPendingDiscordInteraction).not.toHaveBeenCalled();
   });
 
+  it("returns the exact generic error and schedules no after work when durable acknowledgement rejects", async () => {
+    // Given
+    handlerMocks.acknowledgeDiscordReservationInteraction.mockRejectedValue(
+      new TypeError("bounded acknowledgement outage")
+    );
+
+    // When
+    const response = await POST(signedJsonRequest(componentPayload(customIdFor("accept"))));
+
+    // Then
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: { content: "요청을 처리할 수 없습니다.", flags: 64 },
+      type: 4
+    });
+    expect(nextServerMocks.callback).toBeUndefined();
+    expect(handlerMocks.runExactPendingDiscordInteraction).not.toHaveBeenCalled();
+  });
+
   it.runIf(Boolean(process.env.INTEGRATION_DATABASE_URL))(
     "runs cold, 100-request, timeout-abandonment, and activation-won signed routes through real Prisma",
     async () => {
@@ -193,6 +212,7 @@ describe("Discord interaction HTTP route", () => {
       );
       const timeoutId = "423456789012349900";
       const activationWonId = "423456789012349901";
+      const outageId = "423456789012349902";
       const normalIds = Array.from(
         { length: 100 },
         (_, index) => String(423_456_789_012_340_000n + BigInt(index))
@@ -311,23 +331,61 @@ describe("Discord interaction HTTP route", () => {
         });
         expect(JSON.stringify(rows)).not.toContain("interaction-token");
 
+        const terminalIds = [timeoutId, activationWonId];
+        const sentinelUpdatedAt = new Date("2020-01-01T00:00:00.000Z");
+        await database.discordInteractionJob.updateMany({
+          data: { updatedAt: sentinelUpdatedAt },
+          where: { interactionId: { in: terminalIds } }
+        });
+        const terminalBefore = await database.discordInteractionJob.findMany({
+          orderBy: { interactionId: "asc" },
+          where: { interactionId: { in: terminalIds } }
+        });
+        const [abandonmentRead, activationRead] = await Promise.all([
+          realStore.settleDiscordInteractionHandshake({
+            commandDigest: terminalBefore.find(({ interactionId }) => interactionId === timeoutId)?.commandDigest ?? "",
+            interactionId: timeoutId
+          }),
+          realStore.settleDiscordInteractionHandshake({
+            commandDigest: terminalBefore.find(({ interactionId }) => interactionId === activationWonId)?.commandDigest ?? "",
+            interactionId: activationWonId
+          })
+        ]);
+        const terminalAfter = await database.discordInteractionJob.findMany({
+          orderBy: { interactionId: "asc" },
+          where: { interactionId: { in: terminalIds } }
+        });
+        expect(abandonmentRead).toEqual({ kind: "abandoned" });
+        expect(activationRead).toEqual({ kind: "pending" });
+        expect(terminalAfter).toEqual(terminalBefore);
+        console.warn("REAL_PRISMA_TERMINAL_READS=2 ROWS_UNCHANGED=true");
+
         const blocker = new Client({ connectionString: process.env.INTEGRATION_DATABASE_URL });
         await blocker.connect();
         try {
           await blocker.query("BEGIN");
           await blocker.query('LOCK TABLE "DiscordInteractionJob" IN ACCESS EXCLUSIVE MODE');
           const outageStartedAt = performance.now();
-          await expect(realStore.settleDiscordInteractionHandshake({
-            commandDigest: rows[0]?.commandDigest ?? "",
-            interactionId: rows[0]?.interactionId ?? ""
-          })).rejects.toBeInstanceOf(Error);
+          nextServerMocks.callback = undefined;
+          const outageResponse = await POST(signedJsonRequest(
+            componentPayload(customIdFor("accept"), outageId)
+          ));
           const outageElapsedMs = performance.now() - outageStartedAt;
-          console.warn(`REAL_PRISMA_BOUNDED_OUTAGE_MS=${outageElapsedMs.toFixed(3)}`);
+          console.warn(`REAL_PRISMA_ROUTE_OUTAGE_MS=${outageElapsedMs.toFixed(3)}`);
+          expect(outageResponse.status).toBe(200);
+          expect(await outageResponse.json()).toEqual({
+            data: { content: "요청을 처리할 수 없습니다.", flags: 64 },
+            type: 4
+          });
           expect(outageElapsedMs).toBeLessThan(2_500);
+          expect(nextServerMocks.callback).toBeUndefined();
         } finally {
           await blocker.query("ROLLBACK");
           await blocker.end();
         }
+        expect(await database.discordInteractionJob.findUnique({
+          where: { interactionId: outageId }
+        })).toBeNull();
       } finally {
         if (server.listening) {
           await new Promise<void>((resolve, reject) =>

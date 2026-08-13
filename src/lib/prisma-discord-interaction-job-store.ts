@@ -138,26 +138,33 @@ export function settleDiscordInteractionHandshake(input: {
 }): Promise<DiscordInteractionSettlementResult> {
   return withBoundedHandshakeContext(async (transaction) => {
     const [winner] = await transaction.$queryRaw<readonly DiscordInteractionHandshakeSnapshot[]>(Prisma.sql`
-      UPDATE "DiscordInteractionJob"
-      SET
-        "errorCode" = CASE
-          WHEN "commandDigest" = ${input.commandDigest} AND "handshakeStatus" = 'STAGED' AND "status" = 'PENDING'
-            THEN 'discord_ack_deadline_exceeded' ELSE "errorCode" END,
-        "handshakeStatus" = CASE
-          WHEN "commandDigest" = ${input.commandDigest} AND "handshakeStatus" = 'STAGED' AND "status" = 'PENDING'
-            THEN 'ABANDONED_UNACKED' ELSE "handshakeStatus" END,
-        "lastError" = CASE
-          WHEN "commandDigest" = ${input.commandDigest} AND "handshakeStatus" = 'STAGED' AND "status" = 'PENDING'
-            THEN 'ACK_DEADLINE' ELSE "lastError" END,
-        "nextAttemptAt" = CASE
-          WHEN "commandDigest" = ${input.commandDigest} AND "handshakeStatus" = 'STAGED' AND "status" = 'PENDING'
-            THEN NULL ELSE "nextAttemptAt" END,
-        "status" = CASE
-          WHEN "commandDigest" = ${input.commandDigest} AND "handshakeStatus" = 'STAGED' AND "status" = 'PENDING'
-            THEN 'ABANDONED' ELSE "status" END,
-        "updatedAt" = clock_timestamp()
-      WHERE "interactionId" = ${input.interactionId}
-      RETURNING "commandDigest", "handshakeStatus", "status"
+      WITH winner AS MATERIALIZED (
+        SELECT "commandDigest", "handshakeStatus", "status"
+        FROM "DiscordInteractionJob"
+        WHERE "interactionId" = ${input.interactionId}
+        FOR UPDATE
+      ),
+      settled AS (
+        UPDATE "DiscordInteractionJob" AS job
+        SET
+          "errorCode" = 'discord_ack_deadline_exceeded',
+          "handshakeStatus" = 'ABANDONED_UNACKED',
+          "lastError" = 'ACK_DEADLINE',
+          "nextAttemptAt" = NULL,
+          "status" = 'ABANDONED',
+          "updatedAt" = clock_timestamp()
+        FROM winner
+        WHERE job."interactionId" = ${input.interactionId}
+          AND winner."commandDigest" = ${input.commandDigest}
+          AND winner."handshakeStatus" = 'STAGED'
+          AND winner."status" = 'PENDING'
+        RETURNING job."commandDigest", job."handshakeStatus", job."status"
+      )
+      SELECT "commandDigest", "handshakeStatus", "status" FROM settled
+      UNION ALL
+      SELECT "commandDigest", "handshakeStatus", "status" FROM winner
+      WHERE NOT EXISTS (SELECT 1 FROM settled)
+      LIMIT 1
     `);
     if (winner === undefined) return { kind: "missing" };
     if (winner.commandDigest !== input.commandDigest) return { kind: "security_conflict" };

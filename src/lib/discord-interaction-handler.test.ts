@@ -178,6 +178,8 @@ describe("Discord interaction durable handler", () => {
     await expect(handler.acknowledge({
       config, interaction: componentInteraction("accept"), ipHash
     })).rejects.toThrow("bounded settlement failure");
+    expect(dependencies.settle).toHaveBeenCalledOnce();
+    expect(dependencies.runJobs).not.toHaveBeenCalled();
   });
 
   it("fails closed for a digest collision and never activates", async () => {

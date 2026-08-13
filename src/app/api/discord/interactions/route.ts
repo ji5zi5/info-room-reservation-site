@@ -4,7 +4,8 @@ import { DiscordApplicationConfigError, parseDiscordApplicationConfig } from "@/
 import {
   acknowledgeDiscordReservationInteraction,
   authorizeDiscordInteractionModal,
-  runExactPendingDiscordInteraction
+  runExactPendingDiscordInteraction,
+  type DiscordInteractionAcknowledgement
 } from "@/lib/discord-interaction-handler";
 import { verifyDiscordInteractionRequest } from "@/lib/discord-interaction-security";
 import {
@@ -82,7 +83,17 @@ async function deferInteraction(
   interaction: Extract<DiscordReservationInteraction, { readonly kind: "component" | "modal_submit" }>
 ): Promise<NextResponse> {
   const ipHash = hashRequestClientIp(request);
-  const acknowledgement = await acknowledgeDiscordReservationInteraction({ config, interaction, ipHash });
+  let acknowledgement: DiscordInteractionAcknowledgement;
+  try {
+    acknowledgement = await acknowledgeDiscordReservationInteraction({ config, interaction, ipHash });
+  } catch (error) {
+    console.error(JSON.stringify({
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      event: "discord_interaction_acknowledgement_failed",
+      interactionId: interaction.interactionId
+    }));
+    return genericInteractionError(200);
+  }
   if (acknowledgement.kind !== "acknowledged") return genericInteractionError(200);
   after(async () => {
     try {
