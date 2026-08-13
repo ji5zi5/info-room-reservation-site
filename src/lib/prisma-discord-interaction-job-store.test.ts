@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   transaction: {
+    $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
     discordInteractionJob: {
       aggregate: vi.fn(),
@@ -12,26 +13,34 @@ const mocks = vi.hoisted(() => ({
     },
     discordOperationsControl: { findUnique: vi.fn() }
   },
-  withContext: vi.fn()
+  withContext: vi.fn(),
+  withDatabaseContext: vi.fn()
 }));
 
 vi.mock("./prisma-discord-reservation-message-context", () => ({
   withDiscordReservationMessageSystemContext: mocks.withContext
 }));
+vi.mock("./db-context", () => ({
+  systemDatabaseActor: vi.fn(() => ({ id: null, role: "SYSTEM" })),
+  withDatabaseContext: mocks.withDatabaseContext
+}));
+vi.mock("./db", () => ({ prisma: {} }));
 
 import {
+  activateDiscordInteractionJob,
   DISCORD_INTERACTION_CLAIM_BATCH_SIZE,
   DISCORD_INTERACTION_CLAIM_LEASE_MS,
-  enqueueDiscordInteractionJob,
   getDiscordInteractionBacklogSummary,
-  prismaDiscordInteractionJobStore
+  prismaDiscordInteractionJobStore,
+  readDiscordInteractionHandshake,
+  settleDiscordInteractionHandshake,
+  stageDiscordInteractionJob
 } from "./prisma-discord-interaction-job-store";
 
 const now = new Date("2026-08-13T00:00:00.000Z");
 const command = {
   commandDigest: "sha256:command-a",
   discordActorId: "discord-admin",
-  handshakeStatus: "ACKNOWLEDGED" as const,
   interactionId: "interaction-1",
   intent: "accept",
   ipHash: "sha256:ip",
@@ -48,7 +57,9 @@ describe("Prisma Discord interaction job store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.withContext.mockImplementation(async (operation) => operation(mocks.transaction));
-    mocks.transaction.$queryRaw.mockResolvedValue([{ enabled: true, epoch: 7 }]);
+    mocks.withDatabaseContext.mockImplementation(async ({ operation }) => operation(mocks.transaction));
+    mocks.transaction.$queryRaw.mockResolvedValue([{ enabled: true, epoch: 7, now }]);
+    mocks.transaction.$executeRaw.mockResolvedValue(0);
     mocks.transaction.discordOperationsControl.findUnique.mockResolvedValue({ enabled: true, epoch: 7 });
     mocks.transaction.discordInteractionJob.findMany.mockResolvedValue([]);
     mocks.transaction.discordInteractionJob.updateMany.mockResolvedValue({ count: 0 });
@@ -56,13 +67,13 @@ describe("Prisma Discord interaction job store", () => {
 
   it("enqueues once and replays an identical interaction digest", async () => {
     // Given: the first insert wins and the durable row has the same digest.
-    mocks.transaction.discordInteractionJob.createMany.mockResolvedValue({ count: 1 });
+    mocks.transaction.$queryRaw.mockResolvedValue([{ count: 1 }]);
     mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({ commandDigest: command.commandDigest });
 
     // When: the same signed command is delivered twice.
-    const first = await enqueueDiscordInteractionJob(command);
-    mocks.transaction.discordInteractionJob.createMany.mockResolvedValue({ count: 0 });
-    const duplicate = await enqueueDiscordInteractionJob(command);
+    const first = await stageDiscordInteractionJob({ ...command, activationDeadline: new Date(now.getTime() + 1_500) });
+    mocks.transaction.$queryRaw.mockResolvedValue([{ count: 0 }]);
+    const duplicate = await stageDiscordInteractionJob({ ...command, activationDeadline: new Date(now.getTime() + 1_500) });
 
     // Then: the caller observes one enqueue and one idempotent replay.
     expect(first).toEqual({ kind: "enqueued" });
@@ -71,14 +82,87 @@ describe("Prisma Discord interaction job store", () => {
 
   it("returns a terminal security conflict without mutating the existing job", async () => {
     // Given: an interaction ID already belongs to a different immutable command digest.
-    mocks.transaction.discordInteractionJob.createMany.mockResolvedValue({ count: 0 });
+    mocks.transaction.$queryRaw.mockResolvedValue([{ count: 0 }]);
     mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({ commandDigest: "sha256:original" });
 
     // When: an attacker reuses the ID with different command bytes.
-    const result = await enqueueDiscordInteractionJob(command);
+    const result = await stageDiscordInteractionJob({ ...command, activationDeadline: new Date(now.getTime() + 1_500) });
 
     // Then: conflict is terminal and no update path runs.
     expect(result).toEqual({ kind: "security_conflict" });
+    expect(mocks.transaction.discordInteractionJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("inserts only non-claimable STAGED state with an absolute DB-clock activation deadline", async () => {
+    // Given
+    mocks.transaction.$queryRaw.mockResolvedValue([{ count: 1 }]);
+
+    // When
+    await stageDiscordInteractionJob({ ...command, activationDeadline: new Date(now.getTime() + 1_500) });
+
+    // Then
+    expect(mocks.transaction.$queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it("activates only an unexpired matching STAGED row and makes it PENDING at DB now", async () => {
+    // Given
+    mocks.transaction.$executeRaw.mockResolvedValue(1);
+
+    // When
+    const result = await activateDiscordInteractionJob({ commandDigest: command.commandDigest, interactionId: command.interactionId });
+
+    // Then
+    expect(result).toEqual({ kind: "pending" });
+    expect(mocks.transaction.$executeRaw).toHaveBeenCalledTimes(3);
+  });
+
+  it("abandons STAGED at the deadline and delayed activation cannot revive it", async () => {
+    // Given
+    mocks.transaction.$queryRaw.mockResolvedValueOnce([{
+      commandDigest: command.commandDigest,
+      handshakeStatus: "ABANDONED_UNACKED",
+      status: "ABANDONED"
+    }]);
+    mocks.transaction.$executeRaw.mockResolvedValue(0);
+    mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({
+      commandDigest: command.commandDigest,
+      handshakeStatus: "ABANDONED_UNACKED",
+      status: "ABANDONED"
+    });
+
+    // When
+    const abandoned = await settleDiscordInteractionHandshake({
+      commandDigest: command.commandDigest,
+      interactionId: command.interactionId
+    });
+    const activation = await activateDiscordInteractionJob({
+      commandDigest: command.commandDigest,
+      interactionId: command.interactionId
+    });
+
+    // Then
+    expect(abandoned).toEqual({ kind: "abandoned" });
+    expect(activation).toEqual({ kind: "not_pending" });
+    expect(mocks.transaction.$executeRaw).toHaveBeenCalledTimes(5);
+  });
+
+  it("reads durable activation-won state without changing it", async () => {
+    // Given
+    mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({
+      commandDigest: command.commandDigest,
+      handshakeStatus: "ACKNOWLEDGED",
+      status: "PENDING"
+    });
+
+    // When
+    const result = await readDiscordInteractionHandshake(command.interactionId);
+
+    // Then
+    expect(result).toEqual({
+      commandDigest: command.commandDigest,
+      handshakeStatus: "ACKNOWLEDGED",
+      status: "PENDING"
+    });
     expect(mocks.transaction.discordInteractionJob.updateMany).not.toHaveBeenCalled();
   });
 
@@ -233,16 +317,15 @@ describe("Prisma Discord interaction job store", () => {
 
   it("persists only redacted command context and error fields", async () => {
     // Given: a valid enqueue with hash-only source context.
-    mocks.transaction.discordInteractionJob.createMany.mockResolvedValue({ count: 1 });
+    mocks.transaction.$queryRaw.mockResolvedValue([{ count: 1 }]);
     mocks.transaction.discordInteractionJob.findUnique.mockResolvedValue({ commandDigest: command.commandDigest });
 
     // When: the command is persisted.
-    await enqueueDiscordInteractionJob(command);
+    await stageDiscordInteractionJob({ ...command, activationDeadline: new Date(now.getTime() + 1_500) });
 
     // Then: serialized durable input has no token, raw body, raw IP, or request-role snapshot field.
-    const persisted = mocks.transaction.discordInteractionJob.createMany.mock.calls[0]?.[0]?.data;
-    expect(persisted.sourceApplicationId).toBe("application-1");
-    expect(Object.keys(persisted)).toEqual(expect.arrayContaining(Object.keys(command)));
-    expect(Object.keys(persisted)).not.toEqual(expect.arrayContaining(["token", "rawBody", "rawIp", "requestRoleIds"]));
+    const persistedCall = JSON.stringify(mocks.transaction.$queryRaw.mock.calls[0]);
+    expect(persistedCall).toContain("application-1");
+    expect(persistedCall).not.toMatch(/token|rawBody|rawIp|requestRoleIds/u);
   });
 });

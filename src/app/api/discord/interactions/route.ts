@@ -2,12 +2,15 @@ import { after, NextResponse } from "next/server";
 
 import { DiscordApplicationConfigError, parseDiscordApplicationConfig } from "@/lib/discord-app-config";
 import {
-  authorizeRejectComponent,
-  runDeferredDiscordReservationInteraction
+  acknowledgeDiscordReservationInteraction,
+  authorizeDiscordInteractionModal,
+  runExactPendingDiscordInteraction,
+  type DiscordInteractionAcknowledgement
 } from "@/lib/discord-interaction-handler";
 import { verifyDiscordInteractionRequest } from "@/lib/discord-interaction-security";
 import {
   authorizeDiscordPingInteraction,
+  buildDiscordReservationCustomId,
   buildDiscordDeferredEphemeralResponse,
   buildDiscordImmediateEphemeralErrorResponse,
   buildDiscordPongResponse,
@@ -43,10 +46,18 @@ export async function POST(request: Request): Promise<NextResponse> {
         ? NextResponse.json(buildDiscordPongResponse())
         : genericInteractionError(400);
     }
-    case "component":
-      return interaction.command.kind === "reject"
-        ? respondToRejectComponent(config, interaction)
-        : deferInteraction(request, config, interaction);
+    case "component": {
+      switch (interaction.command.kind) {
+        case "accept":
+          return deferInteraction(request, config, interaction);
+        case "admin_cancel":
+        case "no_show":
+        case "reject":
+          return respondToModalComponent(config, interaction);
+        default:
+          return assertNever(interaction.command.kind);
+      }
+    }
     case "modal_submit":
       return deferInteraction(request, config, interaction);
     case "invalid":
@@ -56,25 +67,42 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 }
 
-async function respondToRejectComponent(
+async function respondToModalComponent(
   config: NonNullable<ReturnType<typeof parseDiscordApplicationConfig>>,
   interaction: Extract<DiscordReservationInteraction, { readonly kind: "component" }>
 ): Promise<NextResponse> {
-  const authorization = await authorizeRejectComponent({ config, interaction });
+  const authorization = await authorizeDiscordInteractionModal({ config, interaction });
   return authorization.kind === "authorized"
-    ? NextResponse.json(buildDiscordRejectReasonModal(authorization.reservationId))
+    ? NextResponse.json(buildDiscordRejectReasonModal(interactionDataCustomId(interaction)))
     : genericInteractionError(200);
 }
 
-function deferInteraction(
+async function deferInteraction(
   request: Request,
   config: NonNullable<ReturnType<typeof parseDiscordApplicationConfig>>,
   interaction: Extract<DiscordReservationInteraction, { readonly kind: "component" | "modal_submit" }>
-): NextResponse {
+): Promise<NextResponse> {
   const ipHash = hashRequestClientIp(request);
+  let acknowledgement: DiscordInteractionAcknowledgement;
+  try {
+    acknowledgement = await acknowledgeDiscordReservationInteraction({ config, interaction, ipHash });
+  } catch (error) {
+    console.error(JSON.stringify({
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      event: "discord_interaction_acknowledgement_failed",
+      interactionId: interaction.interactionId
+    }));
+    return genericInteractionError(200);
+  }
+  if (acknowledgement.kind !== "acknowledged") return genericInteractionError(200);
   after(async () => {
     try {
-      await runDeferredDiscordReservationInteraction({ config, interaction, ipHash });
+      await runExactPendingDiscordInteraction({
+        applicationId: config.applicationId,
+        botToken: config.botToken,
+        interactionId: interaction.interactionId,
+        interactionToken: interaction.interactionToken
+      });
     } catch (error) {
       console.error(JSON.stringify({
         errorType: error instanceof Error ? error.name : "UnknownError",
@@ -84,6 +112,28 @@ function deferInteraction(
     }
   });
   return NextResponse.json(buildDiscordDeferredEphemeralResponse());
+}
+
+function interactionDataCustomId(
+  interaction: Extract<DiscordReservationInteraction, { readonly kind: "component" }>
+): string {
+  return interaction.command.sourceIdentity === undefined
+    ? interaction.command.reservationId
+    : buildSignedCustomIdFromRequest(interaction);
+}
+
+function buildSignedCustomIdFromRequest(
+  interaction: Extract<DiscordReservationInteraction, { readonly kind: "component" }>
+): string {
+  const body = interaction.command;
+  if (body.renderedEpoch === undefined || body.sourceIdentity === undefined) return body.reservationId;
+  return buildDiscordReservationCustomId({
+    action: body.kind,
+    renderedEpoch: body.renderedEpoch,
+    reservationId: body.reservationId,
+    secret: process.env.DISCORD_BOT_TOKEN ?? "",
+    sourceIdentity: body.sourceIdentity
+  });
 }
 
 function readDiscordApplicationConfig(): NonNullable<ReturnType<typeof parseDiscordApplicationConfig>> | null {
