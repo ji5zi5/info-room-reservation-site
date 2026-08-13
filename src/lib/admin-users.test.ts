@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   assertRestrictableUser,
   filterAdminUsers,
+  normalizeAdminUserFilters,
+  paginateAdminUsers,
   parseAdminUserStatusFilter,
-  type AdminUserListRow
+  type AdminUserListRow,
+  type AdminUserPage
 } from "./admin-users";
 
 const activeUser = {
@@ -60,6 +63,37 @@ describe("admin user filtering", () => {
     expect(filterAdminUsers(users, { bookingStatus: "ALL", query: "26002" }).map((user) => user.id)).toEqual(["u2"]);
     expect(filterAdminUsers(users, { bookingStatus: "RESTRICTED", query: "" }).map((user) => user.id)).toEqual(["u2"]);
     expect(filterAdminUsers(users, { bookingStatus: "SHADOW_BANNED", query: "" }).map((user) => user.id)).toEqual(["u3"]);
+  });
+
+  it("normalizes cursor-bound query filters", () => {
+    expect(normalizeAdminUserFilters({ bookingStatus: "ALL", query: "  KIM  " })).toEqual({
+      bookingStatus: "ALL",
+      query: "kim"
+    });
+  });
+
+  it("traverses 127 creation-bounded users in fixed pages without duplicate ids", () => {
+    // Given: 127 rows plus an insert newer than the refresh cutoff.
+    const cutoff = new Date("2026-08-13T00:10:00.000Z");
+    const generated = Array.from({ length: 127 }, (_, index) => ({
+      createdAt: new Date(`2026-08-13T00:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`),
+      id: `user-${String(index).padStart(3, "0")}`
+    }));
+    generated.push({ createdAt: new Date("2026-08-13T00:11:00.000Z"), id: "after-cutoff" });
+
+    // When: every terminal page is traversed using only its immutable tuple.
+    const seen: string[] = [];
+    let after: { readonly createdAt: string; readonly id: string } | null = null;
+    do {
+      const page: AdminUserPage<(typeof generated)[number]> = paginateAdminUsers({ after, cutoff, rows: generated });
+      seen.push(...page.rows.map((row) => row.id));
+      after = page.next;
+    } while (after !== null);
+
+    // Then: all baseline ids appear once and the after-cutoff insert stays excluded.
+    expect(seen).toHaveLength(127);
+    expect(new Set(seen).size).toBe(127);
+    expect(seen).not.toContain("after-cutoff");
   });
 });
 

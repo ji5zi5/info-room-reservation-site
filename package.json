@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "vercel-build": "npm run predeploy:check && prisma generate && prisma migrate deploy && next build",
+    "vercel-build": "npm run predeploy:check && prisma generate && prisma migrate deploy && tsx scripts/apply-online-admin-search-indexes.ts && next build",
     "lint": "npm run typecheck",
     "typecheck": "node scripts/typecheck.mjs",
     "test": "vitest run",
@@ -21,7 +21,7 @@
     "discord:smoke": "npx prisma generate && npx tsx scripts/discord-interaction-smoke.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
+    "db:deploy": "prisma migrate deploy && tsx scripts/apply-online-admin-search-indexes.ts",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "cron:setup:external": "tsx scripts/setup-cron-job-org.ts",
@@ -33,6 +33,7 @@
     "ky": "^1.14.0",
     "lucide-react": "^1.17.0",
     "next": "^16.2.11",
+    "pg": "^8.23.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "zod": "^4.1.13"
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@types/node": "^24.10.1",
+    "@types/pg": "^8.21.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "embedded-postgres": "16.14.0-beta.17",

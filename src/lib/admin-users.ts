@@ -19,6 +19,17 @@ export type AdminUserFilterInput = {
   readonly query: string;
 };
 
+export type AdminUserCursorRow = {
+  readonly createdAt: Date;
+  readonly id: string;
+};
+
+export type AdminUserPage<T extends AdminUserCursorRow> = {
+  readonly currentTotal: number;
+  readonly next: { readonly createdAt: string; readonly id: string } | null;
+  readonly rows: readonly T[];
+};
+
 export type RestrictableUserResult =
   | {
       readonly kind: "ok";
@@ -61,6 +72,39 @@ export function filterAdminUsers(
   });
 }
 
+export function normalizeAdminUserFilters(filters: AdminUserFilterInput): AdminUserFilterInput {
+  return { bookingStatus: filters.bookingStatus, query: filters.query.trim().toLocaleLowerCase("ko-KR") };
+}
+
+export function orderAdminUsers<T extends AdminUserCursorRow>(users: readonly T[]): readonly T[] {
+  return [...users].sort((left, right) =>
+    left.createdAt.getTime() - right.createdAt.getTime() || compareText(left.id, right.id)
+  );
+}
+
+export function paginateAdminUsers<T extends AdminUserCursorRow>(input: {
+  readonly after: { readonly createdAt: string; readonly id: string } | null;
+  readonly cutoff: Date;
+  readonly rows: readonly T[];
+}): AdminUserPage<T> {
+  const eligible = orderAdminUsers(input.rows.filter((row) => row.createdAt.getTime() <= input.cutoff.getTime()));
+  const after = input.after;
+  const afterTime = after === null ? null : Date.parse(after.createdAt);
+  const remaining = after === null
+    ? eligible
+    : eligible.filter((row) => row.createdAt.getTime() > (afterTime ?? 0) ||
+      (row.createdAt.getTime() === afterTime && compareText(row.id, after.id) > 0));
+  const rows = remaining.slice(0, 50);
+  const last = rows.at(-1);
+  return {
+    currentTotal: eligible.length,
+    next: remaining.length > rows.length && last !== undefined
+      ? { createdAt: last.createdAt.toISOString(), id: last.id }
+      : null,
+    rows
+  };
+}
+
 export function assertRestrictableUser(input: {
   readonly actorId: string;
   readonly target: Pick<AdminUserListRow, "id" | "role">;
@@ -72,4 +116,8 @@ export function assertRestrictableUser(input: {
     return { kind: "error", reason: "admin_target" };
   }
   return { kind: "ok" };
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

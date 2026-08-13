@@ -8,8 +8,19 @@ export type AdminReservationStudyPeriodFilter = (typeof ADMIN_RESERVATION_PERIOD
 
 type AdminReservationRow = {
   readonly createdAt: Date;
+  readonly id: string;
   readonly status: string;
   readonly studyPeriod: string;
+};
+
+export type AdminReservationPage<T extends AdminReservationRow> = {
+  readonly currentTotal: number;
+  readonly next: {
+    readonly createdAt: string;
+    readonly id: string;
+    readonly studyPeriod: "EIGHTH" | "FIRST";
+  } | null;
+  readonly rows: readonly T[];
 };
 
 type AdminReservationUserFilterRow = AdminReservationRow & {
@@ -87,11 +98,51 @@ export function orderAdminReservations<T extends AdminReservationRow>(reservatio
     if (periodDelta !== 0) {
       return periodDelta;
     }
-    return left.createdAt.getTime() - right.createdAt.getTime();
+    return left.createdAt.getTime() - right.createdAt.getTime() || compareText(left.id, right.id);
   });
+}
+
+export function normalizeAdminReservationFilters(filters: AdminReservationQueryFilters): AdminReservationQueryFilters {
+  return {
+    query: filters.query.trim().toLocaleLowerCase("ko-KR"),
+    studyPeriod: filters.studyPeriod,
+    userId: filters.userId?.trim() || null
+  };
+}
+
+export function paginateAdminReservations<T extends AdminReservationRow>(input: {
+  readonly after: { readonly createdAt: string; readonly id: string; readonly studyPeriod: "EIGHTH" | "FIRST" } | null;
+  readonly cutoff: Date;
+  readonly rows: readonly T[];
+}): AdminReservationPage<T> {
+  const eligible = orderAdminReservations(input.rows.filter((row) => row.createdAt.getTime() <= input.cutoff.getTime()));
+  const after = input.after;
+  const remaining = after === null ? eligible : eligible.filter((row) => compareReservationToCursor(row, after) > 0);
+  const rows = remaining.slice(0, 50);
+  const last = rows.at(-1);
+  const period = last?.studyPeriod;
+  return {
+    currentTotal: eligible.length,
+    next: remaining.length > rows.length && last !== undefined && (period === "EIGHTH" || period === "FIRST")
+      ? { createdAt: last.createdAt.toISOString(), id: last.id, studyPeriod: period }
+      : null,
+    rows
+  };
 }
 
 function studyPeriodRank(value: string): number {
   const index = STUDY_PERIODS.findIndex((period) => period === value);
   return index === -1 ? STUDY_PERIODS.length : index;
+}
+
+function compareReservationToCursor(
+  row: AdminReservationRow,
+  cursor: { readonly createdAt: string; readonly id: string; readonly studyPeriod: "EIGHTH" | "FIRST" }
+): number {
+  return studyPeriodRank(row.studyPeriod) - studyPeriodRank(cursor.studyPeriod) ||
+    row.createdAt.getTime() - Date.parse(cursor.createdAt) || compareText(row.id, cursor.id);
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
