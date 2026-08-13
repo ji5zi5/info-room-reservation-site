@@ -5,18 +5,21 @@ import { useCallback, useState } from "react";
 import type { ReservationActionOutcome } from "@/components/reservation-action-dialog";
 import { NETWORK_ERROR_MESSAGE, readApiErrorMessage } from "./client-api-response";
 import { csrfFetch } from "./csrf-fetch";
-import type { PeriodFetchResult } from "./reservation-home-period-contracts";
 import {
   isReservationActionAuthorized,
   type ReservationActionAuthorization
 } from "./reservation-home-period-contracts";
+import type { ReservationStateRefreshResult } from "./reservation-home-period-refresh";
 
 type ReservationStudyPeriod = "EIGHTH" | "FIRST";
 
 type UseReservationSubmitInput = {
   readonly getReservationActionAuthorization: () => ReservationActionAuthorization;
   readonly profileOpen: boolean;
-  readonly refreshPeriods: (date: string) => Promise<PeriodFetchResult>;
+  readonly refreshPeriods: (
+    date: string,
+    getFreshness: () => ReservationActionAuthorization
+  ) => Promise<ReservationStateRefreshResult>;
   readonly refreshProfile: () => Promise<void>;
   readonly setLoading: (loading: boolean) => void;
   readonly setToast: (message: string) => void;
@@ -59,15 +62,22 @@ export function useReservationSubmit(input: UseReservationSubmitInput): UseReser
         );
         if (!response.ok) {
           const errorMessage = await readApiErrorMessage(response);
-          await input.refreshPeriods(input.targetDate);
+          await input.refreshPeriods(input.targetDate, input.getReservationActionAuthorization);
           input.setToast(errorMessage ?? "예약에 실패했습니다.");
           return { kind: "error" };
         }
-        input.setToast("예약이 확정되었습니다.");
-        await Promise.all([
-          input.refreshPeriods(input.targetDate),
+        const [refreshResult] = await Promise.all([
+          input.refreshPeriods(input.targetDate, input.getReservationActionAuthorization),
           ...(input.profileOpen ? [input.refreshProfile()] : [])
         ]);
+        if (
+          refreshResult.kind !== "settled" ||
+          !isReservationActionAuthorized(authorization, input.getReservationActionAuthorization())
+        ) {
+          input.setToast("예약은 처리되었지만 최신 정보를 불러오지 못했습니다.");
+          return { kind: "error" };
+        }
+        input.setToast("예약이 확정되었습니다.");
         return { kind: "success" };
       } catch {
         input.setToast(NETWORK_ERROR_MESSAGE);
