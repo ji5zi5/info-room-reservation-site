@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle } from "lucide-react";
-import type { ReactElement } from "react";
+import { useLayoutEffect, useRef, type ReactElement } from "react";
 
 import {
   ReservationActionDialog,
@@ -12,6 +12,7 @@ import {
 import { ReservationCalendar } from "@/components/reservation-calendar";
 import { ReservationPeriodCard, type PeriodSummary } from "@/components/reservation-period-card";
 import { ReservationWarningPanel } from "@/components/reservation-warning-panel";
+import { StudentReservationStatusPanel } from "@/components/student-reservation-status-panel";
 import type { getAdvanceReservationPolicy } from "@/lib/advance-reservation-policy";
 import type { StudentCurrentReservation } from "@/lib/student-reservation-status";
 import { formatKstTime } from "@/lib/student-reservation-status";
@@ -52,6 +53,7 @@ type ReservationHomeViewProps = {
   readonly onRefreshRetry?: () => void;
   readonly onReserve: (studyPeriod: "EIGHTH" | "FIRST") => void;
   readonly onSelectCalendarDate: (date: string) => void;
+  readonly onSelectCurrentReservation?: (reservation: StudentCurrentReservation) => void;
   readonly onSidebarToggle: () => void;
   readonly onTabChange: (tab: ReservationHomeTab) => void;
   readonly password: string;
@@ -62,6 +64,7 @@ type ReservationHomeViewProps = {
   readonly periodsRefreshing: boolean;
   readonly profileState: ReservationHomeProfileState;
   readonly reservationSubmitting: boolean;
+  readonly selectedCurrentReservationId?: string | null;
   readonly sidebarOpen: boolean;
   readonly tab: ReservationHomeTab;
   readonly targetDate: string;
@@ -90,6 +93,7 @@ export function ReservationHomeView({
   onRefreshRetry,
   onReserve,
   onSelectCalendarDate,
+  onSelectCurrentReservation,
   onSidebarToggle,
   onTabChange,
   password,
@@ -100,15 +104,42 @@ export function ReservationHomeView({
   periodsRefreshing,
   profileState,
   reservationSubmitting,
+  selectedCurrentReservationId = null,
   sidebarOpen,
   tab,
   targetDate,
   toast,
   user
 }: ReservationHomeViewProps): ReactElement {
+  const lastDialogActionRef = useRef<ReservationPendingAction | null>(null);
   const dialogRefreshProps = refreshError && onRefreshRetry
     ? { onRefreshRetry, refreshRetrying: periodsRefreshing }
     : {};
+
+  useLayoutEffect(() => {
+    if (pendingAction) {
+      lastDialogActionRef.current = pendingAction;
+      return;
+    }
+    const lastAction = lastDialogActionRef.current;
+    if (!lastAction) {
+      return;
+    }
+    lastDialogActionRef.current = null;
+    window.requestAnimationFrame(() => {
+      const buttonLabel = lastAction.kind === "reserve" ? `${lastAction.label} 예약` : "예약 취소";
+      for (const card of document.querySelectorAll<HTMLElement>(".period-card")) {
+        if (!card.textContent?.includes(lastAction.label)) {
+          continue;
+        }
+        const button = Array.from(card.querySelectorAll<HTMLButtonElement>("button")).find(
+          (candidate) => candidate.textContent?.trim() === buttonLabel && !candidate.disabled
+        );
+        button?.focus();
+        return;
+      }
+    });
+  }, [pendingAction]);
 
   return (
     <main className="app-shell">
@@ -176,6 +207,15 @@ export function ReservationHomeView({
               </button>
             </div>
           </div>
+          {user ? (
+            <StudentReservationStatusPanel
+              ariaLabel="현재 예약 상태"
+              currentReservationId={selectedCurrentReservationId}
+              reservations={currentReservations}
+              user={user}
+              onSelectReservation={onSelectCurrentReservation}
+            />
+          ) : null}
           {advancePolicy && user ? (
             <ReservationCalendar
               advancePolicy={advancePolicy}
