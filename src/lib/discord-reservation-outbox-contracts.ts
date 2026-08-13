@@ -86,6 +86,7 @@ type InitialSuccessInput = {
   readonly claimId: string;
   readonly guildId: string;
   readonly messageId: string;
+  readonly renderedSourceEpoch: number;
   readonly reservationId: string;
   readonly sentAt: Date;
 };

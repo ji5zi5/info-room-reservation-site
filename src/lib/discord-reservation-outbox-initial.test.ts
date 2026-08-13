@@ -29,6 +29,15 @@ describe("Discord reservation initial POST", () => {
       await expect(processDiscordInitialClaim(dependencies, claim, now)).resolves.toBe("sent");
 
       expectInitialControlCommands(dependencies, configuredBotToken, 7);
+      expect(dependencies.repository.saveInitialSendSuccess).toHaveBeenCalledWith({
+        channelId: "channel",
+        claimId: "claim-1",
+        guildId: "guild",
+        messageId: "message-1",
+        renderedSourceEpoch: 7,
+        reservationId: "reservation-1",
+        sentAt: now
+      });
     } finally {
       vi.unstubAllEnvs();
     }

@@ -61,7 +61,7 @@ describe("durable Discord reservation operations", () => {
     expect(recovered).toHaveLength(1);
     await expect(prismaDiscordReservationMessageRepository.saveInitialSendSuccess({
       channelId: "channel", claimId: firstClaim?.claimId ?? "missing", guildId: "guild",
-      messageId: "message", reservationId, sentAt: now
+      messageId: "message", renderedSourceEpoch: 7, reservationId, sentAt: now
     })).resolves.toBe(false);
   });
 

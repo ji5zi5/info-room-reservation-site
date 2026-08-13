@@ -143,6 +143,7 @@ async function deliverInitialPost(
           claimId: claim.claimId,
           guildId: config.guildId,
           messageId: delivery.messageId,
+          renderedSourceEpoch: renderedEpoch,
           reservationId: claim.reservationId,
           sentAt: now
         });
