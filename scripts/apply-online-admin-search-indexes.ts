@@ -19,6 +19,10 @@ export const ONLINE_INDEX_SESSION_COMMANDS = [
 type IndexKey = {
   readonly column: string;
   readonly opclass: string;
+  readonly opclassDefault: boolean;
+  readonly opclassExtension: "pg_trgm" | null;
+  readonly opclassInput: "source";
+  readonly opclassNamespace: "pg_catalog" | "public";
   readonly option: number;
 };
 
@@ -32,38 +36,53 @@ type IndexManifest = {
   readonly table: "AdminAction" | "Reservation" | "User";
 };
 
+const GIN_TRGM_OPCLASS = {
+  opclassDefault: false, opclassExtension: "pg_trgm", opclassInput: "source", opclassNamespace: "public"
+} as const;
+const BTREE_DEFAULT_OPCLASS = {
+  opclassDefault: true, opclassExtension: null, opclassInput: "source", opclassNamespace: "pg_catalog"
+} as const;
+
 export const ONLINE_INDEX_MANIFEST = [
   {
     createSql: 'CREATE INDEX CONCURRENTLY IF NOT EXISTS "User_name_trgm_idx" ON "public"."User" USING gin ("name" gin_trgm_ops)',
-    keys: [{ column: "name", opclass: "gin_trgm_ops", option: 0 }], method: "gin", name: "User_name_trgm_idx", reloptions: [], schema: "public", table: "User"
+    keys: [{ column: "name", opclass: "gin_trgm_ops", option: 0, ...GIN_TRGM_OPCLASS }], method: "gin", name: "User_name_trgm_idx", reloptions: [], schema: "public", table: "User"
   },
   {
     createSql: 'CREATE INDEX CONCURRENTLY IF NOT EXISTS "User_studentNumber_trgm_idx" ON "public"."User" USING gin ("studentNumber" gin_trgm_ops)',
-    keys: [{ column: "studentNumber", opclass: "gin_trgm_ops", option: 0 }], method: "gin", name: "User_studentNumber_trgm_idx", reloptions: [], schema: "public", table: "User"
+    keys: [{ column: "studentNumber", opclass: "gin_trgm_ops", option: 0, ...GIN_TRGM_OPCLASS }], method: "gin", name: "User_studentNumber_trgm_idx", reloptions: [], schema: "public", table: "User"
   },
   {
     createSql: 'CREATE INDEX CONCURRENTLY IF NOT EXISTS "AdminAction_action_trgm_idx" ON "public"."AdminAction" USING gin ("action" gin_trgm_ops)',
-    keys: [{ column: "action", opclass: "gin_trgm_ops", option: 0 }], method: "gin", name: "AdminAction_action_trgm_idx", reloptions: [], schema: "public", table: "AdminAction"
+    keys: [{ column: "action", opclass: "gin_trgm_ops", option: 0, ...GIN_TRGM_OPCLASS }], method: "gin", name: "AdminAction_action_trgm_idx", reloptions: [], schema: "public", table: "AdminAction"
   },
   {
     createSql: 'CREATE INDEX CONCURRENTLY IF NOT EXISTS "AdminAction_reason_trgm_idx" ON "public"."AdminAction" USING gin ("reason" gin_trgm_ops)',
-    keys: [{ column: "reason", opclass: "gin_trgm_ops", option: 0 }], method: "gin", name: "AdminAction_reason_trgm_idx", reloptions: [], schema: "public", table: "AdminAction"
+    keys: [{ column: "reason", opclass: "gin_trgm_ops", option: 0, ...GIN_TRGM_OPCLASS }], method: "gin", name: "AdminAction_reason_trgm_idx", reloptions: [], schema: "public", table: "AdminAction"
   },
   {
     createSql: 'CREATE INDEX CONCURRENTLY IF NOT EXISTS "User_createdAt_id_idx" ON "public"."User" USING btree ("createdAt" ASC, "id" ASC)',
-    keys: [{ column: "createdAt", opclass: "timestamp_ops", option: 0 }, { column: "id", opclass: "text_ops", option: 0 }],
+    keys: [
+      { column: "createdAt", opclass: "timestamp_ops", option: 0, ...BTREE_DEFAULT_OPCLASS },
+      { column: "id", opclass: "text_ops", option: 0, ...BTREE_DEFAULT_OPCLASS }
+    ],
     method: "btree", name: "User_createdAt_id_idx", reloptions: [], schema: "public", table: "User"
   },
   {
     createSql: 'CREATE INDEX CONCURRENTLY IF NOT EXISTS "Reservation_date_studyPeriod_createdAt_id_idx" ON "public"."Reservation" USING btree ("date" ASC, "studyPeriod" ASC, "createdAt" ASC, "id" ASC)',
     keys: [
-      { column: "date", opclass: "text_ops", option: 0 }, { column: "studyPeriod", opclass: "text_ops", option: 0 },
-      { column: "createdAt", opclass: "timestamp_ops", option: 0 }, { column: "id", opclass: "text_ops", option: 0 }
+      { column: "date", opclass: "text_ops", option: 0, ...BTREE_DEFAULT_OPCLASS },
+      { column: "studyPeriod", opclass: "text_ops", option: 0, ...BTREE_DEFAULT_OPCLASS },
+      { column: "createdAt", opclass: "timestamp_ops", option: 0, ...BTREE_DEFAULT_OPCLASS },
+      { column: "id", opclass: "text_ops", option: 0, ...BTREE_DEFAULT_OPCLASS }
     ], method: "btree", name: "Reservation_date_studyPeriod_createdAt_id_idx", reloptions: [], schema: "public", table: "Reservation"
   },
   {
     createSql: 'CREATE INDEX CONCURRENTLY IF NOT EXISTS "AdminAction_createdAt_id_idx" ON "public"."AdminAction" USING btree ("createdAt" DESC, "id" DESC)',
-    keys: [{ column: "createdAt", opclass: "timestamp_ops", option: 3 }, { column: "id", opclass: "text_ops", option: 3 }],
+    keys: [
+      { column: "createdAt", opclass: "timestamp_ops", option: 3, ...BTREE_DEFAULT_OPCLASS },
+      { column: "id", opclass: "text_ops", option: 3, ...BTREE_DEFAULT_OPCLASS }
+    ],
     method: "btree", name: "AdminAction_createdAt_id_idx", reloptions: [], schema: "public", table: "AdminAction"
   }
 ] as const satisfies readonly IndexManifest[];
@@ -92,7 +111,10 @@ export class OnlineIndexError extends Error {
 const FoundationSchema = z.object({ foundation: z.string().nullable(), ownerAllowed: z.boolean() });
 const LedgerSchema = z.object({ checksum: z.string(), state: z.enum(["APPLYING", "APPLIED"]) });
 const CatalogKeySchema = z.object({
-  column: z.string().nullable(), indexCollation: z.number(), opclass: z.string(), option: z.number(), sourceCollation: z.number()
+  column: z.string().nullable(), expectedOpclassOid: z.number().int().positive().nullable(), indexCollation: z.number(),
+  opclass: z.string(), opclassDefault: z.boolean(), opclassExtension: z.string().nullable(),
+  opclassInputType: z.number().int().positive(), opclassMethod: z.string(), opclassNamespace: z.string(),
+  opclassOid: z.number().int().positive(), option: z.number(), sourceCollation: z.number(), sourceType: z.number().int().positive()
 });
 const CatalogIndexSchema = z.object({
   expression: z.string().nullable(), indexSchema: z.string(), keys: z.array(CatalogKeySchema), method: z.string(),
@@ -196,7 +218,10 @@ async function inspectIndex(client: pg.Client, name: string): Promise<CatalogInd
            COALESCE(ic.reloptions,ARRAY[]::text[]) AS reloptions,
            COALESCE(json_agg(json_build_object(
              'column',a.attname,'opclass',opc.opcname,'indexCollation',COALESCE(coll.oid,0)::int,
-             'sourceCollation',COALESCE(a.attcollation,0)::int,'option',k.option
+             'sourceCollation',COALESCE(a.attcollation,0)::int,'sourceType',a.atttypid::int,'option',k.option,
+             'opclassOid',opc.oid::int,'expectedOpclassOid',expected_opc.oid::int,
+             'opclassNamespace',opn.nspname,'opclassDefault',opc.opcdefault,
+             'opclassInputType',opc.opcintype::int,'opclassMethod',opam.amname,'opclassExtension',opext.extname
            ) ORDER BY k.ordinality) FILTER (WHERE k.ordinality IS NOT NULL),'[]'::json) AS keys
     FROM pg_class ic
     JOIN pg_namespace ins ON ins.oid=ic.relnamespace
@@ -208,6 +233,26 @@ async function inspectIndex(client: pg.Client, name: string): Promise<CatalogInd
       WITH ORDINALITY AS k(attnum,opclass_oid,collation_oid,option,ordinality) ON true
     LEFT JOIN pg_attribute a ON a.attrelid=tc.oid AND a.attnum=k.attnum
     LEFT JOIN pg_opclass opc ON opc.oid=k.opclass_oid
+    LEFT JOIN pg_namespace opn ON opn.oid=opc.opcnamespace
+    LEFT JOIN pg_am opam ON opam.oid=opc.opcmethod
+    LEFT JOIN pg_depend opd ON opd.classid='pg_opclass'::regclass AND opd.objid=opc.oid
+      AND opd.refclassid='pg_extension'::regclass AND opd.deptype='e'
+    LEFT JOIN pg_extension opext ON opext.oid=opd.refobjid
+    LEFT JOIN LATERAL (
+      SELECT expected.oid
+      FROM pg_opclass expected
+      JOIN pg_namespace expected_ns ON expected_ns.oid=expected.opcnamespace
+      JOIN pg_am expected_am ON expected_am.oid=expected.opcmethod
+      LEFT JOIN pg_depend expected_dep ON expected_dep.classid='pg_opclass'::regclass AND expected_dep.objid=expected.oid
+        AND expected_dep.refclassid='pg_extension'::regclass AND expected_dep.deptype='e'
+      LEFT JOIN pg_extension expected_ext ON expected_ext.oid=expected_dep.refobjid
+      WHERE expected.opcname=opc.opcname AND expected.opcintype=a.atttypid
+        AND ((am.amname='btree' AND expected_am.amname='btree' AND expected.opcdefault AND expected_ns.nspname='pg_catalog')
+          OR (am.amname='gin' AND expected_am.amname='gin' AND NOT expected.opcdefault
+            AND expected_ns.nspname='public' AND expected_ext.extname='pg_trgm'))
+      ORDER BY expected.oid
+      LIMIT 1
+    ) expected_opc ON true
     LEFT JOIN pg_collation coll ON coll.oid=k.collation_oid
     WHERE ic.relkind='i' AND ic.relname=$1
     GROUP BY ins.nspname,ic.relname,tns.nspname,tc.relname,am.amname,i.indisunique,i.indisvalid,
@@ -225,7 +270,11 @@ function matchesManifest(actual: CatalogIndex, expected: IndexManifest): boolean
     actual.keys.length === expected.keys.length && actual.keys.every((key, index) => {
       const expectedKey = expected.keys[index];
       return expectedKey !== undefined && key.column === expectedKey.column && key.opclass === expectedKey.opclass &&
-        key.option === expectedKey.option && key.indexCollation === key.sourceCollation;
+        key.option === expectedKey.option && key.indexCollation === key.sourceCollation &&
+        key.opclassOid === key.expectedOpclassOid && key.opclassMethod === expected.method &&
+        key.opclassInputType === key.sourceType && expectedKey.opclassInput === "source" &&
+        key.opclassNamespace === expectedKey.opclassNamespace && key.opclassDefault === expectedKey.opclassDefault &&
+        key.opclassExtension === expectedKey.opclassExtension;
     });
 }
 

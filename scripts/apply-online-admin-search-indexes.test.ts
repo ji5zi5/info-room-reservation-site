@@ -114,7 +114,9 @@ describe("online admin search index runner", () => {
 
   it("uses owner ledger transitions, one advisory lock, and exact catalog truth", () => {
     // Given: the tracked runner implementation.
-    const requiredCatalogs = ["pg_class", "pg_namespace", "pg_index", "pg_am", "pg_attribute", "pg_opclass", "pg_collation"];
+    const requiredCatalogs = [
+      "pg_class", "pg_namespace", "pg_index", "pg_am", "pg_attribute", "pg_opclass", "pg_collation", "pg_depend", "pg_extension"
+    ];
 
     // When: the fail-closed protocol is inspected.
     const protocolTokens = requiredCatalogs.filter((catalog) => runnerSource.includes(catalog));
@@ -134,7 +136,11 @@ describe("online admin search index runner", () => {
     const exact = {
       expression: null,
       indexSchema: "public",
-      keys: [{ column: "name", indexCollation: 100, opclass: "gin_trgm_ops", option: 0, sourceCollation: 100 }],
+      keys: [{
+        column: "name", expectedOpclassOid: 5001, indexCollation: 100, opclass: "gin_trgm_ops",
+        opclassDefault: false, opclassExtension: "pg_trgm", opclassInputType: 25, opclassMethod: "gin",
+        opclassNamespace: "public", opclassOid: 5001, option: 0, sourceCollation: 100, sourceType: 25
+      }],
       method: "gin",
       name: "User_name_trgm_idx",
       predicate: null,
@@ -152,6 +158,12 @@ describe("online admin search index runner", () => {
       { ...exact, method: "btree" },
       { ...exact, keys: [{ ...exact.keys[0], column: "studentNumber" }] },
       { ...exact, keys: [{ ...exact.keys[0], opclass: "text_ops" }] },
+      { ...exact, keys: [{ ...exact.keys[0], opclassOid: 5002 }] },
+      { ...exact, keys: [{ ...exact.keys[0], opclassNamespace: "shadow" }] },
+      { ...exact, keys: [{ ...exact.keys[0], opclassDefault: true }] },
+      { ...exact, keys: [{ ...exact.keys[0], opclassInputType: 1043 }] },
+      { ...exact, keys: [{ ...exact.keys[0], opclassMethod: "btree" }] },
+      { ...exact, keys: [{ ...exact.keys[0], opclassExtension: null }] },
       { ...exact, keys: [{ ...exact.keys[0], indexCollation: 101 }] },
       { ...exact, keys: [{ ...exact.keys[0], option: 1 }] },
       { ...exact, reloptions: ["fastupdate=off"] },
@@ -176,8 +188,16 @@ describe("online admin search index runner", () => {
     const exact = {
       expression: null, indexSchema: "public",
       keys: [
-        { column: "createdAt", indexCollation: 0, opclass: "timestamp_ops", option: 3, sourceCollation: 0 },
-        { column: "id", indexCollation: 100, opclass: "text_ops", option: 3, sourceCollation: 100 }
+        {
+          column: "createdAt", expectedOpclassOid: 3128, indexCollation: 0, opclass: "timestamp_ops",
+          opclassDefault: true, opclassExtension: null, opclassInputType: 1114, opclassMethod: "btree",
+          opclassNamespace: "pg_catalog", opclassOid: 3128, option: 3, sourceCollation: 0, sourceType: 1114
+        },
+        {
+          column: "id", expectedOpclassOid: 3126, indexCollation: 100, opclass: "text_ops",
+          opclassDefault: true, opclassExtension: null, opclassInputType: 25, opclassMethod: "btree",
+          opclassNamespace: "pg_catalog", opclassOid: 3126, option: 3, sourceCollation: 100, sourceType: 25
+        }
       ],
       method: "btree", name: "AdminAction_createdAt_id_idx", predicate: null, ready: true, reloptions: [],
       tableName: "AdminAction", tableSchema: "public", unique: false, valid: true
@@ -186,11 +206,17 @@ describe("online admin search index runner", () => {
     // When: order and reloptions drift independently.
     const reversed = { ...exact, keys: [...exact.keys].reverse() };
     const fillfactor = { ...exact, reloptions: ["fillfactor=70"] };
+    const wrongOid = { ...exact, keys: [{ ...exact.keys[0], opclassOid: 9999 }, exact.keys[1]] };
+    const wrongNamespace = { ...exact, keys: [{ ...exact.keys[0], opclassNamespace: "shadow" }, exact.keys[1]] };
+    const nondefault = { ...exact, keys: [{ ...exact.keys[0], opclassDefault: false }, exact.keys[1]] };
 
-    // Then: both dimensions are mismatches.
+    // Then: ordering, storage, and same-name btree opclass identity drift are mismatches.
     expect(catalogDefinitionMatchesManifest(exact.name, exact)).toBe(true);
     expect(catalogDefinitionMatchesManifest(exact.name, reversed)).toBe(false);
     expect(catalogDefinitionMatchesManifest(exact.name, fillfactor)).toBe(false);
+    expect(catalogDefinitionMatchesManifest(exact.name, wrongOid)).toBe(false);
+    expect(catalogDefinitionMatchesManifest(exact.name, wrongNamespace)).toBe(false);
+    expect(catalogDefinitionMatchesManifest(exact.name, nondefault)).toBe(false);
   });
 
   it("keeps concurrent index DDL out of Prisma migrations and deployment order non-recursive", () => {
