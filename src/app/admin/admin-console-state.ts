@@ -5,6 +5,9 @@ import type {
   AdminNotificationBacklogItem,
   AdminNotificationReconciliationAction,
   AdminNotificationSettings,
+  AdminOperationItem,
+  AdminOperationRepairAction,
+  AdminOperationsPayload,
   AdminPeriodSetting,
   AdminReservation,
   AdminReservationStatusFilter,
@@ -15,7 +18,8 @@ import type {
   AdminUserStatusFilter,
   StudyPeriod
 } from "./admin-types";
-import type { AdminMutationResult, ApplyRestrictionData, CancelReservationData, NoShowReservationData } from "./admin-api-client";
+import type { AdminMutationResult, ApplyRestrictionData, CancelReservationData, DiscordOperationRepairData, NoShowReservationData } from "./admin-api-client";
+import type { AdminConsoleDeepLinkTarget } from "./admin-console-url";
 import { DEFAULT_SHADOW_BAN_PROFILE, type ShadowBanProfile } from "@/lib/shadow-ban-profile";
 
 export type UserRestrictionDraft = {
@@ -51,6 +55,7 @@ export type AdminConsoleState = {
   readonly markNoShow: (reservationId: string) => Promise<AdminMutationResult<NoShowReservationData>>;
   readonly notificationBacklog: readonly AdminNotificationBacklogItem[];
   readonly notificationSettings: AdminNotificationSettings;
+  readonly operations: AdminOperationsPayload | null;
   readonly periods: readonly AdminPeriodSetting[];
   readonly refresh: () => Promise<void>;
   readonly removeRestriction: (userId: string) => Promise<void>;
@@ -66,6 +71,11 @@ export type AdminConsoleState = {
     item: AdminNotificationBacklogItem,
     action: AdminNotificationReconciliationAction
   ) => Promise<void>;
+  readonly repairOperation: (
+    item: AdminOperationItem,
+    action: AdminOperationRepairAction
+  ) => Promise<AdminMutationResult<DiscordOperationRepairData>>;
+  readonly navigateToOperationTarget: (target: AdminConsoleDeepLinkTarget) => Promise<void>;
   readonly sendNotification: (period: AdminDashboardPeriod) => Promise<void>;
   readonly setActiveSection: (section: AdminSection) => void;
   readonly setAuditActionFilter: (filter: AdminAuditActionFilter) => void;

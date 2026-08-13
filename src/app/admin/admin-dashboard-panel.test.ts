@@ -10,8 +10,11 @@ describe("AdminDashboardPanel notification reconciliation", () => {
     const markup = renderToStaticMarkup(
       createElement(AdminDashboardPanel, {
         notificationBacklog: [unknownDelivery],
+        onNavigateOperationTarget: vi.fn(),
         onReconcileNotification: vi.fn(),
+        onRepairOperation: vi.fn(),
         onSendNotification: vi.fn(),
+        operations: null,
         periods: [sentPeriod],
         statistics: null
       })
@@ -28,8 +31,11 @@ describe("AdminDashboardPanel notification reconciliation", () => {
     const markup = renderToStaticMarkup(
       createElement(AdminDashboardPanel, {
         notificationBacklog: [],
+        onNavigateOperationTarget: vi.fn(),
         onReconcileNotification: vi.fn(),
+        onRepairOperation: vi.fn(),
         onSendNotification: vi.fn(),
+        operations: null,
         periods: [
           { ...sentPeriod, isClosed: false, notification: null, windowState: "not_open_yet" },
           { ...sentPeriod, isClosed: false, notification: null, windowState: "open" },
@@ -67,8 +73,11 @@ describe("AdminDashboardPanel notification reconciliation", () => {
           ...unknownDelivery,
           date: `2026-06-${String(index + 1).padStart(2, "0")}`
         })),
+        onNavigateOperationTarget: vi.fn(),
         onReconcileNotification: vi.fn(),
+        onRepairOperation: vi.fn(),
         onSendNotification: vi.fn(),
+        operations: null,
         periods: [sentPeriod],
         statistics
       })
