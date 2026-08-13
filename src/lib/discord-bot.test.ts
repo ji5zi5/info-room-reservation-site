@@ -15,6 +15,81 @@ const payload = {
 } satisfies DiscordBotMessagePayload;
 
 describe("Discord bot REST transport", () => {
+  it("reads exactly one bounded channel-history page with an optional before cursor", async () => {
+    // Given: Discord returns one valid history page containing nonce-bearing messages.
+    const requests: Request[] = [];
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async (input, init) => {
+        requests.push(new Request(input, init));
+        return new Response(JSON.stringify([
+          { id: "456", nonce: "reservation-nonce" },
+          { id: "455", nonce: null }
+        ]), { headers: { "content-type": "application/json" }, status: 200 });
+      }
+    });
+
+    // When: one bounded page is requested before a known message.
+    const result = await bot.listChannelMessagesPage({ before: "500", channelId: "321", limit: 25 });
+
+    // Then: only the bounded GET is made and the strict response is returned.
+    expect(result).toEqual({
+      kind: "found",
+      messages: [{ id: "456", nonce: "reservation-nonce" }, { id: "455", nonce: null }]
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe("GET");
+    expect(requests[0]?.headers.get("authorization")).toBe(`Bot ${botToken}`);
+    expect(requests[0]?.url).toBe("https://discord.com/api/v10/channels/321/messages?limit=25&before=500");
+  });
+
+  it("caps channel history at Discord's maximum and rejects untrusted message shapes", async () => {
+    // Given: Discord returns a malformed history item for an oversized caller limit.
+    const requests: Request[] = [];
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async (input, init) => {
+        requests.push(new Request(input, init));
+        return new Response(JSON.stringify([{ id: "", nonce: botToken }]), {
+          headers: { "content-type": "application/json" },
+          status: 200
+        });
+      }
+    });
+
+    // When: the caller asks for more than one Discord page.
+    const result = await bot.listChannelMessagesPage({ channelId: "321", limit: 500 });
+
+    // Then: one capped request is made and no external content is returned.
+    expect(result).toEqual({ code: "discord_invalid_history_response", kind: "retryable_failure" });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("https://discord.com/api/v10/channels/321/messages?limit=100");
+    expect(JSON.stringify(result)).not.toContain(botToken);
+  });
+
+  it.each([
+    [429, "retryable_failure"],
+    [500, "retryable_failure"],
+    [401, "terminal_failure"],
+    [403, "terminal_failure"]
+  ] as const)("classifies channel-history HTTP %s as %s without returning response content", async (status, kind) => {
+    // Given: Discord returns an error body containing secret external text.
+    const bot = createDiscordBotClient({
+      applicationId: "123",
+      botToken,
+      fetch: async () => new Response(`secret=${botToken}`, { status })
+    });
+
+    // When: one history page is requested.
+    const result = await bot.listChannelMessagesPage({ channelId: "321", limit: 25 });
+
+    // Then: only the safe status classification crosses the transport boundary.
+    expect(result).toEqual({ code: `discord_http_${status}`, kind });
+    expect(JSON.stringify(result)).not.toContain(botToken);
+  });
+
   it("creates, edits, and completes messages through the Discord REST endpoints", async () => {
     // Given: a bot client backed by a wire-level fetch fake.
     const requests: Request[] = [];

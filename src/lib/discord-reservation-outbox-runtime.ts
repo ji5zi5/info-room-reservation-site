@@ -1,5 +1,10 @@
 import type { DiscordApplicationConfig } from "./discord-app-config";
-import { createDiscordBotClient, type DiscordBotClient, type DiscordGuildMemberClient } from "./discord-bot";
+import {
+  createDiscordBotClient,
+  type DiscordBotClient,
+  type DiscordChannelHistoryClient,
+  type DiscordGuildMemberClient
+} from "./discord-bot";
 import type { DiscordInteractionDispatchResult } from "./discord-interaction-job-runner";
 import {
   authorizeCurrentDiscordReservationActor,
@@ -64,7 +69,7 @@ export async function dispatchDiscordReservationOperation(input: {
 
 export function defaultDiscordReservationOutboxDependencies(): DiscordReservationOutboxDependencies {
   const config = (): DiscordApplicationConfig | null => parseServerEnv().discordApplication;
-  const bot = delegatingBotClient(config);
+  const bot = createDelegatingDiscordBotClient(config);
   return {
     bot,
     getApplicationConfig: config,
@@ -79,20 +84,27 @@ export function defaultDiscordReservationOutboxDependencies(): DiscordReservatio
   };
 }
 
-function delegatingBotClient(config: () => DiscordApplicationConfig | null): DiscordBotClient & DiscordGuildMemberClient {
-  const client = (): DiscordBotClient & DiscordGuildMemberClient => {
+export function createDelegatingDiscordBotClient(
+  config: () => DiscordApplicationConfig | null,
+  createClient: (input: {
+    readonly applicationId: string;
+    readonly botToken: string;
+  }) => DiscordBotClient & DiscordGuildMemberClient & DiscordChannelHistoryClient = createDiscordBotClient
+): DiscordBotClient & DiscordGuildMemberClient & DiscordChannelHistoryClient {
+  const client = (): DiscordBotClient & DiscordGuildMemberClient & DiscordChannelHistoryClient => {
     const current = config();
     if (current === null) {
       throw new DiscordApplicationUnavailableError();
     }
-    return createDiscordBotClient({ applicationId: current.applicationId, botToken: current.botToken });
+    return createClient({ applicationId: current.applicationId, botToken: current.botToken });
   };
   return {
     createChannelMessage: (input) => client().createChannelMessage(input),
     deleteChannelMessage: (input) => client().deleteChannelMessage(input),
     editChannelMessage: (input) => client().editChannelMessage(input),
     editOriginalEphemeralResponse: (input) => client().editOriginalEphemeralResponse(input),
-    getGuildMember: (input) => client().getGuildMember(input)
+    getGuildMember: (input) => client().getGuildMember(input),
+    listChannelMessagesPage: (input) => client().listChannelMessagesPage(input)
   };
 }
 

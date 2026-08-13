@@ -10,6 +10,7 @@ export { redactDiscordBotTokens } from "./discord-bot-errors";
 const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
 const DISCORD_BOT_TIMEOUT_MS = 10_000;
 const MAX_RATE_LIMIT_RETRIES = 1;
+export const DISCORD_CHANNEL_HISTORY_MAX_PAGE_SIZE = 100;
 
 const discordMessageResponseSchema = z.object({
   id: z.string().min(1)
@@ -17,6 +18,10 @@ const discordMessageResponseSchema = z.object({
 const discordGuildMemberSchema = z.object({
   roles: z.array(z.string())
 });
+const discordChannelHistorySchema = z.array(z.object({
+  id: z.string().min(1),
+  nonce: z.union([z.string(), z.null()]).optional()
+}));
 
 export type DiscordEmbedField = {
   readonly inline: boolean;
@@ -81,6 +86,25 @@ export type DiscordGuildMemberLookupResult =
   | { readonly code: string; readonly kind: "retryable_failure" }
   | { readonly code: string; readonly kind: "terminal_failure" };
 
+export type DiscordChannelHistoryPageResult =
+  | {
+      readonly kind: "found";
+      readonly messages: readonly {
+        readonly id: string;
+        readonly nonce: string | null;
+      }[];
+    }
+  | { readonly code: string; readonly kind: "retryable_failure" }
+  | { readonly code: string; readonly kind: "terminal_failure" };
+
+export type DiscordChannelHistoryClient = {
+  readonly listChannelMessagesPage: (input: {
+    readonly before?: string;
+    readonly channelId: string;
+    readonly limit: number;
+  }) => Promise<DiscordChannelHistoryPageResult>;
+};
+
 export type DiscordBotClient = {
   readonly createChannelMessage: (input: {
     readonly channelId: string;
@@ -124,7 +148,9 @@ type RequestOptions = {
   readonly url: string;
 };
 
-export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBotClient & DiscordGuildMemberClient {
+export function createDiscordBotClient(
+  input: DiscordBotClientInput
+): DiscordBotClient & DiscordGuildMemberClient & DiscordChannelHistoryClient {
   const sleep = input.sleep ?? sleepFor;
   const http = ky.create({
     ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
@@ -239,6 +265,42 @@ export function createDiscordBotClient(input: DiscordBotClientInput): DiscordBot
         if (error instanceof TimeoutError || error instanceof TypeError) {
           return {
             code: error instanceof TimeoutError ? "discord_timeout" : "discord_network_error",
+            kind: "retryable_failure"
+          };
+        }
+        throw error;
+      }
+    },
+    listChannelMessagesPage: async ({ before, channelId, limit }) => {
+      const boundedLimit = Math.max(1, Math.min(DISCORD_CHANNEL_HISTORY_MAX_PAGE_SIZE, Math.trunc(limit)));
+      const searchParams = new URLSearchParams({ limit: String(boundedLimit) });
+      if (before !== undefined) searchParams.set("before", before);
+      try {
+        const body = await http.get(
+          `${DISCORD_API_BASE_URL}/channels/${encodeURIComponent(channelId)}/messages?${searchParams.toString()}`,
+          { headers: { authorization: `Bot ${input.botToken}` } }
+        ).json<unknown>();
+        const parsed = discordChannelHistorySchema.safeParse(body);
+        return parsed.success
+          ? {
+              kind: "found",
+              messages: parsed.data.map((message) => ({ id: message.id, nonce: message.nonce ?? null }))
+            }
+          : { code: "discord_invalid_history_response", kind: "retryable_failure" };
+      } catch (error) {
+        if (error instanceof HTTPError) {
+          const status = error.response.status;
+          return status === 401 || status === 403
+            ? { code: `discord_http_${status}`, kind: "terminal_failure" }
+            : { code: `discord_http_${status}`, kind: "retryable_failure" };
+        }
+        if (error instanceof TimeoutError || error instanceof TypeError || error instanceof SyntaxError) {
+          return {
+            code: error instanceof TimeoutError
+              ? "discord_timeout"
+              : error instanceof SyntaxError
+                ? "discord_invalid_history_response"
+                : "discord_network_error",
             kind: "retryable_failure"
           };
         }
