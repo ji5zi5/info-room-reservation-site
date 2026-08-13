@@ -24,7 +24,17 @@ import {
 } from "./admin-types";
 
 type JsonResponseSchema<T> = {
-  readonly parse: (value: unknown) => T;
+  readonly safeParse: (value: unknown) =>
+    | { readonly data: T; readonly success: true }
+    | { readonly success: false };
+};
+
+export type AdminReadPage<T> = {
+  readonly cutoff: string;
+  readonly currentTotalCount: number;
+  readonly expiresAt: string;
+  readonly items: readonly T[];
+  readonly nextCursor: string | null;
 };
 
 export type AdminReadResult<T> =
@@ -79,6 +89,7 @@ export async function fetchAdminStatistics(
 
 export async function fetchAdminReservations(
   input: {
+    readonly cursor?: string;
     readonly date: string;
     readonly query: string;
     readonly reservationId?: string;
@@ -87,7 +98,7 @@ export async function fetchAdminReservations(
     readonly userId?: string | null;
   },
   options?: AdminReadOptions
-): Promise<AdminReadResult<readonly AdminReservation[]>> {
+): Promise<AdminReadResult<AdminReadPage<AdminReservation>>> {
   const params = new URLSearchParams({
     date: input.date,
     query: input.query,
@@ -100,19 +111,31 @@ export async function fetchAdminReservations(
   if (input.reservationId) {
     params.set("reservationId", input.reservationId);
   }
+  if (input.cursor) {
+    params.set("cursor", input.cursor);
+  }
   const response = await fetch(`/api/admin/reservations?${params.toString()}`, options);
-  const result = await readJsonResponse(response, AdminReservationsPayloadSchema);
-  return result.kind === "ok" ? { data: result.data.reservations, kind: "ok" } : result;
+  return readJsonResponse(response, AdminReservationsPayloadSchema);
 }
 
 export async function fetchAdminUsers(
-  input: { readonly query: string; readonly status: AdminUserStatusFilter },
+  input: {
+    readonly cursor?: string;
+    readonly query: string;
+    readonly status: AdminUserStatusFilter;
+    readonly userId?: string;
+  },
   options?: AdminReadOptions
-): Promise<AdminReadResult<readonly AdminUser[]>> {
+): Promise<AdminReadResult<AdminReadPage<AdminUser>>> {
   const params = new URLSearchParams({ bookingStatus: input.status, query: input.query });
+  if (input.userId) {
+    params.set("userId", input.userId);
+  }
+  if (input.cursor) {
+    params.set("cursor", input.cursor);
+  }
   const response = await fetch(`/api/admin/users?${params.toString()}`, options);
-  const result = await readJsonResponse(response, AdminUsersPayloadSchema);
-  return result.kind === "ok" ? { data: result.data.users, kind: "ok" } : result;
+  return readJsonResponse(response, AdminUsersPayloadSchema);
 }
 
 export async function fetchAdminUserDetail(
@@ -125,13 +148,23 @@ export async function fetchAdminUserDetail(
 }
 
 export async function fetchAdminAuditActions(
-  input: { readonly action: AdminAuditActionFilter; readonly query: string },
+  input: {
+    readonly action: AdminAuditActionFilter;
+    readonly actionId?: string;
+    readonly cursor?: string;
+    readonly query: string;
+  },
   options?: AdminReadOptions
-): Promise<AdminReadResult<readonly AdminAuditAction[]>> {
+): Promise<AdminReadResult<AdminReadPage<AdminAuditAction>>> {
   const params = new URLSearchParams({ action: input.action, query: input.query });
+  if (input.actionId) {
+    params.set("actionId", input.actionId);
+  }
+  if (input.cursor) {
+    params.set("cursor", input.cursor);
+  }
   const response = await fetch(`/api/admin/actions?${params.toString()}`, options);
-  const result = await readJsonResponse(response, AdminAuditActionsPayloadSchema);
-  return result.kind === "ok" ? { data: result.data.actions, kind: "ok" } : result;
+  return readJsonResponse(response, AdminAuditActionsPayloadSchema);
 }
 
 async function readJsonResponse<T>(
@@ -152,7 +185,10 @@ async function readJsonResponse<T>(
   if (payload === null) {
     return { kind: "error", message: "관리자 데이터 응답 형식이 올바르지 않습니다." };
   }
-  return { data: schema.parse(payload), kind: "ok" };
+  const parsed = schema.safeParse(payload);
+  return parsed.success
+    ? { data: parsed.data, kind: "ok" }
+    : { kind: "error", message: "관리자 데이터 응답 형식이 올바르지 않습니다." };
 }
 
 function parseJsonBody(body: string): unknown | null {

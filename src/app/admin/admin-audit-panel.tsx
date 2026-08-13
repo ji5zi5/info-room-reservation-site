@@ -45,7 +45,6 @@ export function AdminAuditPanel({
       <div className="topbar">
         <div>
           <h2>감사 로그</h2>
-          <p className="muted">최근 최대 80건 표시 · 최대 200건 조회</p>
         </div>
         <div className="admin-action-row">
           <button className="ghost-button" type="button" onClick={() => void copyAuditCsv()}>

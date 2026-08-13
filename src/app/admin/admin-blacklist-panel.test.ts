@@ -6,7 +6,7 @@ import { AdminBlacklistPanel } from "./admin-blacklist-panel";
 import type { AdminUser } from "./admin-types";
 
 describe("AdminBlacklistPanel", () => {
-  it("shows only 20 matching candidates while disclosing the 100-user request cap", () => {
+  it("shows only 20 matching candidates", () => {
     const users = Array.from({ length: 21 }, (_, index) => ({
       bookingStatus: "ACTIVE",
       generation: 32,
@@ -30,7 +30,6 @@ describe("AdminBlacklistPanel", () => {
       })
     );
 
-    expect(markup).toContain("검색 결과 최대 20명 표시 · 요청당 최대 100명 조회");
     expect(markup).toContain("검색 학생 19");
     expect(markup).not.toContain("검색 학생 20");
   });

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { TransactionRetryExhaustedError } from "@/lib/db-context";
 import type { RateLimitResult } from "@/lib/rate-limit";
@@ -66,6 +67,7 @@ const routeMocks = vi.hoisted(() => ({
   enforceAdminMutationRateLimit: vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
   getMockAdminReservations: vi.fn<GetMockAdminReservations>(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
+  mockReservations: [] as unknown[],
   periodSettingFindMany: vi.fn<PeriodSettingFindMany>(),
   rawCalls: [] as Array<{ readonly strings: readonly string[]; readonly values: readonly unknown[] }>,
   requireAdmin: vi.fn<RequireAdmin>(),
@@ -98,6 +100,10 @@ vi.mock("@/lib/mock-admin-reservation-create", () => ({
 
 vi.mock("@/lib/mock-reservation-data", () => ({
   getMockAdminReservations: routeMocks.getMockAdminReservations
+}));
+
+vi.mock("@/lib/mock-reservation-state", () => ({
+  mockReservations: routeMocks.mockReservations
 }));
 
 vi.mock("@/lib/request-csrf", () => ({
@@ -160,7 +166,9 @@ describe("admin reservations route", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-16T05:00:00.000Z"));
+    vi.stubEnv("SESSION_SECRET", "todo-12-route-cursor-secret");
     vi.resetAllMocks();
+    routeMocks.mockReservations.length = 0;
     routeMocks.rawCalls.length = 0;
     routeMocks.requireMutatingRequestSafety.mockReturnValue(null);
     routeMocks.requireAdmin.mockResolvedValue(adminUser);
@@ -181,7 +189,14 @@ describe("admin reservations route", () => {
     routeMocks.transaction.mockImplementation(async (operation) => operation(transactionClient()));
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
   it("selects and returns only fields used by the admin reservation list", async () => {
+    // Given: one filtered reservation and its current matching count.
+    routeMocks.reservationCount.mockResolvedValue(1);
     routeMocks.reservationFindMany.mockResolvedValue([
       {
         createdAt: new Date("2026-06-16T05:00:00.000Z"),
@@ -205,11 +220,14 @@ describe("admin reservations route", () => {
       }
     ]);
 
+    // When: the first bounded page is requested.
     const response = await GET(new Request("https://example.test/api/admin/reservations?date=2026-06-16"));
 
+    // Then: the database query is bounded and the response is a strict terminal page.
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(routeMocks.reservationFindMany).toHaveBeenCalledWith({
+      orderBy: [{ studyPeriod: "asc" }, { createdAt: "asc" }, { id: "asc" }],
       select: {
         createdAt: true,
         date: true,
@@ -227,10 +245,14 @@ describe("admin reservations route", () => {
           }
         }
       },
-      where: { date: "2026-06-16" }
+      take: 51,
+      where: {
+        createdAt: { lte: new Date("2026-06-16T05:00:00.000Z") },
+        date: "2026-06-16",
+        status: "CONFIRMED"
+      }
     });
-    await expect(response.json()).resolves.toEqual({
-      reservations: [
+    await expect(response.json()).resolves.toEqual(pagePayload([
         {
           createdAt: "2026-06-16T05:00:00.000Z",
           date: "2026-06-16",
@@ -246,22 +268,23 @@ describe("admin reservations route", () => {
             studentNumber: "31001"
           }
         }
-      ]
-    });
+      ], 1));
   });
 
-  it("returns one confirmed deep-link target outside a 100-plus general fixture Given unrelated filters When reservationId is valid Then Prisma uses its exact id/date/status lookup", async () => {
+  it("returns one terminal exact target outside a 100-plus fixture regardless of list filters", async () => {
+    // Given: a cancelled exact target outside an unrelated 101-row fixture.
     const generalFixture = createGeneralReservationFixture();
     const target = reservationListRow({
       id: "deep-link-target-101",
-      status: "CONFIRMED",
+      status: "CANCELLED",
       studyPeriod: "EIGHTH",
       userId: "target-student"
     });
     routeMocks.reservationFindMany.mockImplementation(async (input) =>
-      isConfirmedReservationLookup(input, target.id) ? [target] : generalFixture
+      isExactReservationLookup(input, target.id) ? [target] : generalFixture
     );
 
+    // When: the exact ID is requested with conflicting date/status/list filters.
     const response = await GET(
       createReadRequest({
         query: "cannot-find-target",
@@ -272,30 +295,33 @@ describe("admin reservations route", () => {
       })
     );
 
+    // Then: only the exact ID is queried and its terminal status is preserved.
     expect(generalFixture).toHaveLength(101);
     expect(response.status).toBe(200);
     expect(routeMocks.reservationFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 1,
-        where: { date: "2026-06-16", id: target.id, status: "CONFIRMED" }
+        where: { id: target.id }
       })
     );
-    await expect(response.json()).resolves.toEqual({ reservations: [reservationDto(target)] });
+    await expect(response.json()).resolves.toEqual(pagePayload([reservationDto(target)], 1));
   });
 
-  it("returns the same one confirmed deep-link target in mock mode Given unrelated filters When reservationId is valid Then mock filtering bypasses the general fixture", async () => {
-    const generalFixture = createGeneralReservationFixture();
-    const target = reservationListRow({
+  it("returns a non-confirmed off-date reservation by exact ID in mock mode", async () => {
+    // Given: a cancelled mock target exists only outside the requested date and status.
+    const target = {
+      ...reservationListRow({
       id: "mock-deep-link-target-101",
-      status: "CONFIRMED",
+      status: "CANCELLED",
       studyPeriod: "EIGHTH",
       userId: "target-student"
-    });
+      }),
+      date: "2026-06-15"
+    };
+    routeMocks.mockReservations.push(target);
     routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
-    routeMocks.getMockAdminReservations.mockImplementation((input) =>
-      isMockConfirmedReservationLookup(input, target.id) ? [target] : generalFixture
-    );
 
+    // When: the exact ID is requested with a different date and status filter.
     const response = await GET(
       createReadRequest({
         query: "cannot-find-target",
@@ -306,15 +332,98 @@ describe("admin reservations route", () => {
       })
     );
 
-    expect(generalFixture).toHaveLength(101);
+    // Then: mock mode uses ID-only semantics just like Prisma.
     expect(response.status).toBe(200);
-    expect(routeMocks.getMockAdminReservations).toHaveBeenCalledWith(
-      expect.objectContaining({ date: "2026-06-16", reservationId: target.id })
-    );
-    await expect(response.json()).resolves.toEqual({ reservations: [reservationDto(target)] });
+    expect(routeMocks.getMockAdminReservations).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual(pagePayload([reservationDto(target)], 1));
   });
 
-  it("returns no target Given reservationId names a cancelled reservation When the exact confirmed lookup runs Then cancellation cannot be opened", async () => {
+  it("paginates more than 50 filtered mock reservations with a signed cursor", async () => {
+    // Given: 52 matching rows cross the period tuple at the cutoff, with one later row excluded.
+    const fixture = [
+      ...Array.from({ length: 2 }, (_unused, index) => reservationListRow({
+        id: `mock-page-first-${String(index + 1).padStart(3, "0")}`,
+        status: "CONFIRMED",
+        studyPeriod: "FIRST",
+        userId: `mock-page-first-student-${String(index + 1).padStart(3, "0")}`
+      })),
+      ...Array.from({ length: 50 }, (_unused, index) => reservationListRow({
+        id: `mock-page-eighth-${String(index + 1).padStart(3, "0")}`,
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId: `mock-page-eighth-student-${String(index + 1).padStart(3, "0")}`
+      })),
+      reservationListRow({
+        createdAt: new Date("2026-06-16T05:00:00.001Z"),
+        id: "mock-page-after-cutoff",
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId: "mock-page-after-cutoff-student"
+      })
+    ].reverse();
+    routeMocks.getMockAdminReservations.mockReturnValue(fixture);
+    routeMocks.isNoDatabaseMockMode.mockReturnValue(true);
+
+    const pageSchema = z.object({
+      currentTotalCount: z.number(),
+      items: z.array(z.object({ id: z.string() })),
+      nextCursor: z.string().nullable()
+    });
+
+    // When: page one and page two use the route-issued cursor with unchanged filters.
+    const firstResponse = await GET(createReadRequest({
+      query: "",
+      reservationId: "",
+      status: "CONFIRMED",
+      studyPeriod: "ALL",
+      userId: null
+    }));
+    const firstPage = pageSchema.parse(await firstResponse.json());
+    const secondResponse = await GET(createReadRequest({
+      cursor: firstPage.nextCursor,
+      query: "",
+      reservationId: "",
+      status: "CONFIRMED",
+      studyPeriod: "ALL",
+      userId: null
+    }));
+    const secondPage = pageSchema.parse(await secondResponse.json());
+
+    // Then: pagination preserves the tuple, cutoff, total, signed filter binding, and terminal page.
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(firstPage.currentTotalCount).toBe(52);
+    expect(firstPage.items.map((item) => item.id)).toEqual(
+      Array.from({ length: 50 }, (_unused, index) => `mock-page-eighth-${String(index + 1).padStart(3, "0")}`)
+    );
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+    expect(secondPage.currentTotalCount).toBe(52);
+    expect(secondPage.items.map((item) => item.id)).toEqual(["mock-page-first-001", "mock-page-first-002"]);
+    expect(secondPage.nextCursor).toBeNull();
+    const seenIds = [...firstPage.items, ...secondPage.items].map((item) => item.id);
+    expect(new Set(seenIds).size).toBe(52);
+    expect(seenIds).not.toContain("mock-page-after-cutoff");
+    expect(routeMocks.getMockAdminReservations).toHaveBeenCalledTimes(2);
+    expect(routeMocks.getMockAdminReservations).toHaveBeenCalledWith({
+      date: "2026-06-16",
+      filters: { query: "", studyPeriod: "ALL", userId: null },
+      status: "CONFIRMED"
+    });
+
+    const alteredFilterResponse = await GET(createReadRequest({
+      cursor: firstPage.nextCursor,
+      query: "changed",
+      reservationId: "",
+      status: "CONFIRMED",
+      studyPeriod: "ALL",
+      userId: null
+    }));
+    expect(alteredFilterResponse.status).toBe(400);
+    await expect(alteredFilterResponse.json()).resolves.toMatchObject({ error: { code: "CURSOR_FILTER_MISMATCH" } });
+  });
+
+  it("returns a cancelled reservation when its exact ID is authorized", async () => {
+    // Given: a cancelled reservation that would be excluded by the active list filters.
     const generalFixture = createGeneralReservationFixture();
     const cancelled = reservationListRow({
       id: "cancelled-deep-link-target",
@@ -323,9 +432,10 @@ describe("admin reservations route", () => {
       userId: "cancelled-student"
     });
     routeMocks.reservationFindMany.mockImplementation(async (input) =>
-      isConfirmedReservationLookup(input, cancelled.id) ? [] : [...generalFixture, cancelled]
+      isExactReservationLookup(input, cancelled.id) ? [cancelled] : [...generalFixture, cancelled]
     );
 
+    // When: its exact ID is requested.
     const response = await GET(
       createReadRequest({
         query: "",
@@ -336,23 +446,198 @@ describe("admin reservations route", () => {
       })
     );
 
+    // Then: status filters do not hide the authorized exact target.
     expect(response.status).toBe(200);
     expect(routeMocks.reservationFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 1,
-        where: { date: "2026-06-16", id: cancelled.id, status: "CONFIRMED" }
+        where: { id: cancelled.id }
       })
     );
-    await expect(response.json()).resolves.toEqual({ reservations: [] });
+    await expect(response.json()).resolves.toEqual(pagePayload([reservationDto(cancelled)], 1));
   });
 
-  it("returns no target Given reservationId does not exist When the exact confirmed lookup runs Then the general fixture is not substituted", async () => {
+  it("keeps cursor order and cutoff while status drift changes the current total", async () => {
+    // Given: 52 confirmed reservations and a status change after the first page is issued.
+    const fixture = [
+      ...Array.from({ length: 50 }, (_unused, index) => reservationListRow({
+        id: `drift-eighth-${String(index + 1).padStart(3, "0")}`,
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId: `drift-eighth-student-${String(index + 1).padStart(3, "0")}`
+      })),
+      ...Array.from({ length: 2 }, (_unused, index) => reservationListRow({
+        id: `drift-first-${String(index + 1).padStart(3, "0")}`,
+        status: "CONFIRMED",
+        studyPeriod: "FIRST",
+        userId: `drift-first-student-${String(index + 1).padStart(3, "0")}`
+      }))
+    ];
+    routeMocks.reservationCount.mockImplementation(async () =>
+      fixture.filter((reservation) => reservation.status === "CONFIRMED").length
+    );
+    routeMocks.reservationFindMany.mockImplementation(async () => {
+      const confirmed = fixture.filter((reservation) => reservation.status === "CONFIRMED");
+      return routeMocks.reservationFindMany.mock.calls.length === 1
+        ? confirmed.slice(0, 51)
+        : confirmed.slice(50);
+    });
+    const pageSchema = z.object({
+      cutoff: z.string(),
+      currentTotalCount: z.number(),
+      expiresAt: z.string(),
+      items: z.array(z.object({ id: z.string() })),
+      nextCursor: z.string().nullable()
+    });
+
+    // When: page two reuses page one's cursor after the final reservation leaves the status filter.
+    const firstResponse = await GET(createReadRequest({
+      query: "drift",
+      reservationId: "",
+      status: "CONFIRMED",
+      studyPeriod: "ALL",
+      userId: null
+    }));
+    const firstPage = pageSchema.parse(await firstResponse.json());
+    const driftedReservation = fixture[51];
+    if (driftedReservation === undefined) {
+      throw new Error("missing status-drift fixture");
+    }
+    fixture[51] = { ...driftedReservation, status: "CANCELLED" };
+    const secondResponse = await GET(createReadRequest({
+      cursor: firstPage.nextCursor,
+      query: "drift",
+      reservationId: "",
+      status: "CONFIRMED",
+      studyPeriod: "ALL",
+      userId: null
+    }));
+    const secondPage = pageSchema.parse(await secondResponse.json());
+
+    // Then: the cursor snapshot remains creation-bounded and ordered while the live count is truthful.
+    expect(firstResponse.status).toBe(200);
+    expect(firstPage.items).toHaveLength(50);
+    expect(firstPage.items.at(-1)?.id).toBe("drift-eighth-050");
+    expect(firstPage.currentTotalCount).toBe(52);
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+    expect(secondResponse.status).toBe(200);
+    expect(secondPage).toMatchObject({
+      cutoff: firstPage.cutoff,
+      currentTotalCount: 51,
+      expiresAt: firstPage.expiresAt,
+      items: [{ id: "drift-first-001" }],
+      nextCursor: null
+    });
+    expect(routeMocks.reservationFindMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      orderBy: [{ studyPeriod: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      take: 51,
+      where: expect.objectContaining({
+        createdAt: { lte: new Date(firstPage.cutoff) },
+        status: "CONFIRMED",
+        OR: [
+          { studyPeriod: "FIRST" },
+          { studyPeriod: "EIGHTH", createdAt: { gt: new Date("2026-06-16T05:00:00.000Z") } },
+          { studyPeriod: "EIGHTH", createdAt: new Date("2026-06-16T05:00:00.000Z"), id: { gt: "drift-eighth-050" } }
+        ]
+      })
+    }));
+  });
+
+  it("traverses every filtered reservation beyond the former cap with route-issued cursors", async () => {
+    // Given: 127 matching rows crossing the EIGHTH/FIRST boundary at a shared timestamp.
+    const fixture = [
+      ...Array.from({ length: 64 }, (_unused, index) => reservationListRow({
+        id: `cursor-eighth-${String(index + 1).padStart(3, "0")}`,
+        status: "CONFIRMED",
+        studyPeriod: "EIGHTH",
+        userId: `cursor-student-eighth-${String(index + 1).padStart(3, "0")}`
+      })),
+      ...Array.from({ length: 63 }, (_unused, index) => reservationListRow({
+        id: `cursor-first-${String(index + 1).padStart(3, "0")}`,
+        status: "CONFIRMED",
+        studyPeriod: "FIRST",
+        userId: `cursor-student-first-${String(index + 1).padStart(3, "0")}`
+      }))
+    ];
+    routeMocks.reservationCount.mockResolvedValue(fixture.length);
+    routeMocks.reservationFindMany
+      .mockResolvedValueOnce(fixture.slice(0, 51))
+      .mockResolvedValueOnce(fixture.slice(50, 101))
+      .mockResolvedValueOnce(fixture.slice(100));
+    const pageSchema = z.object({
+      cutoff: z.string(),
+      currentTotalCount: z.number(),
+      items: z.array(z.object({ id: z.string() })),
+      nextCursor: z.string().nullable()
+    });
+    const seenIds: string[] = [];
+    let cursor: string | null = null;
+    let pageCount = 0;
+
+    // When: each page request supplies the preceding response's signed cursor without recreating it.
+    do {
+      const response = await GET(createReadRequest({
+        cursor,
+        query: "cursor",
+        reservationId: "",
+        status: "CONFIRMED",
+        studyPeriod: "ALL",
+        userId: null
+      }));
+      expect(response.status).toBe(200);
+      const page = pageSchema.parse(await response.json());
+      expect(page.cutoff).toBe("2026-06-16T05:00:00.000Z");
+      expect(page.currentTotalCount).toBe(127);
+      seenIds.push(...page.items.map((item) => item.id));
+      cursor = page.nextCursor;
+      pageCount += 1;
+    } while (cursor !== null);
+
+    // Then: filters, cutoff, period-first ordering, and cursor tuple visit each row once and terminate.
+    expect(pageCount).toBe(3);
+    expect(seenIds).toEqual(fixture.map((reservation) => reservation.id));
+    expect(new Set(seenIds).size).toBe(fixture.length);
+    expect(routeMocks.reservationFindMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      orderBy: [{ studyPeriod: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      take: 51,
+      where: expect.objectContaining({
+        createdAt: { lte: new Date("2026-06-16T05:00:00.000Z") },
+        date: "2026-06-16",
+        status: "CONFIRMED"
+      })
+    }));
+    expect(routeMocks.reservationFindMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      orderBy: [{ studyPeriod: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      take: 51,
+      where: expect.objectContaining({
+        OR: [
+          { studyPeriod: "FIRST" },
+          { studyPeriod: "EIGHTH", createdAt: { gt: new Date("2026-06-16T05:00:00.000Z") } },
+          { studyPeriod: "EIGHTH", createdAt: new Date("2026-06-16T05:00:00.000Z"), id: { gt: "cursor-eighth-050" } }
+        ]
+      })
+    }));
+    expect(routeMocks.reservationFindMany).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      orderBy: [{ studyPeriod: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      take: 51,
+      where: expect.objectContaining({
+        OR: [
+          { studyPeriod: "FIRST", createdAt: { gt: new Date("2026-06-16T05:00:00.000Z") } },
+          { studyPeriod: "FIRST", createdAt: new Date("2026-06-16T05:00:00.000Z"), id: { gt: "cursor-first-036" } }
+        ]
+      })
+    }));
+  });
+
+  it("returns no target when the exact reservation ID is missing", async () => {
+    // Given: a missing exact ID and an unrelated general fixture.
     const generalFixture = createGeneralReservationFixture();
     const missingReservationId = "missing-deep-link-target";
     routeMocks.reservationFindMany.mockImplementation(async (input) =>
-      isConfirmedReservationLookup(input, missingReservationId) ? [] : generalFixture
+      isExactReservationLookup(input, missingReservationId) ? [] : generalFixture
     );
 
+    // When: the missing exact ID is requested.
     const response = await GET(
       createReadRequest({
         query: "",
@@ -363,20 +648,23 @@ describe("admin reservations route", () => {
       })
     );
 
+    // Then: no substitute row is returned.
     expect(response.status).toBe(200);
     expect(routeMocks.reservationFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 1,
-        where: { date: "2026-06-16", id: missingReservationId, status: "CONFIRMED" }
+        where: { id: missingReservationId }
       })
     );
-    await expect(response.json()).resolves.toEqual({ reservations: [] });
+    await expect(response.json()).resolves.toEqual(pagePayload([], 0));
   });
 
-  it("returns no target Given reservationId is malformed When the list route reads the request Then the invalid id is never used as an exact lookup", async () => {
+  it("rejects a malformed exact reservation ID before database lookup", async () => {
+    // Given: an exact ID outside the approved identifier grammar.
     const malformedReservationId = "invalid/reservation-id";
     routeMocks.reservationFindMany.mockResolvedValue([]);
 
+    // When: the malformed exact ID crosses the route boundary.
     const response = await GET(
       createReadRequest({
         query: "",
@@ -387,12 +675,13 @@ describe("admin reservations route", () => {
       })
     );
 
-    expect(response.status).toBe(200);
+    // Then: the route returns a typed client error without querying a substitute.
+    expect(response.status).toBe(400);
     expect(routeMocks.reservationFindMany).not.toHaveBeenCalled();
     expect(routeMocks.reservationFindMany).not.toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: malformedReservationId }) })
     );
-    await expect(response.json()).resolves.toEqual({ reservations: [] });
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "bad_request" } });
   });
 
   it("creates a confirmed reservation for the requested student and records admin audit", async () => {
@@ -534,6 +823,7 @@ type ReservationListRow = ReservationRow & {
 };
 
 type ReadRequestInput = {
+  readonly cursor?: string | null;
   readonly query: string;
   readonly reservationId: string;
   readonly status: string;
@@ -553,13 +843,14 @@ function createGeneralReservationFixture(): readonly ReservationListRow[] {
 }
 
 function reservationListRow(input: {
+  readonly createdAt?: Date;
   readonly id: string;
   readonly status: string;
   readonly studyPeriod: StudyPeriod;
   readonly userId: string;
 }): ReservationListRow {
   return {
-    createdAt: new Date("2026-06-16T05:00:00.000Z"),
+    createdAt: input.createdAt ?? new Date("2026-06-16T05:00:00.000Z"),
     date: "2026-06-16",
     id: input.id,
     reason: null,
@@ -580,17 +871,22 @@ function createReadRequest(input: ReadRequestInput): Request {
   const params = new URLSearchParams({
     date: "2026-06-16",
     query: input.query,
-    reservationId: input.reservationId,
     status: input.status,
     studyPeriod: input.studyPeriod
   });
+  if (input.reservationId.length > 0) {
+    params.set("reservationId", input.reservationId);
+  }
+  if (input.cursor !== null && input.cursor !== undefined) {
+    params.set("cursor", input.cursor);
+  }
   if (input.userId !== null) {
     params.set("userId", input.userId);
   }
   return new Request(`https://example.test/api/admin/reservations?${params.toString()}`);
 }
 
-function isConfirmedReservationLookup(input: unknown, reservationId: string): boolean {
+function isExactReservationLookup(input: unknown, reservationId: string): boolean {
   if (typeof input !== "object" || input === null || !("where" in input)) {
     return false;
   }
@@ -598,20 +894,21 @@ function isConfirmedReservationLookup(input: unknown, reservationId: string): bo
   if (
     typeof where !== "object" ||
     where === null ||
-    !("date" in where) ||
-    !("id" in where) ||
-    !("status" in where)
+    !("id" in where)
   ) {
     return false;
   }
-  return where.date === "2026-06-16" && where.id === reservationId && where.status === "CONFIRMED";
+  return where.id === reservationId;
 }
 
-function isMockConfirmedReservationLookup(input: unknown, reservationId: string): boolean {
-  if (typeof input !== "object" || input === null || !("date" in input) || !("reservationId" in input)) {
-    return false;
-  }
-  return input.date === "2026-06-16" && input.reservationId === reservationId;
+function pagePayload(items: readonly object[], currentTotalCount: number): object {
+  return {
+    cutoff: "2026-06-16T05:00:00.000Z",
+    currentTotalCount,
+    expiresAt: "2026-06-16T05:15:00.000Z",
+    items,
+    nextCursor: null
+  };
 }
 
 function reservationDto(reservation: ReservationListRow): object {

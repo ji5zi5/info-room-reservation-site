@@ -9,7 +9,8 @@ import {
   fetchAdminReservations,
   fetchAdminSettings,
   fetchAdminStatistics,
-  fetchAdminUserDetail
+  fetchAdminUserDetail,
+  type AdminReadPage
 } from "./admin-read-api-client";
 import { firstAdminReadError } from "./admin-read-error";
 import type { AdminSection } from "./admin-console-state";
@@ -53,12 +54,12 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
     useState<readonly AdminTypes.AdminDashboardPeriod[]>([]);
   const [notificationBacklog, setNotificationBacklog] =
     useState<readonly AdminTypes.AdminNotificationBacklogItem[]>([]);
-  const [reservations, setReservations] =
-    useState<readonly AdminTypes.AdminReservation[]>([]);
+  const [reservationPage, setReservationPage] =
+    useState<AdminReadPage<AdminTypes.AdminReservation> | null>(null);
   const [statistics, setStatistics] = useState<AdminTypes.AdminStatistics | null>(null);
-  const [users, setUsers] = useState<readonly AdminTypes.AdminUser[]>([]);
-  const [auditActions, setAuditActions] =
-    useState<readonly AdminTypes.AdminAuditAction[]>([]);
+  const [userPage, setUserPage] = useState<AdminReadPage<AdminTypes.AdminUser> | null>(null);
+  const [auditPage, setAuditPage] =
+    useState<AdminReadPage<AdminTypes.AdminAuditAction> | null>(null);
   const [selectedUserDetail, setSelectedUserDetail] =
     useState<AdminTypes.AdminUserDetail | null>(null);
   const [deepLinkRead, setDeepLinkRead] = useState<AdminReservationDeepLinkRead>({ kind: "idle" });
@@ -216,7 +217,7 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
       return;
     }
     if (result.kind === "ok") {
-      setReservations(result.data);
+      setReservationPage(result.data);
       return;
     }
     setSectionError(firstAdminReadError([result]) ?? "예약 목록을 불러오지 못했습니다.");
@@ -241,7 +242,7 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
       });
       return;
     }
-    const reservation = result.data.find(
+    const reservation = result.data.items.find(
       (candidate) =>
         candidate.id === target.reservationId &&
         candidate.date === target.date &&
@@ -264,7 +265,7 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
       return;
     }
     if (result.kind === "ok") {
-      setUsers(result.data);
+      setUserPage(result.data);
       return;
     }
     setSectionError(firstAdminReadError([result]) ?? "학생 목록을 불러오지 못했습니다.");
@@ -279,7 +280,7 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
       return;
     }
     if (result.kind === "ok") {
-      setAuditActions(result.data);
+      setAuditPage(result.data);
       return;
     }
     setSectionError(firstAdminReadError([result]) ?? "감사 기록을 불러오지 못했습니다.");
@@ -319,7 +320,8 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
   }
 
   return {
-    auditActions,
+    auditActions: auditPage?.items ?? [],
+    auditPage,
     clearSelectedUserDetail: () => {
       setDetailError(null);
       setSelectedUserDetail(null);
@@ -333,11 +335,13 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
     refreshActive,
     refreshNotificationSettings: () => setNotificationSettingsRevision((current) => current + 1),
     refreshPeriods: () => setPeriodRevision((current) => current + 1),
-    reservations,
+    reservationPage,
+    reservations: reservationPage?.items ?? [],
     selectedUserDetail,
     setNotificationSettings,
     setPeriods,
     statistics,
-    users
+    userPage,
+    users: userPage?.items ?? []
   };
 }

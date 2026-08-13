@@ -1,11 +1,87 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseAdminConsoleDeepLink,
+  resolveAdminConsoleDeepLink,
+  writeAdminConsoleDeepLink,
   buildAdminReservationDeepLinkUrl,
   parseReservationDeepLink,
   resolveReservationDeepLink,
   writeReservationDeepLink
 } from "./admin-console-url";
+
+describe("versioned admin exact-target URL codec", () => {
+  it.each([
+    [{ kind: "reservation", reservationId: "reservation-127" }, "section=reservations&reservation=reservation-127"],
+    [{ kind: "user", userId: "user-127" }, "section=students&user=user-127"],
+    [{ actionId: "action-227", kind: "audit" }, "section=audit&action=action-227"]
+  ] as const)("round-trips one %s target with codec version 1", (target, expected) => {
+    // Given: an unrelated query key and one typed exact target.
+    const original = "source=operations";
+
+    // When: version 1 writes and parses the target.
+    const written = writeAdminConsoleDeepLink(original, target);
+    const parsed = parseAdminConsoleDeepLink(written);
+
+    // Then: the approved URL shape is canonical and versioned in the parsed contract.
+    expect(written).toBe(`source=operations&${expected}`);
+    expect(parsed).toEqual({ kind: "valid", target, version: 1 });
+  });
+
+  it("cleans malformed controlled keys without looking up or focusing a substitute", () => {
+    // Given: a malformed audit target plus unrelated state.
+    let lookupCount = 0;
+
+    // When: the resolver processes the malformed URL.
+    const resolved = resolveAdminConsoleDeepLink("source=operations&section=audit&action=bad%2Faction", () => {
+      lookupCount += 1;
+      return true;
+    });
+
+    // Then: all controlled keys are removed and no substitute lookup occurs.
+    expect(resolved).toEqual({ cleanedSearch: "source=operations", kind: "invalid" });
+    expect(lookupCount).toBe(0);
+  });
+
+  it("refuses to write a malformed typed target after cleaning controlled keys", () => {
+    // Given: stale controlled keys and a malformed reservation target from an untrusted caller.
+    const search = "source=operations&section=audit&action=old-action";
+
+    // When: the versioned writer receives an invalid identifier.
+    const written = writeAdminConsoleDeepLink(search, { kind: "reservation", reservationId: "bad/id" });
+
+    // Then: only unrelated state remains and no partial or substitute target is written.
+    expect(written).toBe("source=operations");
+  });
+
+  it("cleans a missing exact target and never focuses a substitute row", () => {
+    // Given: a syntactically valid user target.
+    const search = "source=operations&section=students&user=user-127";
+
+    // When: the authorized exact lookup reports no matching target.
+    const resolved = resolveAdminConsoleDeepLink(search, () => false);
+
+    // Then: only controlled keys are removed and no target is returned.
+    expect(resolved).toEqual({ cleanedSearch: "source=operations", kind: "missing" });
+  });
+
+  it("cleans a forbidden exact target using the non-disclosing missing outcome", () => {
+    // Given: a syntactically valid audit target that the authorized lookup must not disclose.
+    let lookupCount = 0;
+    const search = "source=operations&section=audit&action=action-forbidden";
+
+    // When: the authorized exact lookup refuses to expose the target.
+    const resolved = resolveAdminConsoleDeepLink(search, () => {
+      lookupCount += 1;
+      return false;
+    });
+
+    // Then: controlled keys are removed and no substitute target is focused.
+    expect(resolved).toEqual({ cleanedSearch: "source=operations", kind: "missing" });
+    expect(lookupCount).toBe(1);
+    expect(resolved).not.toHaveProperty("target");
+  });
+});
 
 describe("admin reservation deep-link URL contract", () => {
   it("writes one canonical valid tuple while preserving every unrelated key and value", () => {

@@ -1,3 +1,7 @@
+import type { Prisma } from "@prisma/client";
+
+import { ADMIN_EXPORT_PROBE_ROWS, ADMIN_PAGE_SIZE } from "./admin-pagination";
+
 export const ADMIN_AUDIT_ACTION_FILTERS = [
   "ALL",
   "RESTRICTION",
@@ -51,6 +55,16 @@ const ADMIN_AUDIT_ACTION_CATEGORIES: Readonly<Record<string, AdminAuditActionCat
   USER_RESTRICTION_REMOVE: "RESTRICTION",
   USER_SESSIONS_REVOKE: "SESSION"
 };
+
+export const ADMIN_AUDIT_ACTION_LIST_INCLUDE = {
+  actor: { select: { id: true, name: true, studentNumber: true } },
+  targetUser: { select: { id: true, name: true, studentNumber: true } }
+} as const satisfies Prisma.AdminActionInclude;
+
+const ADMIN_AUDIT_ACTIONS_BY_CATEGORY = Object.entries(ADMIN_AUDIT_ACTION_CATEGORIES).reduce<
+  Partial<Record<AdminAuditActionCategory, string[]>>
+>((result, [action, category]) => ({ ...result, [category]: [...(result[category] ?? []), action] }), {});
+const KNOWN_ADMIN_AUDIT_ACTIONS = Object.keys(ADMIN_AUDIT_ACTION_CATEGORIES);
 
 const ADMIN_AUDIT_ACTION_LABELS: Readonly<Record<string, string>> = {
   ADMIN_RESERVATION_CREATE: "관리자 예약 추가",
@@ -112,6 +126,107 @@ export function orderAdminAuditActions<T extends AdminAuditActionRow>(actions: r
 
 export function normalizeAdminAuditActionFilters(filters: AdminAuditActionFilters): AdminAuditActionFilters {
   return { action: filters.action, query: filters.query.trim().toLocaleLowerCase("ko-KR") };
+}
+
+export function parseAdminAuditActionFilters(parameters: URLSearchParams): AdminAuditActionFilters {
+  return normalizeAdminAuditActionFilters({
+    action: parseAdminAuditActionFilter(parameters.get("action")),
+    query: parameters.get("query") ?? ""
+  });
+}
+
+export function buildAdminAuditActionWhere(input: {
+  readonly after: { readonly createdAt: string; readonly id: string } | null;
+  readonly cutoff: Date;
+  readonly filters: AdminAuditActionFilters;
+}): Prisma.AdminActionWhereInput {
+  const query = input.filters.query;
+  const categoryActions = input.filters.action === "ALL"
+    ? null
+    : input.filters.action === "OTHER"
+      ? { notIn: KNOWN_ADMIN_AUDIT_ACTIONS }
+      : { in: ADMIN_AUDIT_ACTIONS_BY_CATEGORY[input.filters.action] ?? [] };
+  return {
+    createdAt: { lte: input.cutoff },
+    ...(input.after === null
+      ? {}
+      : {
+          OR: [
+            { createdAt: { lt: new Date(input.after.createdAt) } },
+            { createdAt: new Date(input.after.createdAt), id: { lt: input.after.id } }
+          ]
+        }),
+    ...(categoryActions === null ? {} : { action: categoryActions }),
+    ...(query.length === 0
+      ? {}
+      : {
+          AND: [{
+            OR: [
+              { action: { contains: query, mode: "insensitive" } },
+              { reason: { contains: query, mode: "insensitive" } },
+              { actor: { is: { OR: [
+                { name: { contains: query, mode: "insensitive" } },
+                { studentNumber: { contains: query, mode: "insensitive" } }
+              ] } } },
+              { targetUser: { is: { OR: [
+                { name: { contains: query, mode: "insensitive" } },
+                { studentNumber: { contains: query, mode: "insensitive" } }
+              ] } } }
+            ]
+          }]
+        })
+  };
+}
+
+export function buildAdminAuditActionPageQuery(input: {
+  readonly after: { readonly createdAt: string; readonly id: string } | null;
+  readonly cutoff: Date;
+  readonly filters: AdminAuditActionFilters;
+}): Pick<Prisma.AdminActionFindManyArgs, "orderBy" | "take" | "where"> {
+  return buildAdminAuditActionQuery({ ...input, take: ADMIN_PAGE_SIZE + 1 });
+}
+
+export function buildAdminAuditActionExportQuery(input: {
+  readonly cutoff: Date;
+  readonly filters: AdminAuditActionFilters;
+}): Pick<Prisma.AdminActionFindManyArgs, "orderBy" | "take" | "where"> {
+  return buildAdminAuditActionQuery({ after: null, ...input, take: ADMIN_EXPORT_PROBE_ROWS });
+}
+
+export function toAdminAuditActionDto(action: AdminAuditActionRow & {
+  readonly actorId: string | null;
+  readonly after: string | null;
+  readonly before: string | null;
+  readonly reservationId: string | null;
+  readonly targetUserId: string | null;
+}) {
+  return {
+    action: action.action,
+    actor: action.actor,
+    actorId: action.actorId,
+    after: action.after,
+    before: action.before,
+    category: classifyAdminAuditAction(action.action),
+    createdAt: action.createdAt.toISOString(),
+    id: action.id,
+    reason: action.reason,
+    reservationId: action.reservationId,
+    targetUser: action.targetUser,
+    targetUserId: action.targetUserId
+  };
+}
+
+function buildAdminAuditActionQuery(input: {
+  readonly after: { readonly createdAt: string; readonly id: string } | null;
+  readonly cutoff: Date;
+  readonly filters: AdminAuditActionFilters;
+  readonly take: number;
+}): Pick<Prisma.AdminActionFindManyArgs, "orderBy" | "take" | "where"> {
+  return {
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: input.take,
+    where: buildAdminAuditActionWhere(input)
+  };
 }
 
 export function paginateAdminAuditActions<T extends AdminAuditActionRow>(input: {

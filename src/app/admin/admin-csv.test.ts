@@ -1,9 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAuditActionsCsv, buildReservationCsv, buildStatisticsCsv } from "./admin-csv";
+import { buildAuditActionsCsv, buildDownloadableAdminCsv, buildReservationCsv, buildStatisticsCsv } from "./admin-csv";
 import type { AdminAuditAction, AdminReservation, AdminStatistics } from "./admin-types";
 
 describe("admin CSV helpers", () => {
+  it("prefixes downloadable CSV with exactly one UTF-8 BOM", () => {
+    // Given: a reservation CSV body without a BOM.
+    const csv = buildReservationCsv([reservation({ name: "김학생", studentNumber: "24101" })]);
+
+    // When: the body is prepared for an HTTP download.
+    const downloadable = buildDownloadableAdminCsv(csv);
+
+    // Then: spreadsheet consumers receive exactly one UTF-8 BOM.
+    expect(downloadable.startsWith("\uFEFF")).toBe(true);
+    expect(downloadable.slice(1).startsWith("\uFEFF")).toBe(false);
+  });
+
   it("escapes reservation cells", () => {
     expect(buildReservationCsv([reservation({ name: '김"학생', studentNumber: "24101" })])).toContain('"김""학생"');
   });
