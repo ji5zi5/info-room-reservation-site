@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+// allow: SIZE_OK — receipt schema, provenance, path confinement, and digest checks are one auditable CLI boundary.
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import { z } from "zod";
@@ -18,7 +19,7 @@ const manifestSchema = z.object({
     path: z.string().min(1),
     sha256: sha256Schema
   }).strict()).min(1),
-  runId: z.string().min(1),
+  runId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/),
   schemaVersion: z.literal(1)
 }).strict();
 const receiptSchema = z.object({
@@ -26,7 +27,7 @@ const receiptSchema = z.object({
   artifactSha256: sha256Schema,
   capturedAt: z.string().min(1),
   deploymentSha: deploymentShaSchema,
-  environment: z.string().min(1),
+  environment: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$/),
   evidenceUrl: httpsUrlSchema,
   expiresAt: z.string().min(1),
   gate: z.string().regex(/^P[01]-\d+$/),
@@ -58,12 +59,16 @@ try {
   const receiptDigests = new Set();
   const artifactPaths = new Set();
   const artifactDigests = new Set();
+  const gates = new Set();
 
   for (const entry of manifest.receipts) {
     assertUnique(receiptIds, entry.id, `duplicate receipt id: ${entry.id}`);
     const receiptPath = resolveEvidenceFile(evidenceRoot, entry.path, `receipt ${entry.id}`);
     assertUnique(receiptPaths, receiptPath, `reused receipt path: ${entry.path}`);
     assertUnique(receiptDigests, entry.sha256, `reused receipt digest: ${entry.id}`);
+    if (receiptPath === manifestPath) {
+      throw new Error(`receipt ${entry.id} reuses the manifest path`);
+    }
     if (sha256File(receiptPath) !== entry.sha256) {
       throw new Error(`receipt ${entry.id} changed after manifest generation`);
     }
@@ -84,11 +89,21 @@ try {
     if (receipt.migrationDigest !== options.migrationDigest) {
       throw new Error(`receipt ${entry.id} migration digest does not match`);
     }
+    assertUnique(gates, receipt.gate, `duplicate readiness gate: ${receipt.gate}`);
 
     const capturedAt = parseTimestamp(receipt.capturedAt, `receipt ${entry.id}.capturedAt`);
     const expiresAt = parseTimestamp(receipt.expiresAt, `receipt ${entry.id}.expiresAt`);
     if (capturedAt.getTime() > now.getTime() + 5 * 60_000) {
       throw new Error(`receipt ${entry.id} was captured in the future`);
+    }
+    if (capturedAt.getTime() > generatedAt.getTime()) {
+      throw new Error(`receipt ${entry.id} was captured after manifest generation`);
+    }
+    if (expiresAt.getTime() <= capturedAt.getTime()) {
+      throw new Error(`receipt ${entry.id} expiry is not after capture`);
+    }
+    if (expiresAt.getTime() - capturedAt.getTime() > 31 * 24 * 60 * 60_000) {
+      throw new Error(`receipt ${entry.id} validity exceeds 31 days`);
     }
     if (expiresAt.getTime() <= now.getTime()) {
       throw new Error(`receipt ${entry.id} is expired`);
@@ -100,9 +115,19 @@ try {
       `receipt ${entry.id} artifact`
     );
     assertUnique(artifactPaths, artifactPath, `reused artifact path: ${receipt.artifactPath}`);
+    if (artifactPath === receiptPath || artifactPath === manifestPath) {
+      throw new Error(`receipt ${entry.id} artifact reuses a metadata path`);
+    }
     assertUnique(artifactDigests, receipt.artifactSha256, `reused artifact digest: ${entry.id}`);
     if (sha256File(artifactPath) !== receipt.artifactSha256) {
       throw new Error(`receipt ${entry.id} artifact digest does not match`);
+    }
+    if (statSync(artifactPath).size === 0) {
+      throw new Error(`receipt ${entry.id} artifact is empty`);
+    }
+    const evidenceUrl = new URL(receipt.evidenceUrl);
+    if (evidenceUrl.username || evidenceUrl.password || evidenceUrl.search || evidenceUrl.hash) {
+      throw new Error(`receipt ${entry.id} evidence URL contains credentials, query, or fragment data`);
     }
   }
 
@@ -202,6 +227,12 @@ function resolveEvidenceFile(root, path, label) {
   if (isAbsolute(path)) {
     throw new Error(`${label} path must be relative`);
   }
+  if (path.split("/").includes("..")) {
+    throw new Error(`${label} path escapes the evidence root`);
+  }
+  if (path.includes("\\") || path.split("/").some((segment) => segment === "" || segment === ".")) {
+    throw new Error(`${label} path must be canonical and use forward slashes`);
+  }
   const resolved = resolve(root, path);
   const relativePath = relative(root, resolved);
   if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
@@ -209,6 +240,9 @@ function resolveEvidenceFile(root, path, label) {
   }
   if (!existsSync(resolved) || !statSync(resolved).isFile()) {
     throw new Error(`${label} file is missing`);
+  }
+  if (lstatSync(resolved).isSymbolicLink()) {
+    throw new Error(`${label} must not be a symbolic link`);
   }
   const realPath = realpathSync(resolved);
   const realRelativePath = relative(root, realPath);

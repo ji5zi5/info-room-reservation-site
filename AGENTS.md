@@ -71,6 +71,8 @@ npm run db:generate
 npm run db:migrate
 npm run db:deploy
 npm run db:seed
+npm run qa:operational:core -- --phase database
+npm run qa:operational -- --phase full --attempt-dir <absolute-attempt-directory>
 ```
 
 ## TESTING NOTES
@@ -90,3 +92,8 @@ npm run db:seed
 - `next-env.d.ts` can flip between `.next/dev/types` and `.next/types` after dev/build. Do not commit that churn unless CI/build behavior needs the new value.
 - `.omo/` is ignored; planning artifacts there are local and will not appear in normal git status.
 - `prisma/dev.db`, `.next/`, `test-results/`, and `tsconfig.tsbuildinfo` are local artifacts. They do not belong in GitHub.
+- The permanent CI job uses `qa:operational:core` from a clean checkout; it dispatches through `scripts/verify-operational-fomo-evidence.mjs --mode core` and must not depend on `.omo`, Docker, absolute local paths, or review receipts. The local `qa:operational` wrapper dispatches through `--mode attempt`, requires an absolute attempt directory, and rejects descriptor/review identity drift before calling the same core. Invoke `node scripts/run-operational-fomo-evidence.mjs start|run|finalize ...` explicitly for recorder lifecycle actions; QA scripts never finalize a manifest.
+- Operational QA owns disposable loopback embedded PostgreSQL and must clean its child process, temporary data directory, and port. Keep `DATABASE_URL`/`DIRECT_URL` scoped to QA children; never point the harness at production or a non-`_test` database.
+- Deployment order is ordinary Prisma migrations, the separately tracked owner-only online-index runner, then application-contract activation. The online-index ledger/catalog verification is not a Prisma migration and must never be edited manually.
+- `qa:operational:core` dispatches database, browser, Discord, and full phases through the same verifier. A database-only run is not full operational, production, Discord-capacity, real-alert-delivery, backup/PITR, or rollback-compatibility validation.
+- The verifier provides `compliance`, `cleanup`, and `scope` modes, each bound to immutable attempt identity. Keep fake Discord and explicit-server browser evidence local and do not treat them as production Discord capacity, real-alert-delivery, backup/PITR, rollback-compatibility, or production validation.

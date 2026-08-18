@@ -10,101 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  quality:
+  operational-qa:
     runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/info_room_build
-      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/info_room_build
-      APP_ORIGIN: https://example.test
-      SESSION_SECRET: ci-session-secret-replace-in-runtime
-      RIRO_MOCK_LOGIN: "false"
-      ENABLE_LOCAL_ADMIN: "false"
-      ENABLE_LOCAL_STUDENT: "false"
-      ADMIN_STUDENT_NUMBERS: "99999"
-      CLOSED_PERIOD_CRON_SECRET: ci-closed-period-cron-secret
-      MAINTENANCE_CRON_SECRET: ci-maintenance-cron-secret
-      DISCORD_WEBHOOK_URL: https://discord.com/api/webhooks/123/token
-      RETENTION_PURGE_ENABLED: "false"
-      TRUST_FORWARDED_IP_HEADERS: "true"
-      OBSERVABILITY_PROVIDER: ci-monitoring
-      OBSERVABILITY_PROJECT_ID: info-room-ci
-      OPERATIONS_ALERT_DESTINATION: ci-operations
-      OPERATIONS_ESCALATION_PATH: ci-owner-then-platform
-      OPERATIONS_OWNER: ci-owner
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npm run typecheck
-      - run: npm test
-      - name: Production predeploy check
-        run: npm run predeploy:check
-        env:
-          NODE_ENV: production
-      - run: npm run build
-
-  postgres-integration:
-    runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/info_room_test
-      DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5432/info_room_test
-      RETENTION_PURGE_ENABLED: "false"
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: info_room_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npx prisma migrate deploy
-      - name: Configure CI runtime role
-        run: >-
-          psql "$DATABASE_URL" --set=ON_ERROR_STOP=1
-          --command "ALTER ROLE info_room_runtime WITH LOGIN PASSWORD 'ci-runtime-password';"
-      - name: Run integration tests as runtime role
-        run: npm run test:integration
-        env:
-          INTEGRATION_DATABASE_URL: postgresql://info_room_runtime:ci-runtime-password@127.0.0.1:5432/info_room_test
-
-  browser-smoke:
-    runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: ""
-      DIRECT_URL: ""
-      E2E_BASE_URL: http://127.0.0.1:3100
-      E2E_ADMIN_LOGIN_ID: ci-admin
-      E2E_ADMIN_LOGIN_PASSWORD: ci-admin-password
-      E2E_STUDENT_LOGIN_ID: ci-student
-      E2E_STUDENT_LOGIN_PASSWORD: ci-student-password
-      ENABLE_LOCAL_ADMIN: "true"
-      ENABLE_LOCAL_STUDENT: "true"
-      ADMIN_LOGIN_ID: ci-admin
-      ADMIN_LOGIN_PASSWORD: ci-admin-password
-      LOCAL_STUDENT_LOGIN_ID: ci-student
-      LOCAL_STUDENT_LOGIN_PASSWORD: ci-student-password
-      LOCAL_STUDENT_NAME: CI 학생
-      LOCAL_STUDENT_NUMBER: "32001"
-      RIRO_MOCK_LOGIN: "true"
-      TRUST_FORWARDED_IP_HEADERS: "true"
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -113,22 +21,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - name: Start isolated mock server
-        run: |
-          npm run dev -- --hostname 127.0.0.1 --port 3100 > /tmp/info-room-next.log 2>&1 &
-          echo $! > /tmp/info-room-next.pid
-          for attempt in {1..60}; do
-            if curl --fail --silent http://127.0.0.1:3100/api/health/live > /dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat /tmp/info-room-next.log
-          exit 1
-      - run: npx playwright test tests/production-smoke.spec.ts --workers=1
-      - name: Stop isolated mock server
+      - run: npm run qa:operational:core -- --phase full --ci
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/operational-fomo-browser-evidence
+      - uses: actions/upload-artifact@v5
         if: always()
-        run: |
-          if test -f /tmp/info-room-next.pid; then
-            kill "$(cat /tmp/info-room-next.pid)" || true
-          fi
+        with:
+          name: operational-fomo-browser-evidence
+          path: ${{ runner.temp }}/operational-fomo-browser-evidence
+          if-no-files-found: error

@@ -55,7 +55,7 @@ test("student traversal resets filters, dedupes next pages, expires safely, and 
 });
 
 test("reservation and audit controls download the full filtered server CSV", async ({ page }) => {
-  await mockPagedAdminConsole(page);
+  const fixture = await mockPagedAdminConsole(page);
   await page.setViewportSize({ height: 900, width: 1440 });
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "예약자" }).click();
@@ -63,22 +63,28 @@ test("reservation and audit controls download the full filtered server CSV", asy
   await page.getByRole("button", { name: "더 보기" }).click();
   await expect(page.getByText("3개 표시 / 현재 2건", { exact: true })).toBeVisible();
   await expect(page.getByText("예약중복", { exact: true })).toHaveCount(1);
+  const reservationExportSearch = await exportSearch(page);
   await assertCsvDownload(
     page,
     "admin-reservations.csv",
     "날짜,시간대,상태,이름,학번,사유",
     4
   );
+  expect(fixture.reservationExportRequests).toHaveLength(1);
+  expect(fixture.reservationExportRequests[0]?.search).toBe(reservationExportSearch);
   await page.screenshot({ path: join(requiredEvidenceDir(), "task-16-admin-pagination-desktop-1440x900.png") });
 
   await page.getByRole("button", { name: "감사" }).click();
   await expect(page.getByText("1개 표시 / 현재 2건", { exact: true })).toBeVisible();
+  const auditExportSearch = await exportSearch(page);
   await assertCsvDownload(
     page,
     "admin-audit-actions.csv",
     "시각,분류,액션,처리자,처리자학번,대상,대상학번,사유,예약ID",
     3
   );
+  expect(fixture.auditExportRequests).toHaveLength(1);
+  expect(fixture.auditExportRequests[0]?.search).toBe(auditExportSearch);
 });
 
 test("an exact audit URL focuses its record without traversing list pages", async ({ page }) => {
@@ -115,8 +121,10 @@ async function readDownload(download: Download): Promise<string> {
 }
 
 async function mockPagedAdminConsole(page: Page) {
+  const auditExportRequests: URL[] = [];
   const userRequests: URL[] = [];
   const auditRequests: URL[] = [];
+  const reservationExportRequests: URL[] = [];
   let expiryBaseReads = 0;
   let releaseSlow = (): void => {};
   const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve; });
@@ -168,12 +176,22 @@ async function mockPagedAdminConsole(page: Page) {
         }
         return fulfill(route, pageOf([auditAction("audit-1", "감사 하나")], "audit-2", 2));
       }
-      case "/api/admin/exports/reservations": return csv(route, reservationCsv, "admin-reservations.csv");
-      case "/api/admin/exports/actions": return csv(route, auditCsv, "admin-audit-actions.csv");
+      case "/api/admin/exports/reservations":
+        reservationExportRequests.push(url);
+        return csv(route, reservationCsv, "admin-reservations.csv");
+      case "/api/admin/exports/actions":
+        auditExportRequests.push(url);
+        return csv(route, auditCsv, "admin-audit-actions.csv");
       default: return fulfill(route, { error: { message: `Unexpected ${url.pathname}` } }, 404);
     }
   });
-  return { auditRequests, releaseSlowUser: releaseSlow, userRequests };
+  return { auditExportRequests, auditRequests, releaseSlowUser: releaseSlow, reservationExportRequests, userRequests };
+}
+
+async function exportSearch(page: Page): Promise<string> {
+  const href = await page.getByRole("link", { name: "CSV 다운로드" }).getAttribute("href");
+  if (href === null) throw new Error("CSV download link is missing its href");
+  return new URL(href, BASE_URL).search;
 }
 
 function user(id: string, name: string) {

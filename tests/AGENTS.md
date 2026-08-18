@@ -19,13 +19,16 @@
 ## CONVENTIONS
 
 - Tests require an explicit `E2E_BASE_URL`; Playwright never starts or reuses a dev server.
+- The caller, including operational QA, owns the server lifecycle. Start one explicit HTTP(S) target, wait until it is ready, export its exact `E2E_BASE_URL`, and stop that owned server and release its port after Playwright exits. Do not rely on `webServer`, a leftover `next dev`, or another test's server.
 - The config intentionally runs one Chromium project with `workers: 1`; avoid assumptions that require parallel isolation.
 - Use `mockClientDate` before navigation when date policy matters.
 - Use unique login IDs with `Date.now()` for stateful flows.
 - Prefer `csrfRequest` for mutating API calls instead of hand-built CSRF headers.
 - Route-mock API failures when verifying client error handling; use the real local app for reservation/admin smoke.
 - Local fallback credentials may be read only for loopback targets unless `E2E_ALLOW_LOCAL_LOGIN_ENV=true`.
-- For UI changes, cover desktop plus the 390px mobile viewport and assert no horizontal overflow.
+- For UI changes, cover desktop plus the 390px mobile viewport and assert no horizontal overflow. Operational browser evidence also captures both viewport artifacts and rejects uncaught page/console errors, unexpected failed requests, or incoherent overlap.
+- Browser fixtures and route mocks are local evidence. Discord-facing browser tests use fakes; they are not proof of real Discord delivery, alert delivery, or production Discord capacity.
+- `qa:operational:core` enters the verifier with `--mode core`; local attempt-bound `qa:operational` enters it with `--mode attempt`. The recorder remains an explicit `node scripts/run-operational-fomo-evidence.mjs start|run|finalize ...` command and is never driven by Playwright.
 
 ## ANTI-PATTERNS
 
@@ -33,3 +36,4 @@
 - Do not add broad sleeps; wait on specific locators, responses, or layout metrics.
 - Do not expand `home-date-first.spec.ts` for unrelated new UI behavior.
 - Do not make E2E specs depend on Vercel, Supabase, or real Discord unless the test is an explicit external smoke path.
+- Do not leave a Playwright target or child server running after interruption or failure; cleanup is part of the scenario, not an optional follow-up.

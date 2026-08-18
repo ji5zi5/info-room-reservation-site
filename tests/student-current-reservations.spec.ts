@@ -30,7 +30,7 @@ type RouteOptions = {
 test("current reservation band stays visible with collapsed sidebar and navigates exact date and period", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockClientDate(page, e2eNow(FIXED_THURSDAY_DATE));
-  await installRoutes(page, { notifications: fiveNotifications() });
+  const fixture = await installRoutes(page, { notifications: fiveNotifications() });
 
   await login(page, "current-band-student");
 
@@ -49,6 +49,7 @@ test("current reservation band stays visible with collapsed sidebar and navigate
   await expect(page.locator(".topbar .muted").first()).toHaveText(FIXED_FRIDAY);
   await expect(page.locator(".period-card").filter({ hasText: "1면학" }).getByRole("button", { name: "예약 취소" })).toBeVisible();
   await expect(page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: "예약 취소" })).toHaveCount(0);
+  expect(fixture.periodRequests.some((request) => request.searchParams.get("weekStart") === "2026-06-08")).toBe(true);
 
   const bandBox = await visibleBox(band, "current reservation band");
   const calendarBox = await visibleBox(page.locator(".reservation-calendar"), "reservation calendar");
@@ -159,14 +160,19 @@ type MutableRouteOptions = RouteOptions & {
   readonly getNotificationStatus?: () => 200 | 500;
 };
 
-async function installRoutes(page: Page, options: MutableRouteOptions): Promise<void> {
+type StudentRouteFixture = {
+  readonly periodRequests: readonly URL[];
+};
+
+async function installRoutes(page: Page, options: MutableRouteOptions): Promise<StudentRouteFixture> {
+  const periodRequests: URL[] = [];
   let currentUser: SessionUser | null = null;
   await page.route("**/api/me", (route) => route.fulfill({ json: { user: currentUser }, status: 200 }));
   await page.route("**/api/auth/riro/login", async (route) => {
     currentUser = studentUser();
     await route.fulfill({ json: { user: currentUser }, status: 200 });
   });
-  await page.route("**/api/periods**", (route) => fulfillPeriods(route));
+  await page.route("**/api/periods**", (route) => fulfillPeriods(route, periodRequests));
   await page.route("**/api/me/profile", (route) => route.fulfill({ json: profilePayload(currentUser ?? studentUser()), status: 200 }));
   await page.route("**/api/me/notifications", (route) => {
     if ((options.getNotificationStatus?.() ?? options.notificationStatus) === 500) {
@@ -175,6 +181,7 @@ async function installRoutes(page: Page, options: MutableRouteOptions): Promise<
     return route.fulfill({ json: { notifications: options.notifications }, status: 200 });
   });
   await page.route("**/api/csrf", (route) => route.fulfill({ json: { csrfToken: "student-current-csrf" }, status: 200 }));
+  return { periodRequests };
 }
 
 async function login(page: Page, id: string): Promise<void> {
@@ -185,8 +192,9 @@ async function login(page: Page, id: string): Promise<void> {
   await expect(page.locator(".period-card")).toHaveCount(2);
 }
 
-async function fulfillPeriods(route: Route): Promise<void> {
+async function fulfillPeriods(route: Route, periodRequests: URL[]): Promise<void> {
   const url = new URL(route.request().url());
+  periodRequests.push(url);
   if (url.searchParams.has("weekStart")) {
     await route.fulfill({
       headers: { ETag: '"task-18-current-reservations"' },
