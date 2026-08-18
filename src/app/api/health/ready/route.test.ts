@@ -30,4 +30,24 @@ describe("readiness route", () => {
       expect((await GET()).status).toBe(200);
     }
   });
+
+  it("returns only the read-only readiness report without applicant data", async () => {
+    routeMocks.getPrismaReadinessReport.mockResolvedValue({
+      checks: {
+        jobs: {
+          DISCORD_INTERACTIONS: { backlog: { count: 2 }, retention: { blocked: true } },
+          DISCORD_RESERVATION_OUTBOX: { backlog: { count: 0 }, retention: { blocked: false } }
+        }
+      },
+      status: "degraded"
+    });
+
+    const response = await GET();
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("DISCORD_INTERACTIONS");
+    expect(body).not.toMatch(/applicant|reason|studentNumber|token|webhook/i);
+    expect(routeMocks.getPrismaReadinessReport).toHaveBeenCalledOnce();
+  });
 });
