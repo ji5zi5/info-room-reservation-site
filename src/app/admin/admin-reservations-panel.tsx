@@ -11,9 +11,16 @@ import {
   type AdminReservationStudyPeriodFilter
 } from "./admin-types";
 import { AdminReservationCreateForm } from "./admin-reservation-create-form";
-import { AdminConfirmationDialog } from "./admin-confirmation-dialog";
-import type { AdminMutationResult, CancelReservationData, NoShowReservationData } from "./admin-api-client";
+import { AdminBulkCancellationDialog, AdminConfirmationDialog } from "./admin-confirmation-dialog";
+import type {
+  AdminMutationResult,
+  BulkCancellationData,
+  BulkCancellationInput,
+  CancelReservationData,
+  NoShowReservationData
+} from "./admin-api-client";
 import type { AdminPaginationState } from "./admin-console-state";
+import { bulkCancellationRetryableReservationIds } from "./admin-mutation-feedback";
 import { AdminPaginationFooter } from "./admin-users-panel";
 
 const STATUS_LABELS: Record<AdminReservationStatusFilter, string> = {
@@ -29,10 +36,13 @@ const PERIOD_FILTER_LABELS: Record<AdminReservationStudyPeriodFilter, string> = 
   FIRST: "1면학"
 };
 
+const MAX_BULK_SELECTION = 50;
+
 export function AdminReservationsPanel({
   date,
   exportUrl,
   focusRecordId = null,
+  onBulkCancelReservations = unavailableBulkCancellation,
   onCancelReservation,
   onCancellationRequestConsumed = noop,
   onLoadMore = noop,
@@ -53,6 +63,7 @@ export function AdminReservationsPanel({
   readonly date: string;
   readonly exportUrl: string;
   readonly focusRecordId?: string | null;
+  readonly onBulkCancelReservations?: (input: BulkCancellationInput) => Promise<AdminMutationResult<BulkCancellationData>>;
   readonly onCancelReservation: (reservationId: string, reason: string) => Promise<AdminMutationResult<CancelReservationData>>;
   readonly onCancellationRequestConsumed?: () => void;
   readonly onLoadMore?: () => void;
@@ -72,10 +83,14 @@ export function AdminReservationsPanel({
 }): ReactElement {
   const [cancelDraft, setCancelDraft] = useState<AdminReservation | null>(requestedCancellation);
   const [cancelReason, setCancelReason] = useState("");
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [selectedReservations, setSelectedReservations] = useState<readonly AdminReservation[]>([]);
   const [noShowDraft, setNoShowDraft] = useState<AdminReservation | null>(null);
+  const bulkActionRef = useRef<HTMLButtonElement>(null);
   const cancelReasonRef = useRef<HTMLTextAreaElement>(null);
   const focusRowRef = useRef<HTMLDivElement>(null);
   const trimmedCancelReason = cancelReason.trim();
+  const selectedIds = new Set(selectedReservations.map((reservation) => reservation.id));
 
   useEffect(() => {
     if (requestedCancellation === null) {
@@ -88,6 +103,23 @@ export function AdminReservationsPanel({
   useEffect(() => {
     focusRowRef.current?.focus();
   }, [focusRecordId, reservations]);
+
+  useEffect(() => {
+    setBulkDialogOpen(false);
+    setSelectedReservations([]);
+  }, [date, periodFilter, query, statusFilter]);
+
+  useEffect(() => {
+    const selectableIds = new Set(
+      reservations
+        .filter((reservation) => reservation.status === "CONFIRMED")
+        .map((reservation) => reservation.id)
+    );
+    setSelectedReservations((current) => {
+      const next = current.filter((reservation) => selectableIds.has(reservation.id));
+      return next.length === current.length ? current : next;
+    });
+  }, [reservations]);
 
   function openCancelDialog(reservation: AdminReservation): void {
     setCancelDraft(reservation);
@@ -110,6 +142,28 @@ export function AdminReservationsPanel({
       };
     }
     return onCancelReservation(cancelDraft.id, trimmedCancelReason);
+  }
+
+  function toggleBulkSelection(reservation: AdminReservation, checked: boolean): void {
+    setSelectedReservations((current) => {
+      if (!checked) {
+        return current.filter((candidate) => candidate.id !== reservation.id);
+      }
+      if (current.some((candidate) => candidate.id === reservation.id) || current.length >= MAX_BULK_SELECTION) {
+        return current;
+      }
+      return [...current, reservation];
+    });
+  }
+
+  function closeBulkDialog(): void {
+    setBulkDialogOpen(false);
+    window.requestAnimationFrame(() => bulkActionRef.current?.focus());
+  }
+
+  function applyBulkCancellationResult(result: BulkCancellationData): void {
+    const retryableIds = new Set(bulkCancellationRetryableReservationIds(result));
+    setSelectedReservations((current) => current.filter((reservation) => retryableIds.has(reservation.id)));
   }
 
   return (
@@ -151,17 +205,57 @@ export function AdminReservationsPanel({
           </button>
         ))}
       </div>
+      <div className="bulk-cancellation-toolbar" aria-label="예약 일괄 작업">
+        <span aria-live="polite">
+          <strong>{selectedReservations.length}건 선택</strong>
+          <span className="muted">최대 {MAX_BULK_SELECTION}건</span>
+        </span>
+        <div>
+          <button
+            className="ghost-button"
+            disabled={selectedReservations.length === 0}
+            type="button"
+            onClick={() => setSelectedReservations([])}
+          >
+            선택 해제
+          </button>
+          <button
+            aria-disabled={selectedReservations.length === 0}
+            aria-haspopup="dialog"
+            className="danger-button"
+            ref={bulkActionRef}
+            type="button"
+            onClick={() => {
+              if (selectedReservations.length > 0) {
+                setBulkDialogOpen(true);
+              }
+            }}
+          >
+            <XCircle aria-hidden="true" size={16} />
+            선택 취소
+          </button>
+        </div>
+      </div>
       <div className="table-list">
         {reservations.map((reservation) => {
           const focusTarget = reservation.id === focusRecordId;
           return (
           <div
-            className="table-line"
+            className="table-line admin-reservation-line"
             data-focus-target={focusTarget ? "true" : undefined}
             key={reservation.id}
             ref={focusTarget ? focusRowRef : undefined}
             tabIndex={focusTarget ? -1 : undefined}
           >
+            {reservation.status === "CONFIRMED" ? (
+              <input
+                aria-label={`${reservation.user.name} 예약 선택`}
+                checked={selectedIds.has(reservation.id)}
+                disabled={!selectedIds.has(reservation.id) && selectedReservations.length >= MAX_BULK_SELECTION}
+                type="checkbox"
+                onChange={(event) => toggleBulkSelection(reservation, event.currentTarget.checked)}
+              />
+            ) : <span aria-hidden="true" className="bulk-selection-spacer" />}
             <div>
               <strong>{reservation.user.name}</strong>
               <p className="muted">{reservation.user.studentNumber}</p>
@@ -226,6 +320,14 @@ export function AdminReservationsPanel({
           </label>
         </AdminConfirmationDialog>
       ) : null}
+      {bulkDialogOpen && selectedReservations.length > 0 ? (
+        <AdminBulkCancellationDialog
+          onDismiss={closeBulkDialog}
+          onExecuted={applyBulkCancellationResult}
+          onMutate={onBulkCancelReservations}
+          reservations={selectedReservations}
+        />
+      ) : null}
       {noShowDraft ? (
         <AdminConfirmationDialog
           cancelLabel="돌아가기"
@@ -242,6 +344,16 @@ export function AdminReservationsPanel({
 }
 
 function noop(): void {}
+
+async function unavailableBulkCancellation(): Promise<AdminMutationResult<BulkCancellationData>> {
+  return {
+    kind: "error",
+    message: "예약 일괄 취소를 사용할 수 없습니다.",
+    retryAfterMs: null,
+    retryable: false,
+    status: null
+  };
+}
 
 function terminalPagination(loadedCount: number): AdminPaginationState {
   return {

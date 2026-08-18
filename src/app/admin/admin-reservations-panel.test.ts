@@ -22,6 +22,12 @@ const confirmedReservation = {
   }
 } satisfies AdminReservation;
 
+const cancelledReservation = {
+  ...confirmedReservation,
+  id: "reservation-cancelled",
+  status: "CANCELLED"
+} satisfies AdminReservation;
+
 const mutationReservation = {
   createdAt: "2026-06-16T00:00:00.000Z",
   date: "2026-06-16",
@@ -107,6 +113,35 @@ describe("AdminReservationsPanel", () => {
 
     expect(markup).toMatch(/<button(?=[^>]*aria-haspopup="dialog")[^>]*>[\s\S]*?취소[\s\S]*?<\/button>/u);
     expect(markup).toMatch(/<button(?=[^>]*aria-haspopup="dialog")[^>]*>[\s\S]*?노쇼[\s\S]*?<\/button>/u);
+    expect(markup).toContain("0건 선택");
+    expect(markup).toMatch(/<input(?=[^>]*aria-label="테스트학생 예약 선택")(?=[^>]*type="checkbox")[^>]*>/u);
+  });
+
+  it("never renders a bulk checkbox for a non-confirmed row", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminReservationsPanel, {
+        date: "2026-06-16",
+        exportUrl: "/api/admin/exports/reservations?date=2026-06-16&query=&status=ALL&studyPeriod=ALL",
+        onBulkCancelReservations: async () => ({
+          data: { results: [], summary: { cancelled: 0, conflict: 0, invalidStatus: 0, notFound: 0, total: 0 } },
+          kind: "ok" as const
+        }),
+        onCancelReservation: cancelReservationSuccess,
+        onMarkNoShow: markNoShowSuccess,
+        onRefresh: () => undefined,
+        onSelectStatus: () => undefined,
+        onSetPeriod: () => undefined,
+        onSetQuery: () => undefined,
+        onViewUser: () => undefined,
+        periodFilter: "ALL",
+        query: "",
+        reservations: [cancelledReservation],
+        statusFilter: "ALL"
+      })
+    );
+
+    expect(markup).not.toContain('type="checkbox"');
+    expect(markup).not.toMatch(/<button[^>]*>[\s\S]*?<svg[^>]*lucide-user-x[\s\S]*?노쇼[\s\S]*?<\/button>/u);
   });
 
   it("renders the existing cancellation dialog for a dedicated deep-link handoff outside the visible list", () => {
@@ -195,6 +230,6 @@ describe("AdminReservationsPanel", () => {
       })
     );
 
-    expect(markup).toMatch(/<div(?=[^>]*class="table-line")(?=[^>]*data-focus-target="true")(?=[^>]*tabindex="-1")[^>]*>/u);
+    expect(markup).toMatch(/<div(?=[^>]*class="[^"]*table-line[^"]*")(?=[^>]*data-focus-target="true")(?=[^>]*tabindex="-1")[^>]*>/u);
   });
 });

@@ -99,6 +99,34 @@ const UserMutationSchema = z.object({
 }).passthrough();
 
 const CancelReservationSchema = z.object({ reservation: ReservationMutationSchema });
+const BulkCancellationStatusSchema = z.enum(["cancelled", "conflict", "invalid_status", "not_found"]);
+const BulkCancellationSchema = z.object({
+  results: z.array(z.object({
+    reservationId: z.string().min(1),
+    status: BulkCancellationStatusSchema
+  }).strict()).max(50),
+  summary: z.object({
+    cancelled: z.number().int().nonnegative(),
+    conflict: z.number().int().nonnegative(),
+    invalidStatus: z.number().int().nonnegative(),
+    notFound: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative().max(50)
+  }).strict()
+}).strict().superRefine((value, context) => {
+  const counts = { cancelled: 0, conflict: 0, invalid_status: 0, not_found: 0 };
+  for (const result of value.results) {
+    counts[result.status] += 1;
+  }
+  if (
+    value.summary.total !== value.results.length ||
+    value.summary.cancelled !== counts.cancelled ||
+    value.summary.conflict !== counts.conflict ||
+    value.summary.invalidStatus !== counts.invalid_status ||
+    value.summary.notFound !== counts.not_found
+  ) {
+    context.addIssue({ code: "custom", message: "Bulk cancellation summary does not match item results." });
+  }
+});
 const NoShowReservationSchema = z.object({
   cancelledFutureReservationCount: z.number().int().nonnegative(),
   reservation: ReservationMutationSchema,
@@ -124,6 +152,12 @@ const DiscordOperationRepairSchema = z.object({
 export type SendClosedPeriodNotificationData = z.infer<typeof SendClosedPeriodNotificationSchema>;
 export type ReconcileClosedPeriodNotificationData = z.infer<typeof ReconcileClosedPeriodNotificationSchema>;
 export type CancelReservationData = z.infer<typeof CancelReservationSchema>;
+export type BulkCancellationData = z.infer<typeof BulkCancellationSchema>;
+export type BulkCancellationInput = {
+  readonly mode: "execute" | "preview";
+  readonly reason: string;
+  readonly reservationIds: readonly string[];
+};
 export type NoShowReservationData = z.infer<typeof NoShowReservationSchema>;
 export type ApplyRestrictionData = z.infer<typeof ApplyRestrictionSchema>;
 export type RemoveRestrictionData = z.infer<typeof RemoveRestrictionSchema>;
@@ -231,6 +265,32 @@ export async function cancelAdminReservation(
     headers: { "content-type": "application/json" },
     method: "POST"
   }), CancelReservationSchema, "예약 취소에 실패했습니다.");
+}
+
+export async function bulkCancelAdminReservations(
+  input: BulkCancellationInput
+): Promise<AdminMutationResult<BulkCancellationData>> {
+  return performAdminMutation(() => csrfFetch("/api/admin/reservations/bulk-cancel", {
+    body: JSON.stringify(input),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  }), bulkCancellationResponseSchema(input.reservationIds), "예약 일괄 취소에 실패했습니다.");
+}
+
+function bulkCancellationResponseSchema(
+  reservationIds: readonly string[]
+): typeof BulkCancellationSchema {
+  return BulkCancellationSchema.superRefine((value, context) => {
+    if (
+      value.results.length !== reservationIds.length ||
+      value.results.some((result, index) => result.reservationId !== reservationIds[index])
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Bulk cancellation results do not match the requested reservations."
+      });
+    }
+  });
 }
 
 export async function reconcileClosedPeriodNotification(

@@ -18,7 +18,7 @@ import type {
   AdminUserStatusFilter,
   StudyPeriod
 } from "./admin-types";
-import type { AdminMutationResult, ApplyRestrictionData, CancelReservationData, DiscordOperationRepairData, NoShowReservationData } from "./admin-api-client";
+import type { AdminMutationResult, ApplyRestrictionData, BulkCancellationData, BulkCancellationInput, CancelReservationData, DiscordOperationRepairData, NoShowReservationData } from "./admin-api-client";
 import type { AdminConsoleDeepLinkTarget } from "./admin-console-url";
 import { DEFAULT_SHADOW_BAN_PROFILE, type ShadowBanProfile } from "@/lib/shadow-ban-profile";
 
@@ -57,6 +57,7 @@ export type AdminConsoleState = {
   readonly auditQuery: string;
   readonly applyRestriction: (userId: string) => Promise<AdminMutationResult<ApplyRestrictionData>>;
   readonly applyShadowBan: (userId: string) => Promise<void>;
+  readonly bulkCancelReservations: (input: BulkCancellationInput) => Promise<AdminMutationResult<BulkCancellationData>>;
   readonly cancelReservation: (reservationId: string, reason: string) => Promise<AdminMutationResult<CancelReservationData>>;
   readonly clearSelectedUser: () => void;
   readonly dashboardPeriods: readonly AdminDashboardPeriod[];

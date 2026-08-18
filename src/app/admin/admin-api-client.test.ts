@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyUserRestriction,
+  bulkCancelAdminReservations,
   cancelAdminReservation,
   fetchAdminDashboard,
   fetchAdminNotificationSettings,
@@ -35,6 +36,7 @@ describe("admin api client", () => {
     vi.stubGlobal("fetch", async () => new Response(null, { status: 500 }));
 
     await expect(fetchAdminSettings("2026-06-14")).resolves.toEqual({
+      code: null,
       kind: "error",
       message: "관리자 데이터를 불러오지 못했습니다."
     });
@@ -300,6 +302,74 @@ describe("admin api client", () => {
     expect(request).toBeDefined();
     expect(request?.body).toBe(JSON.stringify({ reason: "행사 준비로 정보실 사용 불가" }));
     expect(request?.headers).toEqual({ "content-type": "application/json" });
+  });
+
+  it("posts a strict bulk cancellation preview and parses every per-item result", async () => {
+    // Given: the server reports one cancellable row and one row that changed after selection.
+    const payload = {
+      results: [
+        { reservationId: "reservation-1", status: "cancelled" },
+        { reservationId: "reservation-2", status: "invalid_status" }
+      ],
+      summary: { cancelled: 1, conflict: 0, invalidStatus: 1, notFound: 0, total: 2 }
+    };
+    csrfFetchMock.mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+
+    // When / Then: preview uses the existing CSRF mutation transport and returns parsed data.
+    await expect(bulkCancelAdminReservations({
+      mode: "preview",
+      reason: "운영 일정 변경",
+      reservationIds: ["reservation-1", "reservation-2"]
+    })).resolves.toEqual({ data: payload, kind: "ok" });
+    expect(csrfFetchMock).toHaveBeenCalledWith("/api/admin/reservations/bulk-cancel", expect.objectContaining({
+      body: JSON.stringify({
+        mode: "preview",
+        reason: "운영 일정 변경",
+        reservationIds: ["reservation-1", "reservation-2"]
+      }),
+      method: "POST"
+    }));
+  });
+
+  it("rejects a malformed bulk cancellation success payload instead of inferring success", async () => {
+    // Given: the summary says two items while the result list omits required status data.
+    csrfFetchMock.mockResolvedValue(new Response(JSON.stringify({
+      results: [{ reservationId: "reservation-1" }],
+      summary: { cancelled: 2, conflict: 0, invalidStatus: 0, notFound: 0, total: 2 }
+    }), { status: 200 }));
+
+    // When / Then: strict boundary parsing returns a non-retryable payload error.
+    await expect(bulkCancelAdminReservations({
+      mode: "execute",
+      reason: "운영 일정 변경",
+      reservationIds: ["reservation-1", "reservation-2"]
+    })).resolves.toEqual({
+      kind: "error",
+      message: "예약 일괄 취소에 실패했습니다.",
+      retryAfterMs: null,
+      retryable: false,
+      status: 200
+    });
+  });
+
+  it("rejects shape-valid bulk results that do not match the requested reservation order", async () => {
+    csrfFetchMock.mockResolvedValue(new Response(JSON.stringify({
+      results: [
+        { reservationId: "reservation-2", status: "cancelled" },
+        { reservationId: "reservation-other", status: "cancelled" }
+      ],
+      summary: { cancelled: 2, conflict: 0, invalidStatus: 0, notFound: 0, total: 2 }
+    }), { status: 200 }));
+
+    await expect(bulkCancelAdminReservations({
+      mode: "preview",
+      reason: "운영 일정 변경",
+      reservationIds: ["reservation-1", "reservation-2"]
+    })).resolves.toMatchObject({
+      kind: "error",
+      message: "예약 일괄 취소에 실패했습니다.",
+      status: 200
+    });
   });
 
   it.each([
