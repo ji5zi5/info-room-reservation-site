@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, RotateCcw, UserSearch, UserX, XCircle } from "lucide-react";
+import { Download, RotateCcw, UserSearch, UserX, XCircle } from "lucide-react";
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import {
@@ -13,6 +13,8 @@ import {
 import { AdminReservationCreateForm } from "./admin-reservation-create-form";
 import { AdminConfirmationDialog } from "./admin-confirmation-dialog";
 import type { AdminMutationResult, CancelReservationData, NoShowReservationData } from "./admin-api-client";
+import type { AdminPaginationState } from "./admin-console-state";
+import { AdminPaginationFooter } from "./admin-users-panel";
 
 const STATUS_LABELS: Record<AdminReservationStatusFilter, string> = {
   ALL: "전체",
@@ -29,11 +31,14 @@ const PERIOD_FILTER_LABELS: Record<AdminReservationStudyPeriodFilter, string> = 
 
 export function AdminReservationsPanel({
   date,
+  exportUrl,
+  focusRecordId = null,
   onCancelReservation,
   onCancellationRequestConsumed = noop,
-  onCopyCsv,
+  onLoadMore = noop,
   onMarkNoShow,
   onRefresh,
+  onRestartTraversal = noop,
   onSelectStatus,
   onSetPeriod,
   onSetQuery,
@@ -42,14 +47,18 @@ export function AdminReservationsPanel({
   query,
   requestedCancellation = null,
   reservations,
+  pagination = terminalPagination(reservations.length),
   statusFilter
 }: {
   readonly date: string;
+  readonly exportUrl: string;
+  readonly focusRecordId?: string | null;
   readonly onCancelReservation: (reservationId: string, reason: string) => Promise<AdminMutationResult<CancelReservationData>>;
   readonly onCancellationRequestConsumed?: () => void;
-  readonly onCopyCsv: () => void;
+  readonly onLoadMore?: () => void;
   readonly onMarkNoShow: (reservationId: string) => Promise<AdminMutationResult<NoShowReservationData>>;
   readonly onRefresh: () => void;
+  readonly onRestartTraversal?: () => void;
   readonly onSelectStatus: (status: AdminReservationStatusFilter) => void;
   readonly onSetPeriod: (period: AdminReservationStudyPeriodFilter) => void;
   readonly onSetQuery: (query: string) => void;
@@ -58,12 +67,14 @@ export function AdminReservationsPanel({
   readonly query: string;
   readonly requestedCancellation?: AdminReservation | null;
   readonly reservations: readonly AdminReservation[];
+  readonly pagination?: AdminPaginationState;
   readonly statusFilter: AdminReservationStatusFilter;
 }): ReactElement {
   const [cancelDraft, setCancelDraft] = useState<AdminReservation | null>(requestedCancellation);
   const [cancelReason, setCancelReason] = useState("");
   const [noShowDraft, setNoShowDraft] = useState<AdminReservation | null>(null);
   const cancelReasonRef = useRef<HTMLTextAreaElement>(null);
+  const focusRowRef = useRef<HTMLDivElement>(null);
   const trimmedCancelReason = cancelReason.trim();
 
   useEffect(() => {
@@ -73,6 +84,10 @@ export function AdminReservationsPanel({
     openCancelDialog(requestedCancellation);
     onCancellationRequestConsumed();
   }, [onCancellationRequestConsumed, requestedCancellation]);
+
+  useEffect(() => {
+    focusRowRef.current?.focus();
+  }, [focusRecordId, reservations]);
 
   function openCancelDialog(reservation: AdminReservation): void {
     setCancelDraft(reservation);
@@ -104,10 +119,10 @@ export function AdminReservationsPanel({
           <h2>예약자 목록</h2>
         </div>
         <div className="admin-action-row">
-          <button className="ghost-button" type="button" onClick={onCopyCsv}>
-            <ClipboardList size={18} />
-            명단 복사
-          </button>
+          <a className="ghost-button" href={exportUrl}>
+            <Download aria-hidden="true" size={18} />
+            CSV 다운로드
+          </a>
           <button className="ghost-button" type="button" onClick={onRefresh}>
             <RotateCcw size={18} />
             새로고침
@@ -137,8 +152,16 @@ export function AdminReservationsPanel({
         ))}
       </div>
       <div className="table-list">
-        {reservations.map((reservation) => (
-          <div className="table-line" key={reservation.id}>
+        {reservations.map((reservation) => {
+          const focusTarget = reservation.id === focusRecordId;
+          return (
+          <div
+            className="table-line"
+            data-focus-target={focusTarget ? "true" : undefined}
+            key={reservation.id}
+            ref={focusTarget ? focusRowRef : undefined}
+            tabIndex={focusTarget ? -1 : undefined}
+          >
             <div>
               <strong>{reservation.user.name}</strong>
               <p className="muted">{reservation.user.studentNumber}</p>
@@ -165,9 +188,15 @@ export function AdminReservationsPanel({
               ) : null}
             </div>
           </div>
-        ))}
+          );
+        })}
         {reservations.length === 0 ? <div className="table-line muted">아직 예약자가 없습니다.</div> : null}
       </div>
+      <AdminPaginationFooter
+        onLoadMore={onLoadMore}
+        onRestartTraversal={onRestartTraversal}
+        pagination={pagination}
+      />
       {cancelDraft ? (
         <AdminConfirmationDialog
           cancelLabel="닫기"
@@ -213,6 +242,17 @@ export function AdminReservationsPanel({
 }
 
 function noop(): void {}
+
+function terminalPagination(loadedCount: number): AdminPaginationState {
+  return {
+    currentTotalCount: loadedCount,
+    hasHiddenPrevious: false,
+    loadedCount,
+    loadingMore: false,
+    nextCursor: null,
+    restartRequired: false
+  };
+}
 
 function reservationReasonLabel(reason: string | null): string {
   const normalized = reason?.trim();

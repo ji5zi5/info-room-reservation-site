@@ -98,16 +98,20 @@ export function AdminConsole(): ReactElement {
             {consoleState.activeSection === "reservations" ? (
               <AdminReservationsPanel
                 date={consoleState.date}
+                exportUrl={consoleState.reservationExportUrl}
+                focusRecordId={consoleState.reservationFocusId}
+                pagination={consoleState.reservationPagination}
                 requestedCancellation={consoleState.deepLinkCancellation}
                 periodFilter={consoleState.reservationPeriodFilter}
                 query={consoleState.reservationQuery}
                 reservations={consoleState.reservations}
                 statusFilter={consoleState.statusFilter}
                 onCancelReservation={consoleState.cancelReservation}
-                onCopyCsv={() => void consoleState.copyReservationsCsv()}
+                onLoadMore={() => void consoleState.loadMoreReservations()}
                 onMarkNoShow={consoleState.markNoShow}
                 onCancellationRequestConsumed={consoleState.consumeDeepLinkCancellation}
                 onRefresh={() => void consoleState.refresh()}
+                onRestartTraversal={() => void consoleState.restartReservationTraversal()}
                 onSelectStatus={consoleState.selectStatus}
                 onSetPeriod={consoleState.setReservationPeriodFilter}
                 onSetQuery={consoleState.setReservationQuery}
@@ -120,6 +124,9 @@ export function AdminConsole(): ReactElement {
                 selectedUserId={consoleState.selectedUserId}
                 status={consoleState.userStatusFilter}
                 users={consoleState.users}
+                pagination={consoleState.userPagination}
+                onLoadMore={() => void consoleState.loadMoreUsers()}
+                onRestartTraversal={() => void consoleState.restartUserTraversal()}
                 onSelectUser={(userId) => void consoleState.viewUser(userId)}
                 onSetQuery={consoleState.setUserQuery}
                 onSetStatus={consoleState.setUserStatusFilter}
@@ -140,7 +147,12 @@ export function AdminConsole(): ReactElement {
               <AdminAuditPanel
                 actionFilter={consoleState.auditActionFilter}
                 actions={consoleState.auditActions}
+                exportUrl={consoleState.auditExportUrl}
+                focusRecordId={consoleState.auditFocusId}
+                pagination={consoleState.auditPagination}
                 query={consoleState.auditQuery}
+                onLoadMore={() => void consoleState.loadMoreAudit()}
+                onRestartTraversal={() => void consoleState.restartAuditTraversal()}
                 onSetActionFilter={consoleState.setAuditActionFilter}
                 onSetQuery={consoleState.setAuditQuery}
                 onViewUser={(userId) => void consoleState.viewUser(userId)}
