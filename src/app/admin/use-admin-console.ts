@@ -6,9 +6,12 @@ import {
   applyUserRestriction,
   type AdminMutationResult,
   type ApplyRestrictionData,
+  type BulkCancellationData,
+  type BulkCancellationInput,
   type CancelReservationData,
   type NoShowReservationData,
   cancelAdminReservation,
+  bulkCancelAdminReservations,
   fetchAdminAuditActions,
   fetchAdminOperations,
   fetchAdminReservations,
@@ -39,6 +42,7 @@ import {
 import {
   adminMutationFeedback,
   adminSettingsMutationFeedback,
+  bulkCancellationFeedback,
   type AdminMutationFeedbackDecision,
   reconcileClosedPeriodNotificationFeedback,
   sendClosedPeriodNotificationFeedback
@@ -342,6 +346,16 @@ export function useAdminConsole(): AdminConsoleState {
     return result;
   }
 
+  async function bulkCancelReservations(
+    input: BulkCancellationInput
+  ): Promise<AdminMutationResult<BulkCancellationData>> {
+    const result = await bulkCancelAdminReservations(input);
+    if (input.mode === "execute") {
+      applyFeedback(bulkCancellationFeedback(result));
+    }
+    return result;
+  }
+
   async function removeRestriction(userId: string): Promise<void> {
     applyFeedback(adminMutationFeedback(await removeUserRestriction(userId), "예약 제한을 해제했습니다."));
   }
@@ -430,6 +444,7 @@ export function useAdminConsole(): AdminConsoleState {
     auditQuery,
     applyRestriction,
     applyShadowBan,
+    bulkCancelReservations,
     cancelReservation,
     clearSelectedUser,
     consumeDeepLinkCancellation: () => setDeepLinkCancellation(null),

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { BulkCancellationData } from "./admin-api-client";
 
 import {
   adminMutationFeedback,
   adminSettingsMutationFeedback,
+  bulkCancellationFeedback,
+  bulkCancellationRetryableReservationIds,
   reconcileClosedPeriodNotificationFeedback,
   sendClosedPeriodNotificationFeedback
 } from "./admin-mutation-feedback";
@@ -18,6 +21,35 @@ const retryableError = {
 describe("admin mutation feedback", () => {
   it("preserves an ordinary failed draft Given retry metadata When deciding feedback Then it does not refresh", () => {
     expect(adminMutationFeedback(retryableError, "저장했습니다.")).toEqual({
+      message: "잠시 사용할 수 없습니다. 2초 후 다시 시도해 주세요.",
+      refresh: "none"
+    });
+  });
+
+  it("reports exact partial bulk results Given mixed item statuses When deciding feedback Then it never claims all-success", () => {
+    const data = {
+      results: [
+        { reservationId: "cancelled", status: "cancelled" },
+        { reservationId: "changed", status: "invalid_status" },
+        { reservationId: "missing", status: "not_found" },
+        { reservationId: "retry", status: "conflict" }
+      ],
+      summary: { cancelled: 1, conflict: 1, invalidStatus: 1, notFound: 1, total: 4 }
+    } satisfies BulkCancellationData;
+    const result = {
+      data,
+      kind: "ok"
+    } as const;
+
+    expect(bulkCancellationFeedback(result)).toEqual({
+      message: "4건 처리 결과: 취소 1건, 상태 변경 1건, 찾을 수 없음 1건, 재시도 필요 1건.",
+      refresh: "active"
+    });
+    expect(bulkCancellationRetryableReservationIds(data)).toEqual(["retry"]);
+  });
+
+  it("keeps every selection Given preview transport failure When deciding feedback Then no refresh occurs", () => {
+    expect(bulkCancellationFeedback(retryableError)).toEqual({
       message: "잠시 사용할 수 없습니다. 2초 후 다시 시도해 주세요.",
       refresh: "none"
     });

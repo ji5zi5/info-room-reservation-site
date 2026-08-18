@@ -1,5 +1,6 @@
 import type {
   AdminMutationResult,
+  BulkCancellationData,
   ReconcileClosedPeriodNotificationData,
   SendClosedPeriodNotificationData
 } from "./admin-api-client";
@@ -24,6 +25,27 @@ export function adminMutationFeedback<T>(
   return result.kind === "ok"
     ? { message: successMessage, refresh: "active" }
     : { message: mutationErrorMessage(result), refresh: "none" };
+}
+
+export function bulkCancellationFeedback(
+  result: AdminMutationResult<BulkCancellationData>
+): AdminMutationFeedbackDecision {
+  if (result.kind === "error") {
+    return { message: mutationErrorMessage(result), refresh: "none" };
+  }
+  const { summary } = result.data;
+  return {
+    message: `${summary.total}건 처리 결과: 취소 ${summary.cancelled}건, 상태 변경 ${summary.invalidStatus}건, 찾을 수 없음 ${summary.notFound}건, 재시도 필요 ${summary.conflict}건.`,
+    refresh: "active"
+  };
+}
+
+export function bulkCancellationRetryableReservationIds(
+  result: BulkCancellationData
+): readonly string[] {
+  return result.results
+    .filter((item) => item.status === "conflict")
+    .map((item) => item.reservationId);
 }
 
 export function sendClosedPeriodNotificationFeedback(

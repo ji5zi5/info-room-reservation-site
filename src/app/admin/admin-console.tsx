@@ -106,6 +106,7 @@ export function AdminConsole(): ReactElement {
                 query={consoleState.reservationQuery}
                 reservations={consoleState.reservations}
                 statusFilter={consoleState.statusFilter}
+                onBulkCancelReservations={consoleState.bulkCancelReservations}
                 onCancelReservation={consoleState.cancelReservation}
                 onLoadMore={() => void consoleState.loadMoreReservations()}
                 onMarkNoShow={consoleState.markNoShow}

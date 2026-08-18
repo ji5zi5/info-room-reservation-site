@@ -494,6 +494,116 @@
   justify-content: flex-end;
 }
 
+.bulk-cancellation-toolbar {
+  align-items: center;
+  background: var(--fog);
+  border-radius: var(--radius);
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+  min-height: var(--control-height-lg);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+.bulk-cancellation-toolbar > span {
+  display: grid;
+  gap: var(--space-half);
+  min-width: 0;
+}
+
+.bulk-cancellation-toolbar > span > span {
+  font-size: var(--text-xs);
+}
+
+.bulk-cancellation-toolbar > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-3);
+}
+
+.bulk-cancellation-toolbar button[aria-disabled="true"] {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.admin-reservation-line {
+  grid-template-columns: auto 1.1fr 0.8fr 0.8fr auto;
+}
+
+.admin-reservation-line > input[type="checkbox"],
+.bulk-selection-spacer {
+  align-self: center;
+  justify-self: center;
+}
+
+.bulk-selection-spacer {
+  display: block;
+  width: var(--badge-height-xs);
+}
+
+.bulk-cancellation-summary {
+  background: var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: var(--space-4);
+}
+
+.bulk-cancellation-summary strong {
+  grid-column: 1 / -1;
+}
+
+.bulk-cancellation-summary span {
+  color: var(--graphite);
+  font-size: var(--text-sm);
+}
+
+.bulk-cancellation-preview-list {
+  border: var(--stroke-width) solid var(--fog);
+  border-radius: var(--radius);
+  display: grid;
+  max-height: var(--admin-detail-mobile-compact-height);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.confirm-dialog:has(.bulk-cancellation-preview-list) {
+  max-height: calc(100svh - (2 * var(--space-7)));
+  overflow-y: auto;
+}
+
+.bulk-cancellation-preview-row {
+  align-items: center;
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.bulk-cancellation-preview-row + .bulk-cancellation-preview-row {
+  border-top: var(--stroke-width) solid var(--fog);
+}
+
+.bulk-cancellation-preview-row > div {
+  display: grid;
+  gap: var(--space-half);
+  min-width: 0;
+}
+
+.bulk-cancellation-preview-row > div > span {
+  overflow-wrap: anywhere;
+}
+
+.bulk-cancellation-preview-row > span {
+  color: var(--graphite);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
 .admin-pagination-footer {
   align-items: center;
   display: flex;
@@ -517,6 +627,10 @@
   display: grid;
   gap: var(--space-3);
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-dialog-actions > :only-child {
+  grid-column: 1 / -1;
 }
 
 .admin-dialog-actions .ghost-button,
@@ -1197,6 +1311,43 @@
   .admin-action-row,
   .admin-action-row .ghost-button {
     width: 100%;
+  }
+
+  .bulk-cancellation-toolbar {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .bulk-cancellation-toolbar > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .bulk-cancellation-toolbar button {
+    justify-content: center;
+    min-width: 0;
+    padding-inline: var(--space-3);
+    width: 100%;
+  }
+
+  .admin-reservation-line {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .admin-reservation-line > :not(input):not(.bulk-selection-spacer) {
+    grid-column: 2;
+  }
+
+  .admin-reservation-line > input[type="checkbox"],
+  .admin-reservation-line > .bulk-selection-spacer {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .bulk-cancellation-preview-row {
+    align-items: start;
   }
 
   .admin-pagination-footer {
