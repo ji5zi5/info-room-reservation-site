@@ -494,6 +494,25 @@
   justify-content: flex-end;
 }
 
+.admin-pagination-footer {
+  align-items: center;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.admin-pagination-footer > span {
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.admin-load-more {
+  justify-content: center;
+  min-width: var(--admin-table-date-min-width);
+  white-space: nowrap;
+}
+
 .admin-dialog-actions {
   display: grid;
   gap: var(--space-3);
@@ -1177,6 +1196,15 @@
 
   .admin-action-row,
   .admin-action-row .ghost-button {
+    width: 100%;
+  }
+
+  .admin-pagination-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-load-more {
     width: 100%;
   }
 

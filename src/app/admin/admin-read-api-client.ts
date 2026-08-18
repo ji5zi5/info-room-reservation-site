@@ -33,18 +33,72 @@ export type AdminReadPage<T> = {
   readonly cutoff: string;
   readonly currentTotalCount: number;
   readonly expiresAt: string;
+  readonly hasHiddenPrevious?: boolean;
   readonly items: readonly T[];
   readonly nextCursor: string | null;
 };
 
+export const ADMIN_VISIBLE_ITEM_LIMIT = 100;
+
 export type AdminReadResult<T> =
   | { readonly data: T; readonly kind: "ok" }
-  | { readonly kind: "error"; readonly message: string }
+  | { readonly code: string | null; readonly kind: "error"; readonly message: string }
   | { readonly kind: "unauthorized" };
 
 export type AdminReadOptions = {
   readonly signal?: AbortSignal;
 };
+
+export function mergeAdminReadPages<T extends { readonly id: string }>(
+  current: AdminReadPage<T> | null,
+  incoming: AdminReadPage<T>,
+  mode: "append" | "replace"
+): AdminReadPage<T> {
+  if (mode === "replace" || current === null) {
+    return { ...incoming, hasHiddenPrevious: false };
+  }
+  if (incoming.items.length === 0 && incoming.nextCursor === null && current.nextCursor !== null) {
+    return {
+      ...current,
+      currentTotalCount: incoming.currentTotalCount
+    };
+  }
+  const itemsById = new Map(current.items.map((item) => [item.id, item]));
+  for (const item of incoming.items) {
+    itemsById.set(item.id, item);
+  }
+  const mergedItems = [...itemsById.values()];
+  const hasHiddenPrevious = current.hasHiddenPrevious === true || mergedItems.length > ADMIN_VISIBLE_ITEM_LIMIT;
+  return {
+    ...incoming,
+    hasHiddenPrevious,
+    items: hasHiddenPrevious ? mergedItems.slice(-ADMIN_VISIBLE_ITEM_LIMIT) : mergedItems
+  };
+}
+
+export function buildAdminReservationExportUrl(input: {
+  readonly date: string;
+  readonly query: string;
+  readonly status: AdminReservationStatusFilter;
+  readonly studyPeriod: AdminReservationStudyPeriodFilter;
+}): string {
+  return `/api/admin/exports/reservations?${new URLSearchParams({
+    date: input.date,
+    query: input.query,
+    status: input.status,
+    studyPeriod: input.studyPeriod
+  }).toString()}`;
+}
+
+export function buildAdminAuditExportUrl(input: {
+  readonly action: AdminAuditActionFilter;
+  readonly query: string;
+}): string {
+  return `/api/admin/exports/actions?${new URLSearchParams({
+    action: input.action,
+    query: input.query
+  }).toString()}`;
+}
 
 export async function fetchAdminSettings(
   date: string,
@@ -172,23 +226,25 @@ async function readJsonResponse<T>(
   schema: JsonResponseSchema<T>
 ): Promise<AdminReadResult<T>> {
   if (!response.ok) {
+    const details = await readErrorDetails(response);
     return {
+      code: details?.code ?? null,
       kind: "error",
-      message: (await readErrorMessage(response)) ?? "관리자 데이터를 불러오지 못했습니다."
+      message: details?.message ?? "관리자 데이터를 불러오지 못했습니다."
     };
   }
   const body = await response.text();
   if (!body.trim()) {
-    return { kind: "error", message: "관리자 데이터 응답이 비어 있습니다." };
+    return { code: null, kind: "error", message: "관리자 데이터 응답이 비어 있습니다." };
   }
   const payload = parseJsonBody(body);
   if (payload === null) {
-    return { kind: "error", message: "관리자 데이터 응답 형식이 올바르지 않습니다." };
+    return { code: null, kind: "error", message: "관리자 데이터 응답 형식이 올바르지 않습니다." };
   }
   const parsed = schema.safeParse(payload);
   return parsed.success
     ? { data: parsed.data, kind: "ok" }
-    : { kind: "error", message: "관리자 데이터 응답 형식이 올바르지 않습니다." };
+    : { code: null, kind: "error", message: "관리자 데이터 응답 형식이 올바르지 않습니다." };
 }
 
 function parseJsonBody(body: string): unknown | null {
@@ -199,12 +255,18 @@ function parseJsonBody(body: string): unknown | null {
   }
 }
 
-async function readErrorMessage(response: Response): Promise<string | null> {
+async function readErrorDetails(response: Response): Promise<{
+  readonly code: string | null;
+  readonly message: string;
+} | null> {
   const body = await response.text();
   if (!body.trim()) {
     return null;
   }
   const payload = parseJsonBody(body);
-  const parsed = z.object({ error: z.object({ message: z.string() }).optional() }).safeParse(payload);
-  return parsed.success ? parsed.data.error?.message ?? null : null;
+  const parsed = z.object({
+    error: z.object({ code: z.string().optional(), message: z.string() }).optional()
+  }).safeParse(payload);
+  const error = parsed.success ? parsed.data.error : undefined;
+  return error ? { code: error.code ?? null, message: error.message } : null;
 }

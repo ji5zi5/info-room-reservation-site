@@ -31,6 +31,15 @@ export type UserRestrictionDraft = {
 
 export type AdminSection = "audit" | "blacklist" | "dashboard" | "reservations" | "settings" | "students";
 
+export type AdminPaginationState = {
+  readonly currentTotalCount: number;
+  readonly hasHiddenPrevious: boolean;
+  readonly loadedCount: number;
+  readonly loadingMore: boolean;
+  readonly nextCursor: string | null;
+  readonly restartRequired: boolean;
+};
+
 export const DEFAULT_RESTRICTION_DRAFT = {
   days: "7",
   reason: "",
@@ -42,12 +51,14 @@ export type AdminConsoleState = {
   readonly activeSection: AdminSection;
   readonly auditActionFilter: AdminAuditActionFilter;
   readonly auditActions: readonly AdminAuditAction[];
+  readonly auditExportUrl: string;
+  readonly auditPagination: AdminPaginationState;
+  readonly auditFocusId: string | null;
   readonly auditQuery: string;
   readonly applyRestriction: (userId: string) => Promise<AdminMutationResult<ApplyRestrictionData>>;
   readonly applyShadowBan: (userId: string) => Promise<void>;
   readonly cancelReservation: (reservationId: string, reason: string) => Promise<AdminMutationResult<CancelReservationData>>;
   readonly clearSelectedUser: () => void;
-  readonly copyReservationsCsv: () => Promise<void>;
   readonly dashboardPeriods: readonly AdminDashboardPeriod[];
   readonly date: string;
   readonly deepLinkCancellation: AdminReservation | null;
@@ -55,15 +66,24 @@ export type AdminConsoleState = {
   readonly markNoShow: (reservationId: string) => Promise<AdminMutationResult<NoShowReservationData>>;
   readonly notificationBacklog: readonly AdminNotificationBacklogItem[];
   readonly notificationSettings: AdminNotificationSettings;
+  readonly loadMoreAudit: () => Promise<void>;
+  readonly loadMoreReservations: () => Promise<void>;
+  readonly loadMoreUsers: () => Promise<void>;
   readonly operations: AdminOperationsPayload | null;
   readonly periods: readonly AdminPeriodSetting[];
   readonly refresh: () => Promise<void>;
   readonly removeRestriction: (userId: string) => Promise<void>;
   readonly reservationPeriodFilter: AdminReservationStudyPeriodFilter;
   readonly reservationQuery: string;
+  readonly reservationExportUrl: string;
+  readonly reservationPagination: AdminPaginationState;
+  readonly reservationFocusId: string | null;
   readonly reservations: readonly AdminReservation[];
   readonly restrictionDrafts: Readonly<Record<string, UserRestrictionDraft>>;
   readonly saveSettings: () => Promise<void>;
+  readonly restartAuditTraversal: () => Promise<void>;
+  readonly restartReservationTraversal: () => Promise<void>;
+  readonly restartUserTraversal: () => Promise<void>;
   readonly selectedUserDetail: AdminUserDetail | null;
   readonly selectedUserId: string | null;
   readonly selectStatus: (status: AdminReservationStatusFilter) => void;
@@ -94,5 +114,6 @@ export type AdminConsoleState = {
   readonly userQuery: string;
   readonly userStatusFilter: AdminUserStatusFilter;
   readonly users: readonly AdminUser[];
+  readonly userPagination: AdminPaginationState;
   readonly viewUser: (userId: string) => Promise<void>;
 };

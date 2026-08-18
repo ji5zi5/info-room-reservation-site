@@ -1,8 +1,11 @@
 "use client";
 
+import { ChevronDown, RotateCcw } from "lucide-react";
+
 import { parseAdminUserStatusFilter } from "@/lib/admin-users";
 
 import { adminAccountDescription, adminAccountName } from "./admin-account-labels";
+import type { AdminPaginationState } from "./admin-console-state";
 import { ADMIN_USER_STATUS_FILTERS, type AdminUser, type AdminUserStatusFilter } from "./admin-types";
 
 const USER_STATUS_LABELS: Record<AdminUserStatusFilter, string> = {
@@ -15,13 +18,18 @@ const USER_STATUS_LABELS: Record<AdminUserStatusFilter, string> = {
 
 export function AdminUsersPanel({
   onSelectUser,
+  onLoadMore = noop,
+  onRestartTraversal = noop,
   onSetQuery,
   onSetStatus,
   query,
   selectedUserId,
   status,
-  users
+  users,
+  pagination = terminalPagination(users.length)
 }: {
+  readonly onLoadMore?: () => void;
+  readonly onRestartTraversal?: () => void;
   readonly onSelectUser: (userId: string) => void;
   readonly onSetQuery: (query: string) => void;
   readonly onSetStatus: (status: AdminUserStatusFilter) => void;
@@ -29,6 +37,7 @@ export function AdminUsersPanel({
   readonly selectedUserId: string | null;
   readonly status: AdminUserStatusFilter;
   readonly users: readonly AdminUser[];
+  readonly pagination?: AdminPaginationState;
 }): React.ReactElement {
   return (
     <section className="admin-panel stack">
@@ -76,9 +85,70 @@ export function AdminUsersPanel({
         ))}
         {users.length === 0 ? <div className="table-line muted">검색된 학생이 없습니다.</div> : null}
       </div>
+      <AdminPaginationFooter
+        onLoadMore={onLoadMore}
+        onRestartTraversal={onRestartTraversal}
+        pagination={pagination}
+      />
     </section>
   );
 }
+
+export function AdminPaginationFooter({
+  onLoadMore,
+  onRestartTraversal,
+  pagination
+}: {
+  readonly onLoadMore: () => void;
+  readonly onRestartTraversal: () => void;
+  readonly pagination: AdminPaginationState;
+}): React.ReactElement {
+  const terminal = pagination.nextCursor === null;
+  return (
+    <div className="admin-pagination-footer">
+      <span aria-live="polite" className="muted">
+        {pagination.hasHiddenPrevious ? "최근 " : ""}{pagination.loadedCount}개 표시 / 현재 {pagination.currentTotalCount}건
+      </span>
+      {pagination.restartRequired ? (
+        <button className="ghost-button admin-load-more" type="button" onClick={onRestartTraversal}>
+          <RotateCcw aria-hidden="true" size={16} />
+          처음부터 다시
+        </button>
+      ) : (
+        <button
+          className="ghost-button admin-load-more"
+          disabled={(terminal && !pagination.hasHiddenPrevious) || pagination.loadingMore}
+          type="button"
+          onClick={terminal && pagination.hasHiddenPrevious ? onRestartTraversal : onLoadMore}
+        >
+          {terminal && pagination.hasHiddenPrevious ? (
+            <RotateCcw aria-hidden="true" size={16} />
+          ) : (
+            <ChevronDown aria-hidden="true" size={16} />
+          )}
+          {pagination.loadingMore
+            ? "불러오는 중"
+            : terminal
+              ? pagination.hasHiddenPrevious ? "처음부터 보기" : "탐색 완료"
+              : "더 보기"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function terminalPagination(loadedCount: number): AdminPaginationState {
+  return {
+    currentTotalCount: loadedCount,
+    hasHiddenPrevious: false,
+    loadedCount,
+    loadingMore: false,
+    nextCursor: null,
+    restartRequired: false
+  };
+}
+
+function noop(): void {}
 
 function statusLabel(status: string): string {
   switch (status) {

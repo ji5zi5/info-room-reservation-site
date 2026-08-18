@@ -1,12 +1,13 @@
 "use client";
 
-import { ClipboardList, UserSearch } from "lucide-react";
-import type { ReactElement } from "react";
+import { Download, UserSearch } from "lucide-react";
+import { useEffect, useRef, type ReactElement } from "react";
 
 import { getAdminAuditActionLabel } from "@/lib/admin-audit-actions";
 
-import { buildAuditActionsCsv } from "./admin-csv";
+import type { AdminPaginationState } from "./admin-console-state";
 import { ADMIN_AUDIT_ACTION_FILTERS, type AdminAuditAction, type AdminAuditActionFilter } from "./admin-types";
+import { AdminPaginationFooter } from "./admin-users-panel";
 
 const FILTER_LABELS: Record<AdminAuditActionFilter, string> = {
   ALL: "전체",
@@ -22,23 +23,33 @@ const FILTER_LABELS: Record<AdminAuditActionFilter, string> = {
 export function AdminAuditPanel({
   actionFilter,
   actions,
+  exportUrl,
+  focusRecordId = null,
+  onLoadMore = noop,
+  onRestartTraversal = noop,
   onSetActionFilter,
   onSetQuery,
   onViewUser,
-  query
+  query,
+  pagination = terminalPagination(actions.length)
 }: {
   readonly actionFilter: AdminAuditActionFilter;
   readonly actions: readonly AdminAuditAction[];
+  readonly exportUrl: string;
+  readonly focusRecordId?: string | null;
+  readonly onLoadMore?: () => void;
+  readonly onRestartTraversal?: () => void;
   readonly onSetActionFilter: (filter: AdminAuditActionFilter) => void;
   readonly onSetQuery: (query: string) => void;
   readonly onViewUser: (userId: string) => void;
+  readonly pagination?: AdminPaginationState;
   readonly query: string;
 }): ReactElement {
-  const visibleActions = actions.slice(0, 80);
+  const focusRowRef = useRef<HTMLElement>(null);
 
-  async function copyAuditCsv(): Promise<void> {
-    await navigator.clipboard.writeText(buildAuditActionsCsv(visibleActions));
-  }
+  useEffect(() => {
+    focusRowRef.current?.focus();
+  }, [actions, focusRecordId]);
 
   return (
     <section className="admin-panel stack">
@@ -47,10 +58,10 @@ export function AdminAuditPanel({
           <h2>감사 로그</h2>
         </div>
         <div className="admin-action-row">
-          <button className="ghost-button" type="button" onClick={() => void copyAuditCsv()}>
-            <ClipboardList size={18} />
-            감사 복사
-          </button>
+          <a className="ghost-button" href={exportUrl}>
+            <Download aria-hidden="true" size={18} />
+            CSV 다운로드
+          </a>
         </div>
       </div>
       <div className="admin-row">
@@ -67,10 +78,17 @@ export function AdminAuditPanel({
         ))}
       </div>
       <div className="audit-list">
-        {visibleActions.map((action) => {
+        {actions.map((action) => {
           const targetUser = action.targetUser;
+          const focusTarget = action.id === focusRecordId;
           return (
-            <article className="audit-line" key={action.id}>
+            <article
+              className="audit-line"
+              data-focus-target={focusTarget ? "true" : undefined}
+              key={action.id}
+              ref={focusTarget ? focusRowRef : undefined}
+              tabIndex={focusTarget ? -1 : undefined}
+            >
               <div>
                 <span className="status-chip">{FILTER_LABELS[action.category]}</span>
                 <strong>{getAdminAuditActionLabel(action.action)}</strong>
@@ -101,11 +119,29 @@ export function AdminAuditPanel({
             </article>
           );
         })}
-        {visibleActions.length === 0 ? <div className="table-line muted">표시할 감사 로그가 없습니다.</div> : null}
+        {actions.length === 0 ? <div className="table-line muted">표시할 감사 로그가 없습니다.</div> : null}
       </div>
+      <AdminPaginationFooter
+        onLoadMore={onLoadMore}
+        onRestartTraversal={onRestartTraversal}
+        pagination={pagination}
+      />
     </section>
   );
 }
+
+function terminalPagination(loadedCount: number): AdminPaginationState {
+  return {
+    currentTotalCount: loadedCount,
+    hasHiddenPrevious: false,
+    loadedCount,
+    loadingMore: false,
+    nextCursor: null,
+    restartRequired: false
+  };
+}
+
+function noop(): void {}
 
 function formatPerson(person: AdminAuditAction["actor"]): string {
   return person ? `${person.name} (${person.studentNumber})` : "기록 없음";

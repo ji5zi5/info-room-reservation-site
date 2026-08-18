@@ -64,7 +64,7 @@ describe("AdminReservationsPanel", () => {
       createElement(AdminReservationsPanel, {
         date: "2026-06-16",
         onCancelReservation: cancelReservationSuccess,
-        onCopyCsv: () => undefined,
+        exportUrl: "/api/admin/exports/reservations?date=2026-06-16&query=&status=CONFIRMED&studyPeriod=ALL",
         onMarkNoShow: markNoShowSuccess,
         onRefresh: () => undefined,
         onSelectStatus: () => undefined,
@@ -91,7 +91,7 @@ describe("AdminReservationsPanel", () => {
       createElement(AdminReservationsPanel, {
         date: "2026-06-16",
         onCancelReservation: cancelReservationSuccess,
-        onCopyCsv: () => undefined,
+        exportUrl: "/api/admin/exports/reservations?date=2026-06-16&query=&status=CONFIRMED&studyPeriod=ALL",
         onMarkNoShow: markNoShowSuccess,
         onRefresh: () => undefined,
         onSelectStatus: () => undefined,
@@ -115,7 +115,7 @@ describe("AdminReservationsPanel", () => {
       createElement(AdminReservationsPanel, {
         date: "2026-06-16",
         onCancelReservation: cancelReservationSuccess,
-        onCopyCsv: () => undefined,
+        exportUrl: "/api/admin/exports/reservations?date=2026-06-16&query=cannot-find-target&status=CONFIRMED&studyPeriod=ALL",
         onMarkNoShow: markNoShowSuccess,
         onRefresh: () => undefined,
         onSelectStatus: () => undefined,
@@ -135,5 +135,66 @@ describe("AdminReservationsPanel", () => {
     expect(markup).toContain("예약을 관리자 취소할까요?");
     expect(markup).toContain(confirmedReservation.user.name);
     expect(markup).toContain(confirmedReservation.date);
+  });
+
+  it("renders a server CSV download and current paged count without client CSV copy", () => {
+    // Given / When
+    const markup = renderToStaticMarkup(
+      createElement(AdminReservationsPanel, {
+        date: "2026-06-16",
+        exportUrl: "/api/admin/exports/reservations?date=2026-06-16&query=%ED%95%99%EC%83%9D&status=ALL&studyPeriod=EIGHTH",
+        onCancelReservation: cancelReservationSuccess,
+        onLoadMore: () => undefined,
+        onMarkNoShow: markNoShowSuccess,
+        onRefresh: () => undefined,
+        onRestartTraversal: () => undefined,
+        onSelectStatus: () => undefined,
+        onSetPeriod: () => undefined,
+        onSetQuery: () => undefined,
+        onViewUser: () => undefined,
+        pagination: {
+          currentTotalCount: 73,
+          hasHiddenPrevious: false,
+          loadedCount: 50,
+          loadingMore: false,
+          nextCursor: "cursor-2",
+          restartRequired: false
+        },
+        periodFilter: "EIGHTH",
+        query: "학생",
+        reservations: [confirmedReservation],
+        statusFilter: "ALL"
+      })
+    );
+
+    // Then
+    expect(markup).toContain('href="/api/admin/exports/reservations?date=2026-06-16&amp;query=%ED%95%99%EC%83%9D&amp;status=ALL&amp;studyPeriod=EIGHTH"');
+    expect(markup).toContain("CSV 다운로드");
+    expect(markup).toContain("50개 표시 / 현재 73건");
+    expect(markup).toContain("더 보기");
+    expect(markup).not.toContain("명단 복사");
+  });
+
+  it("marks an exact URL record as the focus target independently of list filters", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AdminReservationsPanel, {
+        date: "2026-06-16",
+        exportUrl: "/api/admin/exports/reservations?date=2026-06-16&query=&status=CONFIRMED&studyPeriod=ALL",
+        focusRecordId: confirmedReservation.id,
+        onCancelReservation: cancelReservationSuccess,
+        onMarkNoShow: markNoShowSuccess,
+        onRefresh: () => undefined,
+        onSelectStatus: () => undefined,
+        onSetPeriod: () => undefined,
+        onSetQuery: () => undefined,
+        onViewUser: () => undefined,
+        periodFilter: "ALL",
+        query: "hidden-by-filter",
+        reservations: [confirmedReservation],
+        statusFilter: "CONFIRMED"
+      })
+    );
+
+    expect(markup).toMatch(/<div(?=[^>]*class="table-line")(?=[^>]*data-focus-target="true")(?=[^>]*tabindex="-1")[^>]*>/u);
   });
 });

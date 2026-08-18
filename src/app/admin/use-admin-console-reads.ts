@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   fetchAdminAuditActions,
@@ -9,7 +9,9 @@ import {
   fetchAdminReservations,
   fetchAdminSettings,
   fetchAdminStatistics,
+  fetchAdminUsers,
   fetchAdminUserDetail,
+  mergeAdminReadPages,
   type AdminReadPage
 } from "./admin-read-api-client";
 import { firstAdminReadError } from "./admin-read-error";
@@ -60,6 +62,12 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
   const [userPage, setUserPage] = useState<AdminReadPage<AdminTypes.AdminUser> | null>(null);
   const [auditPage, setAuditPage] =
     useState<AdminReadPage<AdminTypes.AdminAuditAction> | null>(null);
+  const [reservationLoadingMore, setReservationLoadingMore] = useState(false);
+  const [userLoadingMore, setUserLoadingMore] = useState(false);
+  const [auditLoadingMore, setAuditLoadingMore] = useState(false);
+  const [reservationRestartRequired, setReservationRestartRequired] = useState(false);
+  const [userRestartRequired, setUserRestartRequired] = useState(false);
+  const [auditRestartRequired, setAuditRestartRequired] = useState(false);
   const [selectedUserDetail, setSelectedUserDetail] =
     useState<AdminTypes.AdminUserDetail | null>(null);
   const [deepLinkRead, setDeepLinkRead] = useState<AdminReservationDeepLinkRead>({ kind: "idle" });
@@ -74,6 +82,7 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
   const debouncedAuditQuery = useDebouncedValue(input.auditQuery);
   const debouncedReservationQuery = useDebouncedValue(input.reservationQuery);
   const debouncedUserQuery = useDebouncedValue(input.userQuery);
+  const pagedRequest = useRef({ audit: 0, reservations: 0, users: 0 });
 
   useEffect(() => {
     if (input.deepLinkTarget === null) {
@@ -112,6 +121,7 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
 
   useEffect(() => {
     const controller = new AbortController();
+    invalidateActivePagination();
     setSectionError(null);
     void loadActiveSection(controller.signal).catch((loadError: unknown) => {
       handleReadFailure(loadError, controller.signal, setSectionError);
@@ -217,7 +227,8 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
       return;
     }
     if (result.kind === "ok") {
-      setReservationPage(result.data);
+      setReservationPage((current) => mergeAdminReadPages(current, result.data, "replace"));
+      setReservationRestartRequired(false);
       return;
     }
     setSectionError(firstAdminReadError([result]) ?? "예약 목록을 불러오지 못했습니다.");
@@ -265,7 +276,8 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
       return;
     }
     if (result.kind === "ok") {
-      setUserPage(result.data);
+      setUserPage((current) => mergeAdminReadPages(current, result.data, "replace"));
+      setUserRestartRequired(false);
       return;
     }
     setSectionError(firstAdminReadError([result]) ?? "학생 목록을 불러오지 못했습니다.");
@@ -280,7 +292,8 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
       return;
     }
     if (result.kind === "ok") {
-      setAuditPage(result.data);
+      setAuditPage((current) => mergeAdminReadPages(current, result.data, "replace"));
+      setAuditRestartRequired(false);
       return;
     }
     setSectionError(firstAdminReadError([result]) ?? "감사 기록을 불러오지 못했습니다.");
@@ -319,9 +332,140 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
     }
   }
 
+  function invalidateActivePagination(): void {
+    switch (input.activeSection) {
+      case "reservations":
+        pagedRequest.current.reservations += 1;
+        setReservationLoadingMore(false);
+        setReservationRestartRequired(false);
+        return;
+      case "students":
+      case "blacklist":
+        pagedRequest.current.users += 1;
+        setUserLoadingMore(false);
+        setUserRestartRequired(false);
+        return;
+      case "audit":
+        pagedRequest.current.audit += 1;
+        setAuditLoadingMore(false);
+        setAuditRestartRequired(false);
+        return;
+      case "dashboard":
+      case "settings":
+        return;
+    }
+  }
+
+  async function loadMoreReservations(mode: "append" | "replace" = "append"): Promise<void> {
+    const cursor = mode === "append" ? reservationPage?.nextCursor : undefined;
+    if (mode === "append" && (!cursor || reservationLoadingMore)) return;
+    const request = pagedRequest.current.reservations + 1;
+    pagedRequest.current.reservations = request;
+    setReservationLoadingMore(true);
+    if (mode === "replace") setReservationRestartRequired(false);
+    try {
+      const result = await fetchAdminReservations({
+        ...(cursor ? { cursor } : {}),
+        date: input.date,
+        query: debouncedReservationQuery,
+        status: input.statusFilter,
+        studyPeriod: input.reservationPeriodFilter
+      });
+      if (pagedRequest.current.reservations !== request) return;
+      if (result.kind === "ok") {
+        setReservationPage((current) => mergeAdminReadPages(current, result.data, mode));
+        setSectionError(null);
+      } else if (result.kind === "error") {
+        handlePagedError(result, setReservationRestartRequired);
+      } else {
+        setSectionError("관리자 권한을 확인해 주세요.");
+      }
+    } catch (loadError: unknown) {
+      if (pagedRequest.current.reservations === request) handlePagedException(loadError);
+    } finally {
+      if (pagedRequest.current.reservations === request) setReservationLoadingMore(false);
+    }
+  }
+
+  async function loadMoreUsers(mode: "append" | "replace" = "append"): Promise<void> {
+    const cursor = mode === "append" ? userPage?.nextCursor : undefined;
+    if (mode === "append" && (!cursor || userLoadingMore)) return;
+    const request = pagedRequest.current.users + 1;
+    pagedRequest.current.users = request;
+    setUserLoadingMore(true);
+    if (mode === "replace") setUserRestartRequired(false);
+    try {
+      const result = await fetchAdminUsers({
+        ...(cursor ? { cursor } : {}),
+        query: debouncedUserQuery,
+        status: input.userStatusFilter
+      });
+      if (pagedRequest.current.users !== request) return;
+      if (result.kind === "ok") {
+        setUserPage((current) => mergeAdminReadPages(current, result.data, mode));
+        setSectionError(null);
+      } else if (result.kind === "error") {
+        handlePagedError(result, setUserRestartRequired);
+      } else {
+        setSectionError("관리자 권한을 확인해 주세요.");
+      }
+    } catch (loadError: unknown) {
+      if (pagedRequest.current.users === request) handlePagedException(loadError);
+    } finally {
+      if (pagedRequest.current.users === request) setUserLoadingMore(false);
+    }
+  }
+
+  async function loadMoreAudit(mode: "append" | "replace" = "append"): Promise<void> {
+    const cursor = mode === "append" ? auditPage?.nextCursor : undefined;
+    if (mode === "append" && (!cursor || auditLoadingMore)) return;
+    const request = pagedRequest.current.audit + 1;
+    pagedRequest.current.audit = request;
+    setAuditLoadingMore(true);
+    if (mode === "replace") setAuditRestartRequired(false);
+    try {
+      const result = await fetchAdminAuditActions({
+        action: input.auditActionFilter,
+        ...(cursor ? { cursor } : {}),
+        query: debouncedAuditQuery
+      });
+      if (pagedRequest.current.audit !== request) return;
+      if (result.kind === "ok") {
+        setAuditPage((current) => mergeAdminReadPages(current, result.data, mode));
+        setSectionError(null);
+      } else if (result.kind === "error") {
+        handlePagedError(result, setAuditRestartRequired);
+      } else {
+        setSectionError("관리자 권한을 확인해 주세요.");
+      }
+    } catch (loadError: unknown) {
+      if (pagedRequest.current.audit === request) handlePagedException(loadError);
+    } finally {
+      if (pagedRequest.current.audit === request) setAuditLoadingMore(false);
+    }
+  }
+
+  function handlePagedError(
+    result: { readonly code: string | null; readonly message: string },
+    setRestartRequired: (required: boolean) => void
+  ): void {
+    if (result.code === "CURSOR_EXPIRED") {
+      setRestartRequired(true);
+      setSectionError("목록 탐색 시간이 만료되었습니다. 표시된 항목은 그대로 유지됩니다.");
+      return;
+    }
+    setSectionError(result.message);
+  }
+
+  function handlePagedException(loadError: unknown): void {
+    if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+    setSectionError("다음 항목을 불러오지 못했습니다. 다시 시도해 주세요.");
+  }
+
   return {
     auditActions: auditPage?.items ?? [],
     auditPage,
+    auditPagination: paginationState(auditPage, auditLoadingMore, auditRestartRequired),
     clearSelectedUserDetail: () => {
       setDetailError(null);
       setSelectedUserDetail(null);
@@ -331,17 +475,47 @@ export function useAdminConsoleReads(input: AdminConsoleReadInput) {
     error: detailError ?? sectionError ?? periodError ?? notificationSettingsError,
     notificationBacklog,
     notificationSettings,
+    loadMoreAudit: () => loadMoreAudit(),
+    loadMoreReservations: () => loadMoreReservations(),
+    loadMoreUsers: () => loadMoreUsers(),
     periods,
     refreshActive,
     refreshNotificationSettings: () => setNotificationSettingsRevision((current) => current + 1),
     refreshPeriods: () => setPeriodRevision((current) => current + 1),
     reservationPage,
+    reservationPagination: paginationState(reservationPage, reservationLoadingMore, reservationRestartRequired),
     reservations: reservationPage?.items ?? [],
     selectedUserDetail,
     setNotificationSettings,
     setPeriods,
     statistics,
+    restartAuditTraversal: () => loadMoreAudit("replace"),
+    restartReservationTraversal: () => loadMoreReservations("replace"),
+    restartUserTraversal: () => loadMoreUsers("replace"),
     userPage,
+    userPagination: paginationState(userPage, userLoadingMore, userRestartRequired),
     users: userPage?.items ?? []
+  };
+}
+
+function paginationState<T>(
+  page: AdminReadPage<T> | null,
+  loadingMore: boolean,
+  restartRequired: boolean
+): {
+  readonly currentTotalCount: number;
+  readonly hasHiddenPrevious: boolean;
+  readonly loadedCount: number;
+  readonly loadingMore: boolean;
+  readonly nextCursor: string | null;
+  readonly restartRequired: boolean;
+} {
+  return {
+    currentTotalCount: page?.currentTotalCount ?? 0,
+    hasHiddenPrevious: page?.hasHiddenPrevious === true,
+    loadedCount: page?.items.length ?? 0,
+    loadingMore,
+    nextCursor: page?.nextCursor ?? null,
+    restartRequired
   };
 }

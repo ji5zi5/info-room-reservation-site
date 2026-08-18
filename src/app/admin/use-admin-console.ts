@@ -22,8 +22,8 @@ import {
   sendClosedPeriodNotification,
   updatePeriodSetting
 } from "./admin-api-client";
+import { buildAdminAuditExportUrl, buildAdminReservationExportUrl } from "./admin-read-api-client";
 import { todayKst } from "./admin-date";
-import { buildReservationCsv } from "./admin-csv";
 import {
   parseAdminConsoleDeepLink,
   parseReservationDeepLink,
@@ -416,11 +416,6 @@ export function useAdminConsole(): AdminConsoleState {
     reads.clearSelectedUserDetail();
   }
 
-  async function copyReservationsCsv(): Promise<void> {
-    await navigator.clipboard.writeText(buildReservationCsv(reads.reservations));
-    setToast("현재 예약 목록을 복사했습니다.");
-  }
-
   function setRestrictionDraft(userId: string, patch: Partial<UserRestrictionDraft>): void {
     setRestrictionDrafts((current) => patchRestrictionDrafts(current, userId, patch));
   }
@@ -429,12 +424,14 @@ export function useAdminConsole(): AdminConsoleState {
     activeSection,
     auditActionFilter,
     auditActions: prependExact(reads.auditActions, operationAuditAction),
+    auditExportUrl: buildAdminAuditExportUrl({ action: auditActionFilter, query: auditQuery }),
+    auditFocusId: operationAuditAction?.id ?? null,
+    auditPagination: reads.auditPagination,
     auditQuery,
     applyRestriction,
     applyShadowBan,
     cancelReservation,
     clearSelectedUser,
-    copyReservationsCsv,
     consumeDeepLinkCancellation: () => setDeepLinkCancellation(null),
     dashboardPeriods: reads.dashboardPeriods,
     date,
@@ -442,6 +439,9 @@ export function useAdminConsole(): AdminConsoleState {
     markNoShow,
     notificationBacklog: reads.notificationBacklog,
     notificationSettings: reads.notificationSettings,
+    loadMoreAudit: reads.loadMoreAudit,
+    loadMoreReservations: reads.loadMoreReservations,
+    loadMoreUsers: reads.loadMoreUsers,
     operations,
     periods: reads.periods,
     refresh,
@@ -451,9 +451,20 @@ export function useAdminConsole(): AdminConsoleState {
     removeRestriction,
     reservationPeriodFilter,
     reservationQuery,
+    reservationExportUrl: buildAdminReservationExportUrl({
+      date,
+      query: reservationQuery,
+      status: statusFilter,
+      studyPeriod: reservationPeriodFilter
+    }),
+    reservationFocusId: operationReservation?.id ?? null,
+    reservationPagination: reads.reservationPagination,
     reservations: prependExact(reads.reservations, operationReservation),
     restrictionDrafts,
     saveSettings,
+    restartAuditTraversal: reads.restartAuditTraversal,
+    restartReservationTraversal: reads.restartReservationTraversal,
+    restartUserTraversal: reads.restartUserTraversal,
     selectedUserDetail: reads.selectedUserDetail,
     selectedUserId,
     selectStatus,
@@ -475,6 +486,7 @@ export function useAdminConsole(): AdminConsoleState {
     userQuery,
     userStatusFilter,
     users: reads.users,
+    userPagination: reads.userPagination,
     viewUser
   };
 }
