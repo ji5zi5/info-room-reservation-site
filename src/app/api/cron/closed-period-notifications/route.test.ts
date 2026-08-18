@@ -13,6 +13,7 @@ type RunJobInput = {
 };
 
 const routeMocks = vi.hoisted(() => ({
+  activateApplicationContract: vi.fn(),
   createClosedPeriodNotificationService: vi.fn(),
   getClosedPeriodNotificationBacklogSummary: vi.fn(),
   getDueClosedPeriodNotificationCandidates: vi.fn(),
@@ -25,6 +26,10 @@ const routeMocks = vi.hoisted(() => ({
   runOperationalJob: vi.fn<(input: RunJobInput) => Promise<unknown>>(),
   sendClosedPeriod: vi.fn(),
   sendDiscordWebhook: vi.fn()
+}));
+
+vi.mock("@/lib/application-contract-activation", () => ({
+  activateApplicationContract: routeMocks.activateApplicationContract
 }));
 
 vi.mock("@/lib/closed-period-notification-service", () => ({
@@ -63,6 +68,11 @@ describe("closed-period notification cron", () => {
     vi.stubEnv("MAINTENANCE_CRON_SECRET", "maintenance-secret");
     vi.stubEnv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/token");
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
+    routeMocks.activateApplicationContract.mockResolvedValue({
+      deploymentSha: "a".repeat(40),
+      kind: "already_active",
+      source: "FIRST_CRON"
+    });
     routeMocks.getPrismaNotificationSettings.mockResolvedValue(defaultNotificationSettings());
     routeMocks.getMockNotificationSettings.mockReturnValue(defaultNotificationSettings());
     routeMocks.getDueClosedPeriodNotificationCandidates.mockResolvedValue([]);
@@ -123,6 +133,13 @@ describe("closed-period notification cron", () => {
     ]);
     expect(response.status).toBe(interactions || outbox || closed ? 502 : 200);
     expect(body).toEqual({
+      activation: interactions || outbox || closed
+        ? { kind: "deferred", reason: "sibling_job_failed" }
+        : {
+            deploymentSha: "a".repeat(40),
+            kind: "already_active",
+            source: "FIRST_CRON"
+          },
       jobs: {
         CLOSED_PERIOD_NOTIFICATIONS: expect.objectContaining({ kind: closed ? "failed" : "succeeded" }),
         DISCORD_INTERACTIONS: expect.objectContaining({ kind: interactions ? "failed" : "succeeded" }),
@@ -130,6 +147,7 @@ describe("closed-period notification cron", () => {
       },
       ok: !(interactions || outbox || closed)
     });
+    expect(routeMocks.activateApplicationContract).toHaveBeenCalledTimes(interactions || outbox || closed ? 0 : 1);
   });
 
   it("records disabled closed-list work without skipping Discord workers", async () => {
@@ -161,6 +179,8 @@ describe("closed-period notification cron", () => {
     expect(routeMocks.runDiscordInteractionCronWorker).toHaveBeenCalledOnce();
     expect(routeMocks.runDiscordReservationOutbox).toHaveBeenCalledOnce();
     expect(body.jobs.CLOSED_PERIOD_NOTIFICATIONS).toEqual({ failureCode: "unexpected_error", kind: "failed" });
+    expect(body.activation).toEqual({ kind: "deferred", reason: "sibling_job_failed" });
+    expect(routeMocks.activateApplicationContract).not.toHaveBeenCalled();
   });
 
   it("reports already-running work without failing siblings", async () => {
@@ -182,6 +202,29 @@ describe("closed-period notification cron", () => {
 
     expect(response.status).toBe(401);
     expect(routeMocks.runOperationalJob).not.toHaveBeenCalled();
+  });
+
+  it("invokes FIRST_CRON activation only after all three sibling jobs settle", async () => {
+    // Given: one sibling remains pending while the other two settle.
+    let finishInteraction: (() => void) | undefined;
+    routeMocks.runDiscordInteractionCronWorker.mockImplementation(() => new Promise((resolve) => {
+      finishInteraction = () => resolve({
+        abandoned: 0, backlog: { count: 0, oldestAt: null }, claimed: 0,
+        retried: 0, stale: 0, succeeded: 0
+      });
+    }));
+
+    // When: the cron starts but its interaction worker has not settled.
+    const responsePromise = GET(cronRequest());
+    await vi.waitFor(() => expect(routeMocks.runOperationalJob).toHaveBeenCalledTimes(3));
+
+    // Then: activation waits for the final sibling, then uses the shared FIRST_CRON source.
+    expect(routeMocks.activateApplicationContract).not.toHaveBeenCalled();
+    finishInteraction?.();
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    expect(routeMocks.activateApplicationContract).toHaveBeenCalledWith({ source: "FIRST_CRON" });
+    await expect(response.json()).resolves.toMatchObject({ activation: { kind: "already_active" } });
   });
 });
 

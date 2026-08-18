@@ -299,7 +299,7 @@ SMOKE_FORCE_DISCORD_SEND=true
 For interactive Discord controls, use this exact order before changing the application
 deployment:
 
-1. Run `npm run discord:disable-pending -- --confirm DISABLE_DISCORD_INTERACTIONS` and require a successful report that every active bot message has controls removed.
+1. Run `npm run discord:disable-pending -- --confirm DISABLE_DISCORD_INTERACTIONS`; require a successful local fence/drain report and review any explicitly pending remote cleanup.
 2. Remove the Interaction Endpoint URL in the Discord Developer Portal.
 3. Unset the complete seven-variable Discord application group together. Keep `DISCORD_WEBHOOK_URL` set so closed-period and fallback delivery remain available.
 
@@ -309,6 +309,81 @@ that restores the expected schema, and re-run webhook, cron, application-disable
 predeploy, and smoke checks. If disabling controls fails, stop: do not remove the endpoint
 or unset credentials until the command can finish, because doing so would strand active
 controls.
+
+### Discord operation fence and re-enable
+
+`discord:disable-pending` is a database fence, not a claim that an already leased HTTP
+request was cancelled. It uses `DIRECT_URL` to atomically set `enabled=false` and
+increment the control epoch before waiting for old reservation mutations. New claims,
+mutations, and POSTING/PATCHING leases are then rejected. A pre-fence HTTP lease may
+still finish transport; it remains tracked as pending remote cleanup. Ambiguous POST or
+PATCH outcomes stay in permanent operator review and are never automatically replayed.
+
+Re-enable only with explicit residual inert-control acknowledgement:
+
+```bash
+npm run discord:disable-pending -- \
+  --confirm ENABLE_DISCORD_INTERACTIONS \
+  --acknowledge-residual-controls ACKNOWLEDGE_RESIDUAL_INERT_CONTROLS
+```
+
+Re-enable increments the epoch again. The acknowledgement does not claim residual
+controls were removed. Every old signed epoch and every legacy unauthenticated custom
+ID remains inert.
+
+## Application-contract activation and roll-forward recovery
+
+The promoted v2 server resolves the full deployment SHA from `DEPLOYMENT_SHA`, then
+`VERCEL_GIT_COMMIT_SHA`, then `GITHUB_SHA`. The authorized minute cron (`FIRST_CRON`)
+and authenticated admin route (`ADMIN`) call one shared activation service. A browser
+never supplies or receives a readiness receipt ID.
+
+Transaction A sets the exact v2 contract/SHA and commits a source-bound ten-minute
+receipt. Transaction B sets the same contract/SHA/source and consumes it while activating
+the marker and workers. If transaction B rolls back, the service discards its in-memory
+ID and its next attempt creates a fresh receipt. This does not claim direct old-ID reuse
+is rejected solely because the earlier activation transaction rolled back.
+
+After activation, recovery is roll-forward only: fence workers, deploy a newer v2
+artifact, reconcile ambiguous transport, and re-enable with another epoch. Never run an
+older application artifact against the active contract.
+
+Every later owner migration containing guarded DML must establish local v2 context in
+the same transaction before its first guarded write:
+
+```sql
+BEGIN;
+SELECT set_config('app.application_contract', 'discord-ops-v2', true);
+-- guarded owner DML
+COMMIT;
+```
+
+DDL-only migrations need no bypass. Resume online administrator indexes only through
+`scripts/apply-online-admin-search-indexes.ts`; it revalidates the private ledger
+checksum/state and catalog definitions before advancing `APPLYING` to `APPLIED`.
+
+## Local Discord operational evidence
+
+The 300-item result is transport-free local scheduling evidence: at most ten invocations
+within ten seconds. The 250 ms, 2 s, bounded 429, 10 s timeout, and mixed-failure results
+are local fake-transport profiles under configured concurrency and a hard deadline.
+Neither result is production Discord capacity or real alert-delivery evidence.
+
+Run the immutable-base rollout directly until Todo 21 owns the operational QA dispatcher:
+
+```bash
+npx tsx scripts/operational-rollout-smoke.ts rollout --attempt-dir <absolute-fresh-attempt-directory>
+```
+
+The profile reads the full `attemptBaseSha` only from immutable `attempt.json`, creates
+the detached physical `<attemptDir>/base-artifact-worktree`, and independently installs,
+builds, and starts that artifact against an isolated pre-expansion PostgreSQL database.
+On Windows it temporarily maps the attempt directory to a free short drive for the
+install/build/start commands. Success requires the old writer overlap, inactive
+expansion, online-index ledger/catalog checks, source-bound activation, post-activation
+old-writer rejection without mutation, and removal of every child process, port,
+database directory, worktree, lock, and temporary drive mapping. This is local rollout
+compatibility evidence, not production capacity evidence.
 
 ## Local Smoke Test
 
