@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { activateApplicationContract } from "@/lib/application-contract-activation";
 import { createClosedPeriodNotificationService } from "@/lib/closed-period-notification-service";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { sendDiscordWebhook } from "@/lib/discord-notifications";
@@ -87,10 +88,34 @@ export async function GET(request: Request): Promise<NextResponse> {
       ? settled.value
       : { failureCode: "unexpected_error", kind: "failed" }
   ]));
-  const ok = settledRuns.every((settled) =>
+  const siblingsSucceeded = settledRuns.every((settled) =>
     settled.status === "fulfilled" && settled.value.kind !== "failed"
   );
-  return NextResponse.json({ jobs, ok }, { status: ok ? 200 : 502 });
+  const activationRun = siblingsSucceeded
+    ? (await Promise.allSettled([activateApplicationContract({ source: "FIRST_CRON" })]))[0]
+    : null;
+  const activation = activationRun === null
+    ? { kind: "deferred" as const, reason: "sibling_job_failed" as const }
+    : activationRun.status === "fulfilled"
+      ? activationRun.value
+      : { kind: "failed" as const };
+  if (activationRun?.status === "rejected") {
+    const reason = activationRun.reason;
+    console.error(JSON.stringify({
+      databaseCode: typeof reason === "object" && reason !== null && "meta" in reason &&
+        typeof reason.meta === "object" && reason.meta !== null && "code" in reason.meta
+        ? reason.meta.code
+        : "unknown",
+      errorCode: typeof reason === "object" && reason !== null && "code" in reason && typeof reason.code === "string"
+        ? reason.code
+        : "unknown",
+      errorType: reason instanceof Error ? reason.name : "UnknownError",
+      event: "application_contract_activation_failed",
+      source: "FIRST_CRON"
+    }));
+  }
+  const ok = siblingsSucceeded && activationRun?.status === "fulfilled";
+  return NextResponse.json({ activation, jobs, ok }, { status: ok ? 200 : 502 });
 }
 
 async function runClosedPeriodNotifications(now: Date): Promise<CronJobOperationResult> {

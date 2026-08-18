@@ -9,18 +9,27 @@ import {
 } from "../src/lib/discord-app-config";
 import { createDiscordBotClient, redactDiscordBotTokens, type DiscordBotClient } from "../src/lib/discord-bot";
 import {
-  createDisableDiscordPending,
+  createFencedDiscordDisable,
+  reenableDiscordOperations,
   type DisableDiscordPendingResult,
-  type DiscordDisablePendingRepository
+  type DiscordDisablePendingRepository,
+  type DiscordOperationsFenceRepository
 } from "../src/lib/discord-disable-pending";
 import { prismaDiscordReservationMaintenanceRepository } from "../src/lib/prisma-discord-reservation-maintenance-repository";
 import { loadDiscordReservationSnapshot, type DiscordReservationSnapshotResult } from "../src/lib/discord-reservation-snapshot";
+import { createPrismaDiscordOperationsFenceRuntime } from "./operational-rollout-smoke";
 
 const CONFIRMATION = "DISABLE_DISCORD_INTERACTIONS";
+const REENABLE_CONFIRMATION = "ENABLE_DISCORD_INTERACTIONS";
+const RESIDUAL_ACKNOWLEDGEMENT = "ACKNOWLEDGE_RESIDUAL_INERT_CONTROLS";
 const FixtureSchema = z.enum(["active"]);
 
 type CliCommand = {
   readonly confirm: typeof CONFIRMATION;
+  readonly fixture: z.infer<typeof FixtureSchema> | null;
+} | {
+  readonly acknowledgeResidualInertControls: true;
+  readonly confirm: typeof REENABLE_CONFIRMATION;
   readonly fixture: z.infer<typeof FixtureSchema> | null;
 };
 
@@ -28,7 +37,9 @@ type DisableRuntime = {
   readonly bot: Pick<DiscordBotClient, "editChannelMessage">;
   readonly config: DiscordApplicationConfig;
   readonly loadSnapshot: (reservationId: string) => Promise<DiscordReservationSnapshotResult>;
+  readonly operations: DiscordOperationsFenceRepository;
   readonly repository: DiscordDisablePendingRepository;
+  readonly close?: () => Promise<void>;
 };
 
 type CliOptions = {
@@ -44,6 +55,7 @@ export async function runDisableDiscordPendingCli(options: CliOptions): Promise<
   const stdout = options.stdout ?? console.log;
   const stderr = options.stderr ?? console.error;
   let token = "";
+  let runtime: DisableRuntime | undefined;
   try {
     const command = parseCommand(options.args);
     const env = command.fixture === null ? (options.env ?? process.env) : fixtureEnvironment();
@@ -52,10 +64,20 @@ export async function runDisableDiscordPendingCli(options: CliOptions): Promise<
       throw new DiscordDisableConfigurationError();
     }
     token = config.botToken;
-    const runtime = (options.runtimeFactory ?? createRuntime)(config, command.fixture);
-    const result = await createDisableDiscordPending({
+    runtime = (options.runtimeFactory ?? createRuntime)(config, command.fixture);
+    if ("acknowledgeResidualInertControls" in command) {
+      const control = await reenableDiscordOperations({
+        acknowledgeResidualInertControls: true,
+        now: options.now ?? new Date(),
+        repository: runtime.operations
+      });
+      stdout(JSON.stringify({ event: "discord_interactions_enabled", ...control }));
+      return 0;
+    }
+    const result = await createFencedDiscordDisable({
       bot: runtime.bot,
       loadSnapshot: runtime.loadSnapshot,
+      operations: runtime.operations,
       repository: runtime.repository
     })({ now: options.now ?? new Date() });
     stdout(JSON.stringify({ event: "discord_interactions_disabled", ...result }));
@@ -67,12 +89,15 @@ export async function runDisableDiscordPendingCli(options: CliOptions): Promise<
       event: "discord_interactions_disable_failed"
     }));
     return 1;
+  } finally {
+    await runtime?.close?.();
   }
 }
 
 export function parseCommand(args: readonly string[]): CliCommand {
   let confirm: string | null = null;
   let fixture: string | null = null;
+  let acknowledgement: string | null = null;
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
     const value = args[index + 1];
@@ -84,9 +109,16 @@ export function parseCommand(args: readonly string[]): CliCommand {
       fixture = value ?? null;
       continue;
     }
+    if (flag === "--acknowledge-residual-controls") {
+      acknowledgement = value ?? null;
+      continue;
+    }
     throw new DiscordDisableConfirmationError();
   }
-  if (confirm !== CONFIRMATION) {
+  if (confirm === REENABLE_CONFIRMATION && acknowledgement === RESIDUAL_ACKNOWLEDGEMENT) {
+    return { acknowledgeResidualInertControls: true, confirm, fixture: fixture === null ? null : FixtureSchema.parse(fixture) };
+  }
+  if (confirm !== CONFIRMATION || acknowledgement !== null) {
     throw new DiscordDisableConfirmationError();
   }
   return { confirm: CONFIRMATION, fixture: fixture === null ? null : FixtureSchema.parse(fixture) };
@@ -96,10 +128,13 @@ function createRuntime(config: DiscordApplicationConfig, fixture: CliCommand["fi
   if (fixture === "active") {
     return fixtureRuntime(config);
   }
+  const operationsRuntime = createPrismaDiscordOperationsFenceRuntime(requireDirectUrl());
   return {
     bot: createDiscordBotClient({ applicationId: config.applicationId, botToken: config.botToken }),
+    close: operationsRuntime.close,
     config,
     loadSnapshot: loadDiscordReservationSnapshot,
+    operations: operationsRuntime.repository,
     repository: prismaDiscordReservationMaintenanceRepository
   };
 }
@@ -112,6 +147,7 @@ function fixtureRuntime(config: DiscordApplicationConfig): DisableRuntime {
     },
     config,
     loadSnapshot: async () => fixtureSnapshot(),
+    operations: fixtureOperationsRepository(),
     repository: {
       claimActiveMessagesForDisable: async () => {
         if (claimed) {
@@ -124,6 +160,21 @@ function fixtureRuntime(config: DiscordApplicationConfig): DisableRuntime {
       releaseDisableClaim: async () => true
     }
   };
+}
+
+function fixtureOperationsRepository(): DiscordOperationsFenceRepository {
+  return {
+    beginDisable: async () => ({ epoch: 1, preFenceTransportCount: 0 }),
+    countOldReservationMutations: async () => 0,
+    reenable: async () => ({ control: { enabled: true, epoch: 2, pendingRemoteCleanup: false }, kind: "enabled" }),
+    setPendingRemoteCleanup: async () => undefined
+  };
+}
+
+function requireDirectUrl(): string {
+  const directUrl = process.env.DIRECT_URL;
+  if (directUrl === undefined || directUrl.trim() === "") throw new DiscordDisableConfigurationError();
+  return directUrl;
 }
 
 function fixtureEnvironment(): DiscordApplicationConfigInput {

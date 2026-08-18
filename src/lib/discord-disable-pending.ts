@@ -3,6 +3,8 @@ import { buildDiscordReservationStaleMessage } from "./discord-reservation-messa
 import type { DiscordReservationSnapshot, DiscordReservationSnapshotResult } from "./discord-reservation-snapshot";
 
 const DISCORD_DISABLE_MAX_BATCHES = 10;
+const DISCORD_DISABLE_DRAIN_CHECKS = 200;
+const DISCORD_DISABLE_DRAIN_INTERVAL_MS = 50;
 
 export type DiscordDisablePendingClaim = {
   readonly channelId: string;
@@ -23,6 +25,34 @@ export type DisableDiscordPendingResult = {
   readonly disabled: number;
   readonly failed: number;
   readonly hasMore: boolean;
+};
+
+export type DiscordOperationsControl = {
+  readonly enabled: boolean;
+  readonly epoch: number;
+  readonly pendingRemoteCleanup: boolean;
+};
+
+export type DiscordOperationsFenceRepository = {
+  readonly beginDisable: (now: Date) => Promise<{
+    readonly epoch: number;
+    readonly preFenceTransportCount: number;
+  }>;
+  readonly countOldReservationMutations: (fencedEpoch: number) => Promise<number>;
+  readonly reenable: (input: {
+    readonly acknowledgeResidualInertControls: boolean;
+    readonly now: Date;
+  }) => Promise<
+    | { readonly kind: "ack_required" }
+    | { readonly control: DiscordOperationsControl; readonly kind: "enabled" }
+  >;
+  readonly setPendingRemoteCleanup: (pending: boolean, now: Date) => Promise<void>;
+};
+
+export type FencedDiscordDisableResult = DisableDiscordPendingResult & {
+  readonly drainedMutations: number;
+  readonly epoch: number;
+  readonly pendingRemoteCleanup: boolean;
 };
 
 type DisableDiscordPendingBot = Pick<DiscordBotClient, "editChannelMessage">;
@@ -56,6 +86,72 @@ export function createDisableDiscordPending(dependencies: {
     }
     return { claimed, disabled, failed, hasMore };
   };
+}
+
+export function createFencedDiscordDisable(dependencies: {
+  readonly bot: DisableDiscordPendingBot;
+  readonly loadSnapshot: (reservationId: string) => Promise<DiscordReservationSnapshotResult>;
+  readonly maxDrainChecks?: number;
+  readonly operations: DiscordOperationsFenceRepository;
+  readonly repository: DiscordDisablePendingRepository;
+  readonly wait?: () => Promise<void>;
+}): (input: { readonly now: Date }) => Promise<FencedDiscordDisableResult> {
+  return async ({ now }) => {
+    const fence = await dependencies.operations.beginDisable(now);
+    try {
+      const wait = dependencies.wait ?? (() => new Promise((resolve) => {
+        setTimeout(resolve, DISCORD_DISABLE_DRAIN_INTERVAL_MS);
+      }));
+      const maxDrainChecks = dependencies.maxDrainChecks ?? DISCORD_DISABLE_DRAIN_CHECKS;
+      let drainedMutations = 0;
+      for (let check = 0; check < maxDrainChecks; check += 1) {
+        const activeMutations = await dependencies.operations.countOldReservationMutations(fence.epoch);
+        drainedMutations = Math.max(drainedMutations, activeMutations);
+        if (activeMutations === 0) {
+          const cleanup = await createDisableDiscordPending(dependencies)({ now });
+          const pendingRemoteCleanup = fence.preFenceTransportCount > 0 || cleanup.failed > 0 || cleanup.hasMore;
+          await dependencies.operations.setPendingRemoteCleanup(pendingRemoteCleanup, now);
+          return { ...cleanup, drainedMutations, epoch: fence.epoch, pendingRemoteCleanup };
+        }
+        if (check + 1 < maxDrainChecks) await wait();
+      }
+      throw new DiscordDisablePendingError(
+        "MUTATION_DRAIN_TIMEOUT",
+        "Old Discord reservation mutations did not drain before the disable deadline"
+      );
+    } catch (error) {
+      await dependencies.operations.setPendingRemoteCleanup(true, now);
+      throw error;
+    }
+  };
+}
+
+export async function reenableDiscordOperations(input: {
+  readonly acknowledgeResidualInertControls: boolean;
+  readonly now: Date;
+  readonly repository: DiscordOperationsFenceRepository;
+}): Promise<DiscordOperationsControl> {
+  const result = await input.repository.reenable({
+    acknowledgeResidualInertControls: input.acknowledgeResidualInertControls,
+    now: input.now
+  });
+  if (result.kind === "ack_required") {
+    throw new DiscordDisablePendingError(
+      "RESIDUAL_ACK_REQUIRED",
+      "Re-enable requires acknowledgement that residual remote controls are inert"
+    );
+  }
+  return result.control;
+}
+
+export class DiscordDisablePendingError extends Error {
+  public readonly code: "MUTATION_DRAIN_TIMEOUT" | "RESIDUAL_ACK_REQUIRED";
+
+  public constructor(code: DiscordDisablePendingError["code"], message: string) {
+    super(message);
+    this.code = code;
+    this.name = "DiscordDisablePendingError";
+  }
 }
 
 async function processClaim(

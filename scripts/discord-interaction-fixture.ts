@@ -5,6 +5,7 @@ import type { DiscordApplicationConfig } from "../src/lib/discord-app-config";
 import { verifyDiscordInteractionSignature } from "../src/lib/discord-interaction-security";
 import {
   authorizeDiscordReservationInteraction,
+  buildDiscordReservationCustomId,
   parseDiscordReservationInteraction
 } from "../src/lib/discord-interactions";
 import {
@@ -97,6 +98,8 @@ function renderMessagesFixture() {
     confirmedCount: 9,
     date: "2026-08-12",
     reason: "fixture reason",
+    customIdSecret: config.botToken,
+    renderedEpoch: 7,
     reservationId: ledger.reservationId,
     studyPeriod: "EIGHTH"
   } as const;
@@ -104,16 +107,16 @@ function renderMessagesFixture() {
   const accepted = buildDiscordReservationAcceptedMessage(input);
   const cancelled = buildDiscordReservationCancelledMessage({ ...input, cancellationReason: "fixture cancellation" });
   const stale = buildDiscordReservationStaleMessage(input);
-  const terminalControls = [accepted, cancelled, stale].map((payload) => payload.components?.length ?? 0);
+  const controlCounts = [initial, accepted, cancelled, stale].map((payload) => payload.components?.[0]?.components.length ?? 0);
   return {
     assertions: {
       allowedMentions: initial.allowed_mentions.parse,
       initialButtonIds: initial.components?.flatMap((row) => row.components.map((button) => button.custom_id)) ?? [],
-      terminalControlCounts: terminalControls
+      controlCounts
     },
     command: "render-messages",
     messages: { accepted, cancelled, initial, stale },
-    ok: initial.components?.[0]?.components.length === 2 && terminalControls.every((count) => count === 0)
+    ok: controlCounts.join(",") === "2,2,0,0"
   } as const;
 }
 
@@ -144,12 +147,25 @@ function authorizeMatrixFixture() {
     wrongRole: { member: member(ids.user, []) }
   } as const;
   const outcomes = Object.fromEntries(Object.entries(scenarios).map(([name, changes]) => {
-    const interaction = parseDiscordReservationInteraction({ ...componentPayload(), ...changes });
+    const interaction = parseDiscordReservationInteraction({ ...componentPayload(), ...changes }, config.botToken);
     const result = authorizeDiscordReservationInteraction({ config, interaction, ledger });
     return [name, result.kind === "authorized" ? "accepted" : result.code];
   }));
-  const malformedModal = parseDiscordReservationInteraction({ ...modalPayload(), data: { ...modalPayload().data, components: [] } });
+  const malformedModal = parseDiscordReservationInteraction(
+    { ...modalPayload(), data: { ...modalPayload().data, components: [] } },
+    config.botToken
+  );
+  const legacy = parseDiscordReservationInteraction({
+    ...componentPayload(),
+    data: { component_type: 2, custom_id: `reservation:accept:${ledger.reservationId}` }
+  }, config.botToken);
+  const oldEpoch = parseDiscordReservationInteraction({
+    ...componentPayload(),
+    data: { component_type: 2, custom_id: signedCustomId("accept", 6) }
+  }, config.botToken);
   outcomes.malformedModal = malformedModal.kind === "invalid" ? "rejected" : "accepted";
+  outcomes.legacyUnauthenticatedId = legacy.kind === "invalid" ? "inert" : "accepted";
+  outcomes.oldSignedEpoch = oldEpoch.kind === "component" && oldEpoch.command.renderedEpoch === 6 ? "parsed_stale_epoch" : "invalid";
   return {
     assertions: outcomes,
     command: "authorize-matrix",
@@ -160,7 +176,7 @@ function authorizeMatrixFixture() {
 function componentPayload() {
   return {
     application_id: ids.application, channel_id: ids.channel,
-    data: { component_type: 2, custom_id: `reservation:accept:${ledger.reservationId}` }, guild_id: ids.guild,
+    data: { component_type: 2, custom_id: signedCustomId("accept", 7) }, guild_id: ids.guild,
     id: ids.interaction, member: member(ids.user, [ids.adminRole]), message: { id: ids.message }, token: "fixture-token", type: 3
   } as const;
 }
@@ -168,9 +184,19 @@ function componentPayload() {
 function modalPayload() {
   return {
     ...componentPayload(),
-    data: { components: [{ components: [{ custom_id: "reason", type: 4, value: "fixture reason" }], type: 1 }], custom_id: `reservation:reject:${ledger.reservationId}` },
+    data: { components: [{ components: [{ custom_id: "reason", type: 4, value: "fixture reason" }], type: 1 }], custom_id: signedCustomId("reject", 7) },
     type: 5
   } as const;
+}
+
+function signedCustomId(action: "accept" | "reject", renderedEpoch: number): string {
+  return buildDiscordReservationCustomId({
+    action,
+    renderedEpoch,
+    reservationId: ledger.reservationId,
+    secret: config.botToken,
+    sourceIdentity: "reservation-fixture"
+  });
 }
 
 function member(userId: string, roles: readonly string[]) {
