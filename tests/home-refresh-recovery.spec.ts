@@ -15,11 +15,11 @@ const LoginRequestSchema = z.object({
 });
 
 type SessionUser = {
-  readonly bookingStatus: "ACTIVE";
+  readonly bookingStatus: "ACTIVE" | "RESTRICTED";
   readonly generation: number;
   readonly id: string;
   readonly name: string;
-  readonly restrictionReason: null;
+  readonly restrictionReason: string | null;
   readonly restrictedUntil: string | null;
   readonly role: "STUDENT";
   readonly studentNumber: string;
@@ -256,7 +256,12 @@ test("reserve and cancel await the coordinated week and session refresh before s
   await page.route("**/api/reservations/*", async (route) => {
     reservationId = null;
     if (currentUser) {
-      currentUser = { ...currentUser, restrictedUntil: serverRestrictedUntil };
+      currentUser = {
+        ...currentUser,
+        bookingStatus: "RESTRICTED",
+        restrictionReason: "예약 취소",
+        restrictedUntil: serverRestrictedUntil
+      };
     }
     phase = "cancel";
     await route.fulfill({ status: 204 });
@@ -292,7 +297,9 @@ test("reserve and cancel await the coordinated week and session refresh before s
   await expect(page.getByText("예약이 취소되었습니다. 3일간 예약이 제한됩니다.")).toHaveCount(0);
   cancelSessionGate.resolve();
   await expect(page.getByText("예약이 취소되었습니다. 3일간 예약이 제한됩니다.")).toBeVisible();
-  await expect(page.getByRole("region", { name: "내 예약 상태" })).toContainText("2026. 6. 30.");
+  await eighth.getByRole("button", { name: "8면학 예약" }).click();
+  await expect(page.getByText("예약 이용이 제한되었습니다.")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "8면학 예약할까요?" })).toHaveCount(0);
   expect(reservePeriodRequests).toBe(1);
   expect(reserveSessionRequests).toBe(1);
   expect(cancelPeriodRequests).toBe(1);
@@ -323,7 +330,12 @@ test("failed post-cancel week refresh preserves visible data and never emits set
   });
   await page.route("**/api/reservations/*", async (route) => {
     if (currentUser) {
-      currentUser = { ...currentUser, restrictedUntil: "2026-06-30T03:15:00.000Z" };
+      currentUser = {
+        ...currentUser,
+        bookingStatus: "RESTRICTED",
+        restrictionReason: "예약 취소",
+        restrictedUntil: "2026-06-30T03:15:00.000Z"
+      };
     }
     cancelSettled = true;
     await route.fulfill({ status: 204 });
@@ -401,6 +413,7 @@ test("held CSRF cannot DELETE a confirmed cancellation after session freshness b
 test("owner change during reservation preflight cannot open a dialog or POST", async ({ page }) => {
   const userB = studentUser("student-b");
   let currentUser: SessionUser | null = null;
+  let holdStudentAWeekRequest = false;
   let swapOwnerOnNextSessionRead = false;
   let reservationPosts = 0;
   let markWeekRequestStarted = (): void => undefined;
@@ -424,7 +437,8 @@ test("owner change during reservation preflight cannot open a dialog or POST", a
   });
   await page.route("**/api/periods**", async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.has("weekStart") && currentUser?.id === "student-a") {
+    if (holdStudentAWeekRequest && url.searchParams.has("weekStart") && currentUser?.id === "student-a") {
+      holdStudentAWeekRequest = false;
       markWeekRequestStarted();
       await oldWeekRequestGate;
     }
@@ -438,6 +452,7 @@ test("owner change during reservation preflight cannot open a dialog or POST", a
   });
 
   await login(page, "student-a");
+  holdStudentAWeekRequest = true;
   await page.locator(".period-card").filter({ hasText: "8면학" }).getByRole("button", { name: "8면학 예약" }).click();
   await weekRequestStarted;
 
@@ -615,7 +630,10 @@ async function fulfillPeriods(route: Route, remaining: number, reservationId: st
       json: {
         dates: SCHOOL_WEEK_DATES.map((date) => ({
           date,
-          periods: [weekPeriod("EIGHTH", remaining, reservationId), weekPeriod("FIRST", remaining, null)]
+          periods: [
+            weekPeriod("EIGHTH", remaining, date === FIXED_THURSDAY_DATE ? reservationId : null),
+            weekPeriod("FIRST", remaining, null)
+          ]
         }))
       },
       status: 200

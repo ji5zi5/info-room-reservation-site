@@ -22,18 +22,20 @@ describe("production CI contract", () => {
     expect(exists("scripts/verify-readiness-receipts.mjs")).toBe(true);
   });
 
-  it("runs clean migrations and real database scenarios in Postgres 16", () => {
+  it("runs the portable owned-database operational gate from a tracked-only checkout", () => {
     const workflow = read(".github/workflows/ci.yml");
+    const verifier = read("scripts/verify-operational-fomo-evidence.mjs");
 
-    expect(workflow).toContain("permissions:\n  contents: read");
+    expect(workflow).toMatch(/permissions:\r?\n  contents: read/u);
     expect(workflow).toContain("actions/checkout@v6");
     expect(workflow).toContain("actions/setup-node@v6");
     expect(workflow).not.toContain("actions/checkout@v4");
     expect(workflow).not.toContain("actions/setup-node@v4");
-    expect(workflow).toContain("image: postgres:16");
-    expect(workflow).toContain("npx prisma migrate deploy");
-    expect(workflow).toContain("npm run test:integration");
-    expect(workflow).toContain("INTEGRATION_DATABASE_URL:");
+    expect(workflow).not.toMatch(/^\s+services:/mu);
+    expect(workflow).toContain("npm run qa:operational:core -- --phase full --ci");
+    expect(verifier).toContain('await import("./operational-fomo-harness.mjs")');
+    expect(verifier).toContain('["prisma", "migrate", "deploy"]');
+    expect(verifier).toContain('"test:integration"');
   });
 
   it("keeps every Prisma migration free of a UTF-8 byte-order mark", () => {
@@ -50,15 +52,15 @@ describe("production CI contract", () => {
     }
   });
 
-  it("runs one explicit-server Chromium production smoke", () => {
+  it("runs one explicit-server Chromium operational smoke", () => {
     const workflow = read(".github/workflows/ci.yml");
     const playwrightConfig = read("playwright.config.ts");
 
     expect(playwrightConfig).toContain("process.env.E2E_BASE_URL");
     expect(playwrightConfig).not.toContain("webServer:");
     expect(workflow).toContain("npx playwright install --with-deps chromium");
-    expect(workflow).toContain("E2E_BASE_URL: http://127.0.0.1:3100");
-    expect(workflow).toContain("tests/production-smoke.spec.ts");
+    expect(workflow).toContain("EVIDENCE_DIR: ${{ runner.temp }}/operational-fomo-browser-evidence");
+    expect(workflow).toContain("npm run qa:operational:core -- --phase full --ci");
     expect(exists("tests/production-smoke.spec.ts")).toBe(true);
   });
 });

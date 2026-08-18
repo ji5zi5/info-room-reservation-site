@@ -17,8 +17,8 @@ describe("operational FOMO harness contract", () => {
   it("pins the development-only embedded PostgreSQL package and QA commands", () => {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
     expect(pkg.devDependencies["embedded-postgres"]).toBe("16.14.0-beta.17");
-    expect(pkg.scripts["qa:operational"]).toBe("node scripts/run-operational-fomo-evidence.mjs");
-    expect(pkg.scripts["qa:operational:core"]).toBe("node scripts/operational-fomo-core.mjs");
+    expect(pkg.scripts["qa:operational"]).toBe("node scripts/verify-operational-fomo-evidence.mjs --mode attempt");
+    expect(pkg.scripts["qa:operational:core"]).toBe("node scripts/verify-operational-fomo-evidence.mjs --mode core");
   });
 
   it("rejects unsafe and non-test database URLs at the boundary", () => {

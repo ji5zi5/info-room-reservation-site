@@ -8,7 +8,6 @@ const directAdminActionRouteFiles = [
   "src/app/api/admin/notifications/closed-periods/send/route.ts",
   "src/app/api/admin/period-settings/route.ts",
   "src/app/api/admin/reservations/admin-create-reservation.ts",
-  "src/app/api/admin/reservations/[id]/no-show/route.ts",
   "src/app/api/admin/users/[id]/restriction/route.ts",
   "src/app/api/admin/users/[id]/sessions/revoke/route.ts"
 ] as const;
@@ -16,6 +15,11 @@ const directAdminActionRouteFiles = [
 const sharedAdminCancellationAuditContract = {
   operationFile: "src/lib/admin-reservation-operations.ts",
   routeFile: "src/app/api/admin/reservations/[id]/cancel/route.ts"
+} as const;
+
+const sharedAdminNoShowAuditContract = {
+  operationFile: "src/lib/admin-no-show-operations.ts",
+  routeFile: "src/app/api/admin/reservations/[id]/no-show/route.ts"
 } as const;
 
 const studentCancellationAuditContract = {
@@ -50,6 +54,15 @@ describe("admin action source coverage", () => {
 
     // Then
     expect(routeHashesAndPassesSource).toBe(true);
+    expect(operationSource).toContain("adminAction.create");
+    expect(operationSource).toContain("ipHash: input.ipHash");
+  });
+
+  it("passes the hashed no-show source to the shared AdminAction writer", () => {
+    const routeSource = readFileSync(join(process.cwd(), sharedAdminNoShowAuditContract.routeFile), "utf8");
+    const operationSource = readFileSync(join(process.cwd(), sharedAdminNoShowAuditContract.operationFile), "utf8");
+
+    expect(routeSource).toContain("ipHash: hashRequestClientIp(request)");
     expect(operationSource).toContain("adminAction.create");
     expect(operationSource).toContain("ipHash: input.ipHash");
   });

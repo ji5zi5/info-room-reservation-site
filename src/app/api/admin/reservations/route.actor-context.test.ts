@@ -4,7 +4,8 @@ import type { DatabaseActor } from "@/lib/db-context";
 import type { SessionUser } from "@/lib/session";
 
 type FindMany = (input: unknown) => Promise<readonly unknown[]>;
-type ScopedClient = { readonly reservation: { readonly findMany: FindMany } };
+type Count = (input: unknown) => Promise<number>;
+type ScopedClient = { readonly reservation: { readonly count: Count; readonly findMany: FindMany } };
 type WithDatabaseContext = <T>(input: {
   readonly actor: DatabaseActor;
   readonly client: unknown;
@@ -19,6 +20,7 @@ const routeMocks = vi.hoisted(() => ({
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
   rawReservationFindMany: vi.fn<FindMany>(),
   requireAdmin: vi.fn<() => Promise<SessionUser>>(),
+  scopedReservationCount: vi.fn<Count>(),
   scopedReservationFindMany: vi.fn<FindMany>(),
   withDatabaseContext: vi.fn<WithDatabaseContext>()
 }));
@@ -79,17 +81,16 @@ describe("admin reservation list database actor context", () => {
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
     routeMocks.rawReservationFindMany.mockResolvedValue([]);
     routeMocks.requireAdmin.mockResolvedValue(admin);
+    routeMocks.scopedReservationCount.mockResolvedValue(0);
     routeMocks.scopedReservationFindMany.mockResolvedValue([]);
     routeMocks.withDatabaseContext.mockImplementation(async (input) =>
-      input.operation({ reservation: { findMany: routeMocks.scopedReservationFindMany } })
+      input.operation({ reservation: { count: routeMocks.scopedReservationCount, findMany: routeMocks.scopedReservationFindMany } })
     );
   });
 
   it("filters a contextual list read using the exact authenticated ADMIN actor", async () => {
-    routeMocks.scopedReservationFindMany.mockResolvedValue([
-      { ...matchingReservation, id: "reservation-other", status: "NO_SHOW" },
-      matchingReservation
-    ]);
+    routeMocks.scopedReservationCount.mockResolvedValue(1);
+    routeMocks.scopedReservationFindMany.mockResolvedValue([matchingReservation]);
 
     const response = await GET(
       reservationRequest("status=CONFIRMED&studyPeriod=EIGHTH&query=31001&userId=student-matching")
@@ -103,11 +104,13 @@ describe("admin reservation list database actor context", () => {
       operation: expect.any(Function)
     });
     expect(routeMocks.scopedReservationFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { date: "2026-06-16" } })
+      expect.objectContaining({ where: expect.objectContaining({ date: "2026-06-16" }) })
     );
     expect(routeMocks.rawReservationFindMany).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      reservations: [expect.objectContaining({ id: matchingReservation.id })]
+    await expect(response.json()).resolves.toMatchObject({
+      currentTotalCount: 1,
+      items: [expect.objectContaining({ id: matchingReservation.id })],
+      nextCursor: null
     });
   });
 
@@ -119,11 +122,11 @@ describe("admin reservation list database actor context", () => {
     expect(routeMocks.scopedReservationFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 1,
-        where: { date: "2026-06-16", id: "missing-reservation", status: "CONFIRMED" }
+        where: { id: "missing-reservation" }
       })
     );
     expect(routeMocks.rawReservationFindMany).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({ reservations: [] });
+    await expect(response.json()).resolves.toMatchObject({ currentTotalCount: 0, items: [], nextCursor: null });
   });
 
   it("preserves mock mode without opening a database context", async () => {

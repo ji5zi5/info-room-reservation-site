@@ -343,6 +343,13 @@ async function runPortableCore(phase, childArgv, ci, attemptDir) {
       operation: async ({ databaseUrl, directUrl }) => {
         const env = operationalEnvironment(databaseUrl, directUrl, ci);
         await runCommand(npxCommand(), ["prisma", "validate"], env);
+        if (phase === "full") {
+          const testEnv = { ...process.env, NODE_ENV: "test" };
+          for (const key of ["DATABASE_URL", "DEPLOYMENT_SHA", "DIRECT_URL", "INTEGRATION_DATABASE_URL"]) {
+            delete testEnv[key];
+          }
+          await runCommand(npmCommand(), ["test"], testEnv);
+        }
         await runCommand(npxCommand(), ["prisma", "generate"], env);
         await runCommand(npxCommand(), ["prisma", "migrate", "deploy"], env);
         await runCommand(npxCommand(), ["tsx", "scripts/apply-online-admin-search-indexes.ts"], env);
@@ -354,11 +361,6 @@ async function runPortableCore(phase, childArgv, ci, attemptDir) {
           await runDiscordPhase(env);
           return { phase, status: "passed" };
         }
-        const testEnv = { ...process.env, NODE_ENV: "test" };
-        for (const key of ["DATABASE_URL", "DEPLOYMENT_SHA", "DIRECT_URL", "INTEGRATION_DATABASE_URL"]) {
-          delete testEnv[key];
-        }
-        await runCommand(npmCommand(), ["test"], testEnv);
         await runCommand(npmCommand(), ["run", "test:integration"], {
           ...env,
           INTEGRATION_DATABASE_URL: await configureRuntimeIntegrationUrl(databaseUrl)

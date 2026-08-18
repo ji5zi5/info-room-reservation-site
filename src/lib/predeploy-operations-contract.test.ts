@@ -94,56 +94,25 @@ describe("production predeploy operations contract", () => {
     expect(packageJson.scripts["vercel-build"]).toContain("npm run predeploy:check");
   });
 
-  it("supplies an HTTPS application origin to the CI quality fixture", () => {
+  it("routes permanent CI through the single portable operational gate", () => {
     // Given
     const workflow = readFileSync(ciWorkflowPath, "utf8");
 
     // When / Then
-    expect(workflow).toMatch(/quality:\n[\s\S]*?APP_ORIGIN: https:\/\/example\.test/);
+    expect(workflow.match(/npm run qa:operational:core -- --phase full --ci/gu)).toHaveLength(1);
+    expect(workflow).not.toMatch(/^\s+services:/mu);
   });
 
-  it("keeps migration connections administrative and runs integration tests as the runtime role", () => {
+  it("keeps migration ownership and runtime integration setup inside the portable verifier", () => {
     const workflow = readFileSync(ciWorkflowPath, "utf8");
-    const postgresJob = workflow.match(
-      /^  postgres-integration:\n(?<job>[\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|(?![\s\S]))/mu
-    )?.groups?.job;
+    const verifier = readFileSync(join(root, "scripts", "verify-operational-fomo-evidence.mjs"), "utf8");
 
-    expect(postgresJob).toBeDefined();
-
-    const databaseUrl = postgresJob?.match(/^      DATABASE_URL: (?<url>\S+)$/mu)?.groups?.url;
-    const directUrl = postgresJob?.match(/^      DIRECT_URL: (?<url>\S+)$/mu)?.groups?.url;
-    const migrationStepIndex = postgresJob?.indexOf("- run: npx prisma migrate deploy") ?? -1;
-    const roleStepIndex = postgresJob?.indexOf("- name: Configure CI runtime role") ?? -1;
-    const integrationStepIndex = postgresJob?.indexOf("- name: Run integration tests as runtime role") ?? -1;
-    const configuredPassword = postgresJob?.match(
-      /ALTER ROLE info_room_runtime WITH LOGIN PASSWORD '(?<password>[^']+)'/mu
-    )?.groups?.password;
-    const integrationUrl = postgresJob?.match(
-      /- name: Run integration tests as runtime role\n[\s\S]*?^          INTEGRATION_DATABASE_URL: (?<url>\S+)$/mu
-    )?.groups?.url;
-    const adminDatabase = new URL(databaseUrl ?? "invalid:");
-    const adminDirect = new URL(directUrl ?? "invalid:");
-    const integrationDatabase = new URL(integrationUrl ?? "invalid:");
-
-    expect(adminDatabase.username).toBe("postgres");
-    expect(adminDirect.username).toBe("postgres");
-    expect(migrationStepIndex).toBeGreaterThanOrEqual(0);
-    expect(postgresJob).toMatch(
-      /^      - run: npx prisma migrate deploy\n(?=      - name: Configure CI runtime role)/mu
-    );
-    expect(roleStepIndex).toBeGreaterThan(migrationStepIndex);
-    expect(postgresJob).toMatch(
-      /- name: Configure CI runtime role\n[\s\S]*?psql "\$DATABASE_URL"[\s\S]*?ALTER ROLE info_room_runtime WITH LOGIN PASSWORD/mu
-    );
-    expect(integrationStepIndex).toBeGreaterThan(roleStepIndex);
-    expect(integrationDatabase.username).toBe("info_room_runtime");
-    expect(integrationDatabase.username).not.toBe("postgres");
-    expect(integrationDatabase.password).toBe(configuredPassword);
-    expect(integrationDatabase.host).toBe(adminDatabase.host);
-    expect(integrationDatabase.pathname).toBe(adminDatabase.pathname);
-    expect(postgresJob).toMatch(
-      /- name: Run integration tests as runtime role\n\s+run: npm run test:integration\n/mu
-    );
+    expect(workflow).not.toMatch(/^\s+services:/mu);
+    expect(verifier).toContain('["prisma", "migrate", "deploy"]');
+    expect(verifier).toContain('"scripts/apply-online-admin-search-indexes.ts"');
+    expect(verifier).toContain("configureRuntimeIntegrationUrl(databaseUrl)");
+    expect(verifier).toContain("ALTER ROLE info_room_runtime WITH LOGIN PASSWORD");
+    expect(verifier).toContain('"test:integration"');
   });
 
   it("rejects a non-immutable deployment SHA", () => {

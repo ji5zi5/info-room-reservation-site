@@ -624,6 +624,6 @@ function responseType(body: unknown): number | null {
 }
 
 main().catch((error: unknown) => { // no-excuse-ok: catch
-  process.stderr.write(`${error instanceof Error ? error.message : "Discord interaction smoke failed"}\n`);
-  process.exitCode = 1;
+  const message = error instanceof Error ? error.message : "Discord interaction smoke failed";
+  process.stderr.write(`${message}\n`, () => process.exit(1));
 });

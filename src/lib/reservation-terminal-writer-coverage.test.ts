@@ -11,8 +11,8 @@ const REAL_TERMINAL_WRITERS = [
     markers: ["status: \"CANCELLED\"", "status: \"CONFIRMED\""]
   },
   {
-    file: "src/app/api/admin/reservations/[id]/no-show/route.ts",
-    markers: ["status: \"NO_SHOW\"", "status: \"CANCELLED\""]
+    file: "src/lib/admin-no-show-operations.ts",
+    markers: ["data: { status: \"NO_SHOW\" }", "data: { status: \"CANCELLED\" }"]
   },
   {
     file: "src/app/api/admin/users/[id]/restriction/route.ts",

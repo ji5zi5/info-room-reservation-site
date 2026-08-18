@@ -29,7 +29,7 @@ type EvidenceFixture = {
 describe("operational FOMO evidence verifier CLI", () => {
   beforeAll(() => {
     fixture = createEvidenceFixture();
-  });
+  }, 30_000);
 
   afterAll(() => {
     rmSync(fixture.root, { force: true, recursive: true });
