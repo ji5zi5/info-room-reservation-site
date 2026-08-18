@@ -39,7 +39,10 @@ describe("readiness report", () => {
       assertConfig: () => undefined,
       loadSnapshot: async () => ({
         closedPeriodNotificationsEnabled: false,
-        discordOperationsEnabled: true,
+        discord: {
+          interactions: { enabled: true, retentionBacklogCount: 0 },
+          reservationOutbox: { enabled: true, retentionBacklogCount: 0 }
+        },
         jobs: [
           succeededJob("DISCORD_INTERACTIONS"),
           succeededJob("DISCORD_RESERVATION_OUTBOX"),
@@ -59,9 +62,73 @@ describe("readiness report", () => {
 
     expect(report.status).toBe("ok");
     expect(report.checks.jobs.CLOSED_PERIOD_NOTIFICATIONS).toEqual({ code: "disabled", status: "ok" });
-    expect(report.checks.jobs.DISCORD_INTERACTIONS).toEqual({ code: "healthy", status: "ok" });
-    expect(report.checks.jobs.DISCORD_RESERVATION_OUTBOX).toEqual({ code: "healthy", status: "ok" });
+    expect(report.checks.jobs.DISCORD_INTERACTIONS).toEqual({
+      backlog: { count: 0, status: "ok" },
+      code: "healthy",
+      enabled: true,
+      freshness: { code: "healthy", status: "ok" },
+      retention: { blocked: false, count: 0, status: "ok" },
+      status: "ok"
+    });
+    expect(report.checks.jobs.DISCORD_RESERVATION_OUTBOX).toEqual(expect.objectContaining({
+      enabled: true,
+      status: "ok"
+    }));
     expect(report.checks.jobs.MAINTENANCE).toEqual({ code: "healthy", status: "ok" });
+  });
+
+  it("degrades only the retention-blocked Discord sibling while preserving both job reports", async () => {
+    const report = await getReadinessReport({
+      assertConfig: () => undefined,
+      loadSnapshot: async () => ({
+        closedPeriodNotificationsEnabled: false,
+        discord: {
+          interactions: { enabled: true, retentionBacklogCount: 2 },
+          reservationOutbox: { enabled: true, retentionBacklogCount: 0 }
+        },
+        jobs: [
+          { ...succeededJob("DISCORD_INTERACTIONS"), backlogCount: 0 },
+          { ...succeededJob("DISCORD_RESERVATION_OUTBOX"), backlogCount: 0 },
+          { ...succeededJob("DISCORD_RESERVATION_OUTBOX"), job: "MAINTENANCE" as const }
+        ]
+      }),
+      now
+    });
+
+    expect(report.status).toBe("degraded");
+    expect(report.checks.jobs.DISCORD_INTERACTIONS).toMatchObject({
+      retention: { blocked: true, count: 2, status: "degraded" },
+      status: "degraded"
+    });
+    expect(report.checks.jobs.DISCORD_RESERVATION_OUTBOX).toMatchObject({
+      retention: { blocked: false, count: 0, status: "ok" },
+      status: "ok"
+    });
+  });
+
+  it.each([
+    [null, "never_run", "unready"],
+    [{ ...succeededJob("DISCORD_INTERACTIONS"), lastSuccessAt: new Date("2026-06-12T07:21:00.000Z") }, "stale", "unready"],
+    [{ ...succeededJob("DISCORD_INTERACTIONS"), consecutiveFailures: 1, status: "FAILED" as const }, "last_attempt_failed", "degraded"]
+  ] as const)("reports Discord freshness as %s", async (job, code, status) => {
+    const report = await getReadinessReport({
+      assertConfig: () => undefined,
+      loadSnapshot: async () => ({
+        closedPeriodNotificationsEnabled: false,
+        discord: {
+          interactions: { enabled: true, retentionBacklogCount: 0 },
+          reservationOutbox: { enabled: false, retentionBacklogCount: 0 }
+        },
+        jobs: job === null ? [] : [job]
+      }),
+      now
+    });
+
+    expect(report.checks.jobs.DISCORD_INTERACTIONS).toMatchObject({
+      freshness: { code, status },
+      status
+    });
+    expect(report.checks.jobs.DISCORD_RESERVATION_OUTBOX).toMatchObject({ enabled: false });
   });
 });
 

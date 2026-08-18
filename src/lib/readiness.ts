@@ -13,15 +13,43 @@ type SimpleReadinessCheck = {
 
 export type ReadinessSnapshot = {
   readonly closedPeriodNotificationsEnabled: boolean;
+  readonly discord?: {
+    readonly interactions: DiscordReadinessSnapshot;
+    readonly reservationOutbox: DiscordReadinessSnapshot;
+  };
   readonly discordOperationsEnabled?: boolean;
-  readonly jobs: readonly (OperationalJobState & { readonly job: OperationalJobName })[];
+  readonly jobs: readonly (OperationalJobState & {
+    readonly backlogCount?: number;
+    readonly job: OperationalJobName;
+  })[];
+};
+
+type DiscordReadinessSnapshot = {
+  readonly enabled: boolean;
+  readonly retentionBacklogCount: number;
+};
+
+export type DiscordOperationalJobReadiness = {
+  readonly backlog: { readonly count: number; readonly status: "degraded" | "ok" };
+  readonly code: OperationalJobReadiness["code"];
+  readonly enabled: boolean;
+  readonly freshness: OperationalJobReadiness;
+  readonly retention: {
+    readonly blocked: boolean;
+    readonly count: number;
+    readonly status: "degraded" | "ok";
+  };
+  readonly status: OperationalJobReadiness["status"];
 };
 
 export type ReadinessReport = {
   readonly checks: {
     readonly config: SimpleReadinessCheck;
     readonly database: SimpleReadinessCheck;
-    readonly jobs: Record<OperationalJobName, OperationalJobReadiness>;
+    readonly jobs: Record<
+      OperationalJobName,
+      OperationalJobReadiness | DiscordOperationalJobReadiness
+    >;
   };
   readonly status: "degraded" | "ok" | "unready";
 };
@@ -47,6 +75,10 @@ export async function getReadinessReport(input: {
   }
 
   const byJob = new Map(snapshot.jobs.map((job) => [job.job, job]));
+  const fallbackDiscord = {
+    enabled: snapshot.discordOperationsEnabled ?? false,
+    retentionBacklogCount: 0
+  };
   const jobs = {
     CLOSED_PERIOD_NOTIFICATIONS: evaluateOperationalJobReadiness({
       enabled: snapshot.closedPeriodNotificationsEnabled,
@@ -54,16 +86,16 @@ export async function getReadinessReport(input: {
       policy: OPERATIONAL_JOB_POLICIES.CLOSED_PERIOD_NOTIFICATIONS,
       state: byJob.get("CLOSED_PERIOD_NOTIFICATIONS") ?? null
     }),
-    DISCORD_INTERACTIONS: evaluateOperationalJobReadiness({
-      enabled: snapshot.discordOperationsEnabled ?? false,
+    DISCORD_INTERACTIONS: discordJobReadiness({
+      job: "DISCORD_INTERACTIONS",
       now: input.now,
-      policy: OPERATIONAL_JOB_POLICIES.DISCORD_INTERACTIONS,
+      snapshot: snapshot.discord?.interactions ?? fallbackDiscord,
       state: byJob.get("DISCORD_INTERACTIONS") ?? null
     }),
-    DISCORD_RESERVATION_OUTBOX: evaluateOperationalJobReadiness({
-      enabled: snapshot.discordOperationsEnabled ?? false,
+    DISCORD_RESERVATION_OUTBOX: discordJobReadiness({
+      job: "DISCORD_RESERVATION_OUTBOX",
       now: input.now,
-      policy: OPERATIONAL_JOB_POLICIES.DISCORD_RESERVATION_OUTBOX,
+      snapshot: snapshot.discord?.reservationOutbox ?? fallbackDiscord,
       state: byJob.get("DISCORD_RESERVATION_OUTBOX") ?? null
     }),
     MAINTENANCE: evaluateOperationalJobReadiness({
@@ -81,6 +113,37 @@ export async function getReadinessReport(input: {
       jobs
     },
     status: statuses.includes("unready") ? "unready" : statuses.includes("degraded") ? "degraded" : "ok"
+  };
+}
+
+function discordJobReadiness(input: {
+  readonly job: "DISCORD_INTERACTIONS" | "DISCORD_RESERVATION_OUTBOX";
+  readonly now: Date;
+  readonly snapshot: DiscordReadinessSnapshot;
+  readonly state: (OperationalJobState & { readonly backlogCount?: number }) | null;
+}): DiscordOperationalJobReadiness {
+  const freshness = evaluateOperationalJobReadiness({
+    enabled: input.snapshot.enabled,
+    now: input.now,
+    policy: OPERATIONAL_JOB_POLICIES[input.job],
+    state: input.state
+  });
+  const backlogCount = input.state?.backlogCount ?? 0;
+  const retentionBlocked = input.snapshot.retentionBacklogCount > 0;
+  const degraded = backlogCount > 0 || retentionBlocked;
+  return {
+    backlog: { count: backlogCount, status: backlogCount > 0 ? "degraded" : "ok" },
+    code: freshness.code,
+    enabled: input.snapshot.enabled,
+    freshness,
+    retention: {
+      blocked: retentionBlocked,
+      count: input.snapshot.retentionBacklogCount,
+      status: retentionBlocked ? "degraded" : "ok"
+    },
+    status: freshness.status === "unready"
+      ? "unready"
+      : freshness.status === "degraded" || degraded ? "degraded" : "ok"
   };
 }
 
