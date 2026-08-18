@@ -37,6 +37,10 @@ test("bulk cancellation previews server truth, restores focus on cancel, and ret
   await expect(confirmation).toContainText("누락학생");
   await expect(confirmation.getByRole("button", { name: "일괄 취소 확정" })).toBeEnabled();
   expect(fixture.executeAttempts).toBe(0);
+  expect(fixture.previewRequests).toEqual([
+    { mode: "preview", reason: "운영 일정 변경", reservationIds: ["reservation-cancel", "reservation-changed", "reservation-missing", "reservation-conflict"] },
+    { mode: "preview", reason: "운영 일정 변경", reservationIds: ["reservation-cancel", "reservation-changed", "reservation-missing", "reservation-conflict"] }
+  ]);
   await page.screenshot({ path: join(requiredEvidenceDir(), "task-17-admin-bulk-cancellation-desktop-1440x900.png") });
 
   await confirmation.getByRole("button", { name: "돌아가기" }).click();
@@ -50,6 +54,9 @@ test("bulk cancellation previews server truth, restores focus on cancel, and ret
   await page.getByRole("button", { name: "일괄 취소 확정" }).click();
 
   await expect.poll(() => fixture.executeAttempts).toBe(1);
+  expect(fixture.executeRequests).toEqual([
+    { mode: "execute", reason: "운영 일정 변경", reservationIds: ["reservation-cancel", "reservation-changed", "reservation-missing", "reservation-conflict"] }
+  ]);
   const resultDialog = page.getByRole("dialog", { name: "일괄 취소 결과" });
   await expect(resultDialog).toContainText("취소학생");
   await expect(resultDialog).toContainText("취소 완료");
@@ -133,7 +140,9 @@ test("bulk selection caps at 50 and clears on date, query, status, and period ch
 
 type BulkFixture = {
   executeAttempts: number;
+  executeRequests: BulkRequest[];
   previewAttempts: number;
+  previewRequests: BulkRequest[];
   setReservationStatus: (reservationId: string, status: string) => void;
 };
 
@@ -145,7 +154,9 @@ async function mockAdminConsole(
   let currentReservations = [...reservations];
   const fixture: BulkFixture = {
     executeAttempts: 0,
+    executeRequests: [],
     previewAttempts: 0,
+    previewRequests: [],
     setReservationStatus: (reservationId, status) => {
       currentReservations = currentReservations.map((reservation) => {
         const record = z.object({ id: z.string() }).passthrough().parse(reservation);
@@ -166,6 +177,7 @@ async function mockAdminConsole(
       }
       if (body.data.mode === "preview") {
         fixture.previewAttempts += 1;
+        fixture.previewRequests.push(body.data);
         if (failFirstPreview && fixture.previewAttempts === 1) {
           await route.abort("failed");
           return;
@@ -174,6 +186,7 @@ async function mockAdminConsole(
         return;
       }
       fixture.executeAttempts += 1;
+      fixture.executeRequests.push(body.data);
       await fulfill(route, executeResult(body.data.reservationIds));
       return;
     }
@@ -269,6 +282,8 @@ const BulkRequestSchema = z.object({
   reason: z.string(),
   reservationIds: z.array(z.string())
 }).strict();
+
+type BulkRequest = z.infer<typeof BulkRequestSchema>;
 
 async function fulfill(route: Route, json: unknown, status = 200): Promise<void> {
   await route.fulfill({ contentType: "application/json", json, status });

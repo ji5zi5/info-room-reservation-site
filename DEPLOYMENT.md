@@ -385,6 +385,81 @@ old-writer rejection without mutation, and removal of every child process, port,
 database directory, worktree, lock, and temporary drive mapping. This is local rollout
 compatibility evidence, not production capacity evidence.
 
+## Operational CI and attempt-bound evidence
+
+The permanent GitHub Actions job is deliberately clean-clone capable: it checks out only
+Git-tracked files, runs `npm ci`, installs Chromium with
+`npx playwright install --with-deps chromium`, and invokes:
+
+```bash
+npm run qa:operational:core -- --phase full --ci
+```
+
+The verifier's `--mode core` entrypoint must not need `.omo`, an absolute Windows
+source path, Docker, an attempt descriptor, or a review receipt. Its database harness owns a loopback
+`embedded-postgres` child, random `_test` database, temporary data directory, and
+port; it injects the resulting disposable URLs into child-scoped Prisma commands.
+It refuses non-loopback or non-`_test` reused databases unless explicit loopback
+pre-authorization is set. It records and verifies cleanup of the database child,
+data directory, and port before reporting success.
+
+The database phase runs Prisma validation/generation/ordinary `prisma migrate deploy`
+and database-contract checks. Browser, Discord, and full phases use the same entrypoint
+and remain subject to their own executable gates. The CI invocation above is the
+permanent workflow contract; this Todo's database-only evidence is not proof that the
+current checkout has completed full operational QA. Do not present a green
+database-only run as a full CI or production validation.
+
+For an approved local final attempt, use the separate wrapper rather than passing an
+attempt directory to CI:
+
+```bash
+npm run qa:operational -- --phase full --attempt-dir <absolute-attempt-directory>
+```
+
+The verifier's `--mode attempt` wrapper validates the immutable `attempt.json` before it imports the core. The
+binding covers the descriptor script identity, descriptor-chain digests, approved
+plan and review receipt identities, reviewer/base SHA and tree observations, and
+reviewer launch/session separation. Any missing attempt record or identity drift
+fails closed. The browser phase stops its owned server process tree, and that is not a
+substitute for the harness cleanup receipt.
+
+The required ordering for a production-like verification is ordinary committed Prisma
+migrations first, then the owner-only separately tracked
+`scripts/apply-online-admin-search-indexes.ts`, then application-contract activation.
+The online runner rechecks its private ledger checksum/state and every catalog index
+definition before marking the ledger `APPLIED`; do not put concurrent-index work in a
+Prisma migration or manually alter that ledger. Activation follows the source-bound,
+two-transaction readiness-receipt handoff described above. These are local
+PostgreSQL-contract checks, not a claim of managed backup/PITR execution, rollback
+compatibility, or production validation.
+
+The final full contract adds fake-Discord lifecycle evidence and browser evidence to
+the same disposable environment. Fake transport results are evidence of local
+behavior only: they do not demonstrate real Discord delivery, production alert
+delivery, or production Discord capacity. Browser evidence must start its target
+server explicitly and preserve both desktop and 390px viewport artifacts with no
+uncaught page/console errors, unexpected failed requests, horizontal overflow, or
+incoherent overlap.
+
+The verifier also provides `compliance`, `cleanup`, and `scope` modes. All three first
+verify immutable attempt identity. `compliance` checks all 21 task manifests and
+integration receipts, command and evidence digests, declared write sets, and dependency
+baselines. `cleanup` rejects generated workspace artifacts, credential files, and
+`next-env.d.ts` drift. `scope` requires all five approved outcomes, validates the final
+diff, and rejects forbidden persistent-gateway/vendor/scheduler paths. Run them directly
+with the same absolute attempt directory, for example:
+
+```bash
+node scripts/verify-operational-fomo-evidence.mjs \
+  --mode compliance --attempt-dir <absolute-attempt-directory> --workspace <absolute-workspace>
+```
+
+The immutable recorder remains separate: invoke `node
+scripts/run-operational-fomo-evidence.mjs start|run|finalize ...` explicitly; neither
+`qa:operational` package script finalizes a task manifest. Never substitute a printed
+success line for these checks or their captured artifacts.
+
 ## Local Smoke Test
 
 For UI smoke tests without a database, run the dev server with mock login and no `DATABASE_URL`:

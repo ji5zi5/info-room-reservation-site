@@ -29,7 +29,12 @@ test("operations command center repairs and opens exact related records at deskt
   await retryRow.getByRole("button", { name: "다시 시도" }).click();
   await expect(retryRow).toHaveCount(0);
   expect(fixture.dashboardReads).toBe(dashboardReadsBeforeRepair);
-  expect(fixture.repairRequests).toHaveLength(1);
+  expect(fixture.repairRequests).toEqual([{
+    action: "retry",
+    expectedControlEpoch: 7,
+    expectedState: "RETRY",
+    reservationId: "reservation-1"
+  }]);
 
   await reviewRow.getByRole("button", { name: "예약 보기" }).click();
   await expect(page.getByRole("heading", { name: "예약자 목록" })).toBeVisible();
