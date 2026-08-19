@@ -347,7 +347,7 @@ async function runPortableCore(phase, childArgv, ci, attemptDir) {
         await runCommand(npxCommand(), ["prisma", "validate"], env);
         if (phase === "full") {
           const testEnv = { ...process.env, NODE_ENV: "test" };
-          for (const key of ["DATABASE_URL", "DEPLOYMENT_SHA", "DIRECT_URL", "GITHUB_SHA", "INTEGRATION_DATABASE_URL", "VERCEL_GIT_COMMIT_SHA"]) {
+          for (const key of ["DATABASE_URL", "DEPLOYMENT_SHA", "DIRECT_URL", "EVIDENCE_DIR", "GITHUB_SHA", "INTEGRATION_DATABASE_URL", "VERCEL_GIT_COMMIT_SHA"]) {
             delete testEnv[key];
           }
           await runCommand(npmCommand(), ["test"], testEnv);

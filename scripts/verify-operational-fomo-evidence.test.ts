@@ -68,7 +68,7 @@ describe("operational FOMO evidence verifier CLI", () => {
     ])).toBe(true);
     expect(implementation).toMatch(/const testEnv = \{ \.\.\.process\.env, NODE_ENV: "test" \}[\s\S]*delete testEnv\[key\]/u);
     expect(implementation).toContain(
-      '["DATABASE_URL", "DEPLOYMENT_SHA", "DIRECT_URL", "GITHUB_SHA", "INTEGRATION_DATABASE_URL", "VERCEL_GIT_COMMIT_SHA"]'
+      '["DATABASE_URL", "DEPLOYMENT_SHA", "DIRECT_URL", "EVIDENCE_DIR", "GITHUB_SHA", "INTEGRATION_DATABASE_URL", "VERCEL_GIT_COMMIT_SHA"]'
     );
     expect(implementation).toMatch(/INTEGRATION_DATABASE_URL: await configureRuntimeIntegrationUrl\(databaseUrl\)/u);
     expect(implementation).toMatch(/configureRuntimeIntegrationUrl[\s\S]*ALTER ROLE info_room_runtime/u);
