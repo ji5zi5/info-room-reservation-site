@@ -75,6 +75,8 @@ describe("operational FOMO evidence verifier CLI", () => {
     expect(implementation.match(/\["run", "vercel-build"\]/gu)).toHaveLength(1);
     expect(implementation).toMatch(/runDiscordPhase[\s\S]*runBrowserPhase[\s\S]*snapshotGeneratedArtifacts/u);
     expect(implementation).toContain('if (phase === "browser") return await runBrowserPhase(childArgv, ci, attemptDir);');
+    expect(implementation).toMatch(/stopOwnedChild[\s\S]*waitForProcessGroupExit[\s\S]*SIGKILL/u);
+    expect(implementation).toContain("browser process group could not be terminated");
     expect(implementation).toMatch(/case "attempt"[\s\S]*validateAttemptIdentity\(attemptDir\)[\s\S]*runPortableCore\(options\.phase, options\.childArgv, false, attemptDir\)/u);
     expect(implementation).toMatch(/resolveBrowserEvidenceRoot[\s\S]*owned: attemptDir === undefined[\s\S]*EVIDENCE_DIR: evidenceRoot/u);
     expect(implementation).toContain('["npm", "npm.cmd", "npx", "npx.cmd"]');

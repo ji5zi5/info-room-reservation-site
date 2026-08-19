@@ -761,10 +761,53 @@ function waitForHealth(port, server) {
 }
 
 async function stopOwnedChild(child) {
-  if (child.exitCode !== null || child.pid === undefined) return;
-  if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/f", "/t"], { stdio: "ignore", windowsHide: true });
-  else { try { process.kill(-child.pid, "SIGTERM"); } catch (error) { if (!(error instanceof Error) || !("code" in error) || error.code !== "ESRCH") throw error; } }
+  if (child.pid === undefined) return;
+  if (process.platform === "win32") {
+    if (child.exitCode === null) {
+      spawnSync("taskkill", ["/pid", String(child.pid), "/f", "/t"], { stdio: "ignore", windowsHide: true });
+    }
+  } else {
+    await terminateProcessGroup(child.pid);
+  }
+  if (child.exitCode !== null) return;
   await new Promise((resolveExit) => { const timeout = setTimeout(resolveExit, 5_000); child.once("exit", () => { clearTimeout(timeout); resolveExit(); }); });
+}
+
+async function terminateProcessGroup(pid) {
+  if (!signalProcessGroup(pid, "SIGTERM") || await waitForProcessGroupExit(pid, 1_000)) return;
+  signalProcessGroup(pid, "SIGKILL");
+  if (!await waitForProcessGroupExit(pid, 5_000)) {
+    fail("CLEANUP", "browser process group could not be terminated");
+  }
+}
+
+function signalProcessGroup(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+async function waitForProcessGroupExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processGroupExists(pid)) return true;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  }
+  return !processGroupExists(pid);
+}
+
+function processGroupExists(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+    throw error;
+  }
 }
 
 function focusedSpecs() {
