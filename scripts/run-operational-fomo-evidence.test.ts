@@ -105,8 +105,8 @@ describe("operational FOMO immutable recorder", () => {
   it("fails closed at the recorder deadline and removes the owned child tree", async () => {
     const value = await fixture();
     const marker = join(value.attempt, "grandchild.pid");
-    const program = "const{spawn}=require('node:child_process'),fs=require('node:fs');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)']);fs.writeFileSync(process.argv[1],String(c.pid));setTimeout(()=>process.exit(0),300)";
-    const result = cli(value.repo, "run", "--todo", "1", "--attempt-dir", value.attempt, "--timeout-ms", "50", "--", process.execPath, "-e", program, marker);
+    const program = "const{spawn}=require('node:child_process'),fs=require('node:fs');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)']);fs.writeFileSync(process.argv[1],String(c.pid));setInterval(()=>{},1000)";
+    const result = cli(value.repo, "run", "--todo", "1", "--attempt-dir", value.attempt, "--timeout-ms", "2000", "--", process.execPath, "-e", program, marker);
     const records = JSON.parse(await readFile(join(value.attempt, "task-1-commands.json"), "utf8")) as { exitCode: number; timedOut?: boolean }[];
     const pid = Number(await readFile(marker, "utf8"));
     let alive = true;
