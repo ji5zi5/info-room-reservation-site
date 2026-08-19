@@ -303,14 +303,38 @@ async function terminateOwnedProcessTree(record, platformName = platform()) {
     if (!await boundedResult(killerTerminal, 2_000, false)) killer.kill();
     return boundedResult(record.terminal.then(() => true), 3_000, false);
   }
-  try { process.kill(-record.pid, "SIGTERM"); } catch (error) {
-    if (!(error instanceof Error) || !("code" in error) || error.code !== "ESRCH") throw error;
+  if (!signalProcessGroup(record.pid, "SIGTERM") || await waitForProcessGroupExit(record.pid, 1_000)) return true;
+  signalProcessGroup(record.pid, "SIGKILL");
+  return waitForProcessGroupExit(record.pid, 3_000);
+}
+
+function signalProcessGroup(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+    throw error;
   }
-  if (await boundedResult(record.terminal.then(() => true), 1_000, false)) return true;
-  try { process.kill(-record.pid, "SIGKILL"); } catch (error) {
-    if (!(error instanceof Error) || !("code" in error) || error.code !== "ESRCH") throw error;
+}
+
+async function waitForProcessGroupExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processGroupExists(pid)) return true;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
-  return boundedResult(record.terminal.then(() => true), 3_000, false);
+  return !processGroupExists(pid);
+}
+
+function processGroupExists(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+    throw error;
+  }
 }
 
 async function boundedResult(operation, timeoutMs, fallback) {
