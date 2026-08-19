@@ -27,6 +27,7 @@ export async function resetPostgresTestDatabase(): Promise<void> {
 }
 
 export async function seedUser(input: {
+  readonly createdAt?: Date;
   readonly id: string;
   readonly role?: "ADMIN" | "STUDENT";
 }): Promise<User> {
@@ -34,6 +35,7 @@ export async function seedUser(input: {
     transaction.user.create({
       data: {
         bookingStatus: "ACTIVE",
+        ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
         generation: 32,
         id: input.id,
         name: input.role === "ADMIN" ? "통합 관리자" : "통합 학생",

@@ -338,7 +338,7 @@ describe("real PostgreSQL production route and store actor context", () => {
       requests.map((response) => response.json())
     );
     expect(users).toMatchObject({
-      users: expect.arrayContaining([
+      items: expect.arrayContaining([
         expect.objectContaining({
           id: seeded.peer.id,
           name: seeded.peer.name,
@@ -378,7 +378,7 @@ describe("real PostgreSQL production route and store actor context", () => {
       }
     });
     expect(reservations).toMatchObject({
-      reservations: expect.arrayContaining([
+      items: expect.arrayContaining([
         expect.objectContaining({
           id: seeded.peerReservationId,
           reason: "peer private reason",
@@ -408,7 +408,7 @@ describe("real PostgreSQL production route and store actor context", () => {
       ])
     });
     expect(actions).toMatchObject({
-      actions: expect.arrayContaining([
+      items: expect.arrayContaining([
         expect.objectContaining({
           actor: expect.objectContaining({
             id: seeded.admin.id,
@@ -736,10 +736,11 @@ describe("real PostgreSQL production route and store actor context", () => {
 });
 
 async function seedProtectedFixtures(): Promise<TestFixtures> {
+  const createdAt = new Date(TEST_NOW.getTime() - 60_000);
   const [admin, student, peer] = await Promise.all([
-    seedUser({ id: "route-admin", role: "ADMIN" }),
-    seedUser({ id: "route-student" }),
-    seedUser({ id: "route-peer" })
+    seedUser({ createdAt, id: "route-admin", role: "ADMIN" }),
+    seedUser({ createdAt, id: "route-student" }),
+    seedUser({ createdAt, id: "route-peer" })
   ]);
   await withSystemDatabaseContext(async (transaction) => {
     await transaction.periodSetting.createMany({
@@ -751,15 +752,16 @@ async function seedProtectedFixtures(): Promise<TestFixtures> {
     });
     await transaction.reservation.createMany({
       data: [
-        { id: "own-protected-reservation", date: TEST_DATE, reason: "own private reason", status: "CONFIRMED", studyPeriod: "EIGHTH", userId: student.id },
-        { id: "peer-protected-reservation", date: TEST_DATE, reason: "peer private reason", status: "CONFIRMED", studyPeriod: "EIGHTH", userId: peer.id },
-        { id: "closed-peer-reservation", date: CLOSED_DATE, reason: "closed list reason", status: "CONFIRMED", studyPeriod: "EIGHTH", userId: peer.id }
+        { createdAt, id: "own-protected-reservation", date: TEST_DATE, reason: "own private reason", status: "CONFIRMED", studyPeriod: "EIGHTH", userId: student.id },
+        { createdAt, id: "peer-protected-reservation", date: TEST_DATE, reason: "peer private reason", status: "CONFIRMED", studyPeriod: "EIGHTH", userId: peer.id },
+        { createdAt, id: "closed-peer-reservation", date: CLOSED_DATE, reason: "closed list reason", status: "CONFIRMED", studyPeriod: "EIGHTH", userId: peer.id }
       ]
     });
     await transaction.adminAction.create({
       data: {
         action: "SEEDED_PROTECTED_ACTION",
         actorId: admin.id,
+        createdAt,
         id: "seeded-admin-action",
         reason: "seeded audit reason",
         reservationId: "peer-protected-reservation",

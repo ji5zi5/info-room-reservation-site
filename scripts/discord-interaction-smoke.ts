@@ -457,6 +457,8 @@ async function assertFullLifecycle(databaseUrl: string, fakeDiscord: FakeDiscord
   if (fakeDiscord === null) throw new TypeError("Full lifecycle requires fake Discord.");
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
   try {
+    const initialMarker = await prisma.schemaCompatibility.findUniqueOrThrow({ where: { id: "discord-operations" } });
+    const startsActivated = initialMarker.activatedAt !== null;
     let lastState: unknown = null;
     let cronTriggered = false;
     let activationTriggered = false;
@@ -470,7 +472,11 @@ async function assertFullLifecycle(databaseUrl: string, fakeDiscord: FakeDiscord
         prisma.discordInteractionJob.findUnique({ where: { interactionId: "423456789012345678" } }),
         prisma.schemaCompatibility.findUnique({ where: { id: "discord-operations" } }),
         prisma.applicationDeploymentReceipt.findFirst({
-          where: { activationSource: "FIRST_CRON", consumedAt: { not: null }, deploymentSha: "b".repeat(40) }
+          where: {
+            ...(startsActivated ? {} : { activationSource: "FIRST_CRON" }),
+            consumedAt: { not: null },
+            deploymentSha: "b".repeat(40)
+          }
         }),
         prisma.adminAction.count({ where: { action: "DISCORD_RESERVATION_ACCEPT", reservationId } }),
         prisma.auditLog.count({ where: { action: "DISCORD_RESERVATION_ACCEPT" } })
@@ -481,8 +487,9 @@ async function assertFullLifecycle(databaseUrl: string, fakeDiscord: FakeDiscord
         cronTriggered = true;
         const guardedCron = await getCron(port);
         guardedCronStatus = guardedCron.status;
-        if (guardedCron.status !== 502) {
-          throw new TypeError(`Activation must fail closed while workers are enabled: ${JSON.stringify(guardedCron)}`);
+        const expectedStatus = startsActivated ? 200 : 502;
+        if (guardedCron.status !== expectedStatus) {
+          throw new TypeError(`Activation guard returned ${guardedCron.status}, expected ${expectedStatus}: ${JSON.stringify(guardedCron)}`);
         }
       }
       if (job?.status === "PENDING" && attempt >= 20 && !recoveryCronTriggered) {
@@ -491,13 +498,15 @@ async function assertFullLifecycle(databaseUrl: string, fakeDiscord: FakeDiscord
       }
       if (patched && !activationTriggered) {
         activationTriggered = true;
-        await prisma.$transaction(async (transaction) => {
-          await transaction.$executeRaw`SELECT set_config('app.application_contract', 'discord-ops-v2', true)`;
-          await transaction.discordOperationsControl.update({
-            data: { enabled: false },
-            where: { id: "discord-operations" }
+        if (!startsActivated) {
+          await prisma.$transaction(async (transaction) => {
+            await transaction.$executeRaw`SELECT set_config('app.application_contract', 'discord-ops-v2', true)`;
+            await transaction.discordOperationsControl.update({
+              data: { enabled: false },
+              where: { id: "discord-operations" }
+            });
           });
-        });
+        }
         const activationCron = await getCron(port);
         activationCronStatus = activationCron.status;
         if (activationCron.status !== 200) {
@@ -509,7 +518,8 @@ async function assertFullLifecycle(databaseUrl: string, fakeDiscord: FakeDiscord
         actionCount === 1 && auditCount >= 1 && patched && marker?.minimumApplicationContract === "discord-ops-v2" &&
         marker.deploymentSha === "b".repeat(40) && activationReceipt !== null
       ) {
-        return `signed-command/auth/reservation/audit/receipt/source-PATCH/FIRST_CRON-activation/cron=${guardedCronStatus}->${activationCronStatus}`;
+        const activationPath = startsActivated ? "already-active" : "FIRST_CRON-activation";
+        return `signed-command/auth/reservation/audit/receipt/source-PATCH/${activationPath}/cron=${guardedCronStatus}->${activationCronStatus}`;
       }
       await new Promise((resolveWait) => setTimeout(resolveWait, 100));
     }

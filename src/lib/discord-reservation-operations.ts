@@ -206,7 +206,7 @@ async function processInTransaction(input: TransactionInput): Promise<DiscordRes
     }),
     input.transaction.$queryRaw<readonly { readonly enabled: boolean; readonly epoch: number }[]>(Prisma.sql`
       SELECT "enabled", "epoch" FROM "DiscordOperationsControl"
-      WHERE "id" = 'discord-operations' FOR SHARE
+      WHERE "id" = 'discord-operations'
     `)
   ]);
   if (
@@ -235,15 +235,21 @@ async function processInTransaction(input: TransactionInput): Promise<DiscordRes
     message.messageId !== input.command.sourceMessageId ||
     message.guildId !== input.command.sourceGuildId || message.channelId !== input.command.sourceChannelId
   ) return { code: "stale_message", kind: "noop" };
-  if (reservation.status !== "CONFIRMED") return writeStaleReceipt(input);
+  if (reservation.status !== "CONFIRMED") {
+    return input.command.kind === "accept" || input.command.kind === "reject"
+      ? settledInitialDecisionResult(input.command.reservationId, reservation.status, message.decision)
+      : writeStaleReceipt(input);
+  }
 
   switch (input.command.kind) {
     case "accept":
-      return message.decision === null ? acceptReservation(input) : writeStaleReceipt(input);
+      return message.decision === null
+        ? acceptReservation(input)
+        : settledInitialDecisionResult(input.command.reservationId, reservation.status, message.decision);
     case "reject":
       return message.decision === null
         ? cancelReservation({ ...input, command: input.command }, "DISCORD_REJECTION")
-        : writeStaleReceipt(input);
+        : settledInitialDecisionResult(input.command.reservationId, reservation.status, message.decision);
     case "admin_cancel":
       return message.decision === "ACCEPTED"
         ? cancelReservation({ ...input, command: input.command }, "DISCORD_ADMIN_CANCEL")
@@ -258,7 +264,7 @@ async function processInTransaction(input: TransactionInput): Promise<DiscordRes
 }
 
 async function acceptReservation(input: TransactionInput): Promise<DiscordReservationOperationResult> {
-  await requireSourceMessageCas(input, "ACCEPTED", null);
+  await requireSourceMessageCas(input, "ACCEPTED", null, "INCREMENT");
   const action = await input.transaction.adminAction.create({ data: {
     action: "DISCORD_RESERVATION_ACCEPT", actorId: input.actor.id,
     after: JSON.stringify({ reservationStatus: "CONFIRMED" }), before: JSON.stringify({ reservationStatus: "CONFIRMED" }),
@@ -283,7 +289,7 @@ async function cancelReservation(
   if (result.kind !== "ok") {
     return { code: result.kind === "not_found" ? "reservation_not_found" : result.kind, kind: "noop" };
   }
-  await requireSourceMessageCas(input, "CANCELLED", source === "DISCORD_REJECTION" ? null : "ACCEPTED");
+  await requireSourceMessageCas(input, "CANCELLED", source === "DISCORD_REJECTION" ? null : "ACCEPTED", "PRESERVE");
   return writeSuccessReceipt(input, source === "DISCORD_REJECTION" ? "REJECT" : "ADMIN_CANCEL", "CANCELLED", "cancelled");
 }
 
@@ -297,21 +303,36 @@ async function markNoShow(input: TransactionInput & {
   if (result.kind !== "ok") {
     return { code: result.kind === "not_found" ? "reservation_not_found" : result.kind, kind: "noop" };
   }
-  await requireSourceMessageCas(input, "NO_SHOW", "ACCEPTED");
+  await requireSourceMessageCas(input, "NO_SHOW", "ACCEPTED", "PRESERVE");
   return writeSuccessReceipt(input, "NO_SHOW", "NO_SHOW", "no_show");
 }
 
 async function requireSourceMessageCas(
   input: TransactionInput,
   decision: string,
-  expectedDecision: "ACCEPTED" | null
+  expectedDecision: "ACCEPTED" | null,
+  revision: "INCREMENT" | "PRESERVE"
 ): Promise<void> {
   const recorded = await recordDiscordReservationDecision(input.transaction, {
     decision, discordActorId: input.command.discordActorId, expectedDecision,
     localActorId: input.actor.id, now: input.now, renderedSourceEpoch: input.command.renderedControlEpoch,
-    reservationId: input.command.reservationId, revision: "INCREMENT", sourceMessageId: input.command.sourceMessageId
+    reservationId: input.command.reservationId, revision, sourceMessageId: input.command.sourceMessageId
   });
   if (!recorded) throw new DiscordReservationDecisionConflictError(input.command.reservationId);
+}
+
+function settledInitialDecisionResult(
+  reservationId: string,
+  reservationStatus: string,
+  decision: string | null
+): DiscordReservationOperationResult {
+  if (reservationStatus === "CANCELLED" || decision === "CANCELLED") {
+    return { kind: "cancelled", reservationId };
+  }
+  if (reservationStatus === "CONFIRMED" && decision === "ACCEPTED") {
+    return { kind: "accepted", reservationId };
+  }
+  return { kind: "stale", reservationId };
 }
 
 async function writeSuccessReceipt(

@@ -17,7 +17,7 @@ import {
 const runnerSource = readFileSync(resolve("scripts/apply-online-admin-search-indexes.ts"), "utf8");
 const EXACT_BASE_WRITER_SOURCE = String.raw`
   import { spawnSync } from "node:child_process";
-  import { PrismaClient } from "@prisma/client";
+  import { PrismaClient } from "./generated/prisma-client/index.js";
 
   async function main() {
     const commit = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
@@ -326,7 +326,7 @@ describe("online admin search index runner", () => {
 function runPostgresScenario(): string {
   const source = String.raw`
     import { spawn, spawnSync } from 'node:child_process';
-    import { mkdtemp, rm, symlink } from 'node:fs/promises';
+    import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
     import { fileURLToPath } from 'node:url';
     import { tmpdir } from 'node:os';
     import { join } from 'node:path';
@@ -349,18 +349,25 @@ function runPostgresScenario(): string {
         let writerStdout = '';
         let writerStderr = '';
         let observer;
-        let baseClientGenerated = false;
         try {
           const cloned = spawnSync('git', ['clone','--local','--no-checkout',repositoryRoot,baseRepository], { encoding: 'utf8' });
           if (cloned.status !== 0) throw new Error(cloned.stderr || cloned.stdout);
           const checkedOut = spawnSync('git', ['checkout','--detach',exactBaseSha], { cwd: baseRepository, encoding: 'utf8' });
           if (checkedOut.status !== 0) throw new Error(checkedOut.stderr || checkedOut.stdout);
           await symlink(join(repositoryRoot,'node_modules'), join(baseRepository,'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+          const baseSchemaPath = join(baseRepository, 'prisma', 'schema.prisma');
+          const baseSchema = await readFile(baseSchemaPath, 'utf8');
+          const generatorMarker = 'generator client {';
+          if (!baseSchema.includes(generatorMarker)) throw new Error('exact-base Prisma client generator missing');
+          await writeFile(
+            baseSchemaPath,
+            baseSchema.replace(generatorMarker, generatorMarker + '\n  output = "../generated/prisma-client"'),
+            'utf8'
+          );
           const generated = spawnSync(process.execPath, [prismaCli, 'generate'], {
             cwd: baseRepository, encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: directUrl }
           });
           if (generated.status !== 0) throw new Error(generated.stderr || generated.stdout);
-          baseClientGenerated = true;
           const baseMigrated = spawnSync(process.execPath, [prismaCli, 'migrate', 'deploy'], {
             cwd: baseRepository, encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: directUrl }
           });
@@ -527,12 +534,6 @@ function runPostgresScenario(): string {
             }
           }
           if (observer !== undefined) await observer.end().catch(() => undefined);
-          if (baseClientGenerated) {
-            const restoredClient = spawnSync(process.execPath, [prismaCli, 'generate'], {
-              cwd: repositoryRoot, encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: directUrl }
-            });
-            if (restoredClient.status !== 0) throw new Error(restoredClient.stderr || restoredClient.stdout);
-          }
           await rm(cloneRoot, { recursive: true, force: true });
         }
       }, timeoutMs: 90_000

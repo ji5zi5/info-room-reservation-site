@@ -144,7 +144,7 @@ describe("Discord reservation decisions", () => {
     expect(result).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
     expect(mocks.recordDecision).toHaveBeenCalledWith(transaction, expect.objectContaining({
       decision: "CANCELLED",
-      revision: "INCREMENT"
+      revision: "PRESERVE"
     }));
     expect(mocks.cancel).toHaveBeenCalledWith(transaction, {
       actor: { id: "admin-1", role: "ADMIN" },
@@ -175,6 +175,20 @@ describe("Discord reservation decisions", () => {
     expect(result).toEqual({ kind: "cancelled", reservationId: "reservation-1" });
     expect(mocks.recordDecision).toHaveBeenCalledOnce();
     expect(mocks.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("returns the first settled decision to a competing interaction without another receipt", async () => {
+    transaction.discordReservationMessage.findUnique.mockResolvedValue({
+      channelId: "channel-1", decision: "ACCEPTED", guildId: "guild-1",
+      messageId: "message-1", renderedSourceEpoch: 7
+    });
+
+    const result = await processDiscordReservationDecision({ command: command("reject"), currentApplicationId, ipHash, now });
+
+    expect(result).toEqual({ kind: "accepted", reservationId: "reservation-1" });
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(mocks.recordDecision).not.toHaveBeenCalled();
+    expect(mocks.recordReceipt).not.toHaveBeenCalled();
   });
 
   it("binds the legacy direct path to the explicitly supplied current application", async () => {

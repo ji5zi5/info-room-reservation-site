@@ -3,22 +3,24 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
-  cpSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readlinkSync,
   readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
-  statSync
+  statSync,
+  symlinkSync
 } from "node:fs";
 import { get } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { z } from "zod";
 import pg from "pg";
@@ -354,20 +356,20 @@ async function runPortableCore(phase, childArgv, ci, attemptDir) {
         await runCommand(npxCommand(), ["prisma", "migrate", "deploy"], env);
         await runCommand(npxCommand(), ["tsx", "scripts/apply-online-admin-search-indexes.ts"], env);
         if (phase === "database") {
-          await runDatabaseContractQa(databaseUrl);
+          await runDatabaseContractQaInChild(env);
           return { phase, status: "passed" };
         }
         if (phase === "discord") {
           await runDiscordPhase(env);
           return { phase, status: "passed" };
         }
+        await runDatabaseContractQaInChild(env);
         await runCommand(npmCommand(), ["run", "test:integration"], {
           ...env,
           INTEGRATION_DATABASE_URL: await configureRuntimeIntegrationUrl(databaseUrl)
         });
-        await runCommand(npmCommand(), ["run", "build"], env);
-        await runCommand(npmCommand(), ["run", "vercel-build"], env);
-        await runDatabaseContractQa(databaseUrl);
+        await runCommandWithTransientPrismaRetry(npmCommand(), ["run", "build"], env);
+        await runCommandWithTransientPrismaRetry(npmCommand(), ["run", "vercel-build"], env);
         await runDiscordPhase(env);
         return { phase, status: "passed" };
       },
@@ -409,7 +411,16 @@ async function configureRuntimeIntegrationUrl(databaseUrl) {
   return roleUrl(databaseUrl, "info_room_runtime", password);
 }
 
-async function runDatabaseContractQa(databaseUrl) {
+async function runDatabaseContractQaInChild(env) {
+  const verifierUrl = pathToFileURL(fileURLToPath(import.meta.url)).href;
+  const source = `
+    import { runDatabaseContractQa } from ${JSON.stringify(verifierUrl)};
+    await runDatabaseContractQa(process.env.DATABASE_URL);
+  `;
+  await runCommand(process.execPath, ["--input-type=module", "--eval", source], env);
+}
+
+export async function runDatabaseContractQa(databaseUrl) {
   process.env.DATABASE_URL = databaseUrl;
   process.env.DIRECT_URL = databaseUrl;
   const { PrismaClient } = await import("@prisma/client");
@@ -637,7 +648,18 @@ function browserEnvironment(port, ci, evidenceRoot) {
 async function runCommand(command, args, env) {
   const invocation = executableInvocation(command, args);
   const child = spawn(invocation.command, invocation.args, {
-    cwd: process.cwd(), detached: process.platform !== "win32", env, shell: false, stdio: "inherit", windowsHide: true
+    cwd: process.cwd(), detached: process.platform !== "win32", env, shell: false,
+    stdio: ["ignore", "pipe", "pipe"], windowsHide: true
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout = appendOutputTail(stdout, chunk.toString());
+    process.stdout.write(chunk);
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr = appendOutputTail(stderr, chunk.toString());
+    process.stderr.write(chunk);
   });
   activeChildren.add(child);
   const terminal = new Promise((complete) => {
@@ -655,23 +677,70 @@ async function runCommand(command, args, env) {
       fail("CORE", `${command} ${args.join(" ")} timed out`);
     }
     if (result.kind === "error") throw new OperationalEvidenceError("CORE", `${command} failed to execute`, { cause: result.error });
-    if (result.status !== 0) fail("CORE", `${command} ${args.join(" ")} exited ${result.status}`);
+    if (result.status !== 0) {
+      throw new OperationalEvidenceError("CORE", `${command} ${args.join(" ")} exited ${result.status}`, {
+        cause: new Error(`${stdout}\n${stderr}`)
+      });
+    }
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     activeChildren.delete(child);
   }
 }
 
+async function runCommandWithTransientPrismaRetry(command, args, env) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await runCommand(command, args, env);
+    } catch (error) {
+      if (attempt >= 4 || !isTransientWindowsPrismaLock(error)) throw error;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, attempt * 5_000));
+    }
+  }
+}
+
+function isTransientWindowsPrismaLock(error) {
+  if (process.platform !== "win32" || !(error instanceof OperationalEvidenceError) || !(error.cause instanceof Error)) {
+    return false;
+  }
+  return /(?:EPERM|EBUSY)[\s\S]*query_engine-windows\.dll\.node/iu.test(error.cause.message);
+}
+
+function appendOutputTail(current, chunk) {
+  return `${current}${chunk}`.slice(-32_768);
+}
+
 function snapshotGeneratedArtifacts() {
   const root = mkdtempSync(join(tmpdir(), "operational-fomo-artifacts-"));
   const paths = [".next", "test-results", "tsconfig.tsbuildinfo", "next-env.d.ts"];
   const present = new Set(paths.filter((path) => existsSync(resolve(path))));
-  for (const path of present) cpSync(resolve(path), join(root, basename(path)), { recursive: true });
+  for (const path of present) copyArtifact(resolve(path), join(root, basename(path)));
   return { restore() {
     for (const path of paths) rmSync(resolve(path), { force: true, recursive: true });
-    for (const path of present) cpSync(join(root, basename(path)), resolve(path), { recursive: true });
+    for (const path of present) copyArtifact(join(root, basename(path)), resolve(path));
     rmSync(root, { force: true, recursive: true });
   } };
+}
+
+function copyArtifact(source, destination) {
+  const metadata = lstatSync(source);
+  if (metadata.isDirectory()) {
+    mkdirSync(destination, { recursive: true });
+    for (const entry of readdirSync(source)) {
+      copyArtifact(join(source, entry), join(destination, entry));
+    }
+    return;
+  }
+  mkdirSync(dirname(destination), { recursive: true });
+  if (metadata.isFile()) {
+    copyFileSync(source, destination);
+    return;
+  }
+  if (metadata.isSymbolicLink()) {
+    symlinkSync(readlinkSync(source), destination, statSync(source).isDirectory() ? "dir" : "file");
+    return;
+  }
+  fail("CORE", `unsupported generated artifact type: ${source}`);
 }
 
 function waitForHealth(port, server) {

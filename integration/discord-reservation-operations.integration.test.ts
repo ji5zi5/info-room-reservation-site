@@ -179,7 +179,10 @@ describe("durable Discord reservation operations", () => {
     }));
     await expect(withStudentDatabaseContext(student.id, (transaction) => transaction.discordReservationMessage.create({
       data: { nonce: "student-denied", reservationId: deniedReservation.id }
-    }))).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    }))).rejects.toThrow();
+    await expect(withSystemDatabaseContext((transaction) => transaction.discordReservationMessage.count({
+      where: { reservationId: deniedReservation.id }
+    }))).resolves.toBe(0);
   });
 
   it("deletes expired terminal messages then receipts in bounded batches", async () => {

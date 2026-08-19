@@ -53,14 +53,14 @@ type WithDatabaseMutationInput<TTransaction extends DatabaseContextTransaction, 
 const SERIALIZABLE_RETRY_DELAYS_MS = [10, 25] as const;
 
 export const PRISMA_MUTATION_TRANSACTION_OPTIONS = {
-  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  isolationLevel: "Serializable",
   maxWait: 5_000,
   timeout: 10_000
 } satisfies PrismaMutationTransactionOptions;
 
 export const PRISMA_LOCKED_MUTATION_TRANSACTION_OPTIONS = {
   ...PRISMA_MUTATION_TRANSACTION_OPTIONS,
-  isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted
+  isolationLevel: "ReadCommitted"
 } satisfies PrismaMutationTransactionOptions;
 
 export class TransactionRetryExhaustedError extends Error {
