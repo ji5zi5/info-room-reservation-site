@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -146,7 +146,9 @@ describe("operational FOMO immutable recorder", () => {
     expect(cli(stale.repo, "finalize", "--todo", "1", "--attempt-dir", stale.attempt, "--evidence", join(stale.attempt, "evidence.txt")).status).toBe(1);
 
     const replaced = await fixture();
-    const bytes = await readFile(replaced.review); await rm(replaced.review); await writeFile(replaced.review, bytes);
+    const bytes = await readFile(replaced.review);
+    await rename(replaced.review, `${replaced.review}.original`);
+    await writeFile(replaced.review, bytes);
     expect(cli(replaced.repo, "run", "--todo", "1", "--attempt-dir", replaced.attempt, "--", process.execPath, "-e", "process.exit(0)").stderr).toContain("IDENTITY_DRIFT");
   }, 30_000);
 

@@ -125,6 +125,34 @@ async function terminateProcessTree(pid) {
   } catch (error) {
     if (!(error instanceof Error) || !("code" in error) || error.code !== "ESRCH") throw error;
   }
+  if (await waitForProcessGroupExit(pid, 1_000)) return;
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ESRCH") throw error;
+  }
+  if (!await waitForProcessGroupExit(pid, 5_000)) {
+    throw new OperationalChildError("child process tree could not be terminated", { pid });
+  }
+}
+
+async function waitForProcessGroupExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processGroupExists(pid)) return true;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  }
+  return !processGroupExists(pid);
+}
+
+function processGroupExists(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+    throw error;
+  }
 }
 
 async function runDatabaseContractQa(databaseUrl) {

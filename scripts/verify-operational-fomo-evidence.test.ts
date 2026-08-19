@@ -67,6 +67,9 @@ describe("operational FOMO evidence verifier CLI", () => {
       "runBrowserPhase(childArgv, ci, attemptDir)"
     ])).toBe(true);
     expect(implementation).toMatch(/const testEnv = \{ \.\.\.process\.env, NODE_ENV: "test" \}[\s\S]*delete testEnv\[key\]/u);
+    expect(implementation).toContain(
+      '["DATABASE_URL", "DEPLOYMENT_SHA", "DIRECT_URL", "GITHUB_SHA", "INTEGRATION_DATABASE_URL", "VERCEL_GIT_COMMIT_SHA"]'
+    );
     expect(implementation).toMatch(/INTEGRATION_DATABASE_URL: await configureRuntimeIntegrationUrl\(databaseUrl\)/u);
     expect(implementation).toMatch(/configureRuntimeIntegrationUrl[\s\S]*ALTER ROLE info_room_runtime/u);
     expect(implementation.match(/\["run", "vercel-build"\]/gu)).toHaveLength(1);
@@ -75,6 +78,8 @@ describe("operational FOMO evidence verifier CLI", () => {
     expect(implementation).toMatch(/case "attempt"[\s\S]*validateAttemptIdentity\(attemptDir\)[\s\S]*runPortableCore\(options\.phase, options\.childArgv, false, attemptDir\)/u);
     expect(implementation).toMatch(/resolveBrowserEvidenceRoot[\s\S]*owned: attemptDir === undefined[\s\S]*EVIDENCE_DIR: evidenceRoot/u);
     expect(implementation).toContain('["npm", "npm.cmd", "npx", "npx.cmd"]');
+    expect(implementation).toContain("process.exit(1)");
+    expect(implementation).not.toContain("process.exitCode = 1");
     expect(predeploy).toContain("permanent single-core CI/package contract");
   });
 

@@ -28,6 +28,7 @@ describe("production CI contract", () => {
 
     expect(workflow).toMatch(/permissions:\r?\n  contents: read/u);
     expect(workflow).toContain("actions/checkout@v6");
+    expect(workflow).toMatch(/actions\/checkout@v6\r?\n\s+with:\r?\n\s+fetch-depth: 0/u);
     expect(workflow).toContain("actions/setup-node@v6");
     expect(workflow).not.toContain("actions/checkout@v4");
     expect(workflow).not.toContain("actions/setup-node@v4");
