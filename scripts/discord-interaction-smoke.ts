@@ -161,7 +161,7 @@ function startNext(port: number, databaseUrl: string, publicKey: string, fakeDis
       DISCORD_GUILD_ID: guildId, DISCORD_PUBLIC_KEY: publicKey,
       ...(fakeDiscordUrl === undefined ? {} : {
         DISCORD_FAKE_BASE_URL: fakeDiscordUrl,
-        DISCORD_WEBHOOK_URL: `${fakeDiscordUrl}/webhooks/closed-list`,
+        DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/local-fixture-token",
         NODE_OPTIONS: buildDiscordLoopbackNodeOptions(fakeDiscordUrl, process.env.NODE_OPTIONS)
       }),
       NODE_ENV: "development",

@@ -174,6 +174,15 @@ describe("Discord interaction operator tooling", () => {
     expect(packageJson.scripts["discord:fixture"]).toContain("scripts/discord-interaction-fixture.ts");
     expect(packageJson.scripts["discord:smoke"]).toContain("scripts/discord-interaction-smoke.ts");
   });
+
+  it("keeps the Discord smoke webhook valid while redirecting transport to loopback", () => {
+    const smokeSource = readFileSync(join(root, "scripts", "discord-interaction-smoke.ts"), "utf8");
+
+    expect(smokeSource).toContain(
+      'DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/local-fixture-token"'
+    );
+    expect(smokeSource).not.toContain("DISCORD_WEBHOOK_URL: `${fakeDiscordUrl}");
+  });
 });
 
 function productionEnv(): NodeJS.ProcessEnv {
