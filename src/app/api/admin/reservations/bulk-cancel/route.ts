@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { bulkCancelAdministratorReservations } from "@/lib/admin-bulk-cancellation";
+import { scheduleDiscordOperationsBoardSync } from "@/lib/discord-operations-board-after-mutation";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
@@ -49,6 +50,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       reservationIds: parsed.data.reservationIds,
       source: { kind: "WEB_ADMIN" }
     });
+    if (parsed.data.mode === "execute" && result.summary.cancelled > 0) {
+      scheduleDiscordOperationsBoardSync();
+    }
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {

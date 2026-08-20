@@ -81,7 +81,13 @@ export async function runOperationalJob<T>(input: {
     return outcome.kind === "succeeded"
       ? { kind: "succeeded", value: outcome.value }
       : { failureCode: outcome.failureCode ?? "job_failed", kind: "failed", value: outcome.value };
-  } catch {
+  } catch (error) {
+    console.error(JSON.stringify({
+      errorCode: safeErrorCode(error),
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      event: "operational_job_unexpected_failure",
+      job: input.job
+    }));
     const finishedAt = input.clock?.() ?? new Date();
     await input.store.finish({
       backlogCount: 0,
@@ -96,4 +102,11 @@ export async function runOperationalJob<T>(input: {
     });
     return { failureCode: "unexpected_error", kind: "failed" };
   }
+}
+
+function safeErrorCode(error: unknown): string {
+  if (typeof error !== "object" || error === null || !("code" in error) || typeof error.code !== "string") {
+    return "unknown";
+  }
+  return /^[A-Za-z0-9_.:-]{1,64}$/u.test(error.code) ? error.code : "redacted_error";
 }

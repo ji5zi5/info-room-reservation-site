@@ -68,6 +68,8 @@ import { POST as markNoShow } from "@/app/api/admin/reservations/[id]/no-show/ro
 import { POST as restrictUser } from "@/app/api/admin/users/[id]/restriction/route";
 import { DELETE as cancelReservation } from "@/app/api/reservations/[id]/route";
 import { prismaReservationStore } from "@/lib/prisma-reservation-store";
+import { prismaOperationalJobStore } from "@/lib/prisma-operational-job-store";
+import { OPERATIONAL_JOB_NAMES } from "@/lib/operational-jobs";
 import { reserveStudyPeriod } from "@/lib/reservation-service";
 
 const TEST_WINDOW = futureMondayWindow();
@@ -86,6 +88,31 @@ afterAll(async () => {
 });
 
 describe("real PostgreSQL mutation serialization", () => {
+  it("records independent operational jobs concurrently without serialization conflicts", async () => {
+    const startedAt = new Date("2026-08-20T05:00:00.000Z");
+    const starts = await Promise.all(OPERATIONAL_JOB_NAMES.map((job) =>
+      prismaOperationalJobStore.tryStart({ job, startedAt, timeoutMs: 120_000 })
+    ));
+
+    expect(starts.every((record) => record?.status === "RUNNING")).toBe(true);
+    await Promise.all(OPERATIONAL_JOB_NAMES.map((job) =>
+      prismaOperationalJobStore.finish({
+        backlogCount: 0,
+        durationMs: 25,
+        failureCode: null,
+        finishedAt: new Date(startedAt.getTime() + 25),
+        job,
+        oldestBacklogAt: null,
+        result: "{}",
+        startedAt,
+        succeeded: true
+      })
+    ));
+    await expect(withSystemDatabaseContext((transaction) =>
+      transaction.operationalJob.count({ where: { status: "SUCCEEDED" } })
+    )).resolves.toBe(OPERATIONAL_JOB_NAMES.length);
+  });
+
   it("allows exactly one winner for the last seat", async () => {
     const users = await Promise.all([seedUser({ id: "last-seat-a" }), seedUser({ id: "last-seat-b" })]);
     await seedPeriod(1);

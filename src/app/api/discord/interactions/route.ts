@@ -1,6 +1,17 @@
 import { after, NextResponse } from "next/server";
 
 import { DiscordApplicationConfigError, parseDiscordApplicationConfig } from "@/lib/discord-app-config";
+import { completeDiscordAdminInteraction } from "@/lib/discord-admin-interaction-completion";
+import { parseDiscordAdminInteraction, type DiscordAdminInteraction } from "@/lib/discord-admin-interaction-contracts";
+import { waitForDiscordAdminPreparation } from "@/lib/discord-admin-interaction-deadline";
+import {
+  prepareDiscordAdminInteraction,
+  type PreparedDiscordAdminInteraction
+} from "@/lib/discord-admin-interaction-ack";
+import {
+  buildDiscordDeferredPrivateResponse,
+  buildDiscordDeferredPublicResponse
+} from "@/lib/discord-admin-interaction-responses";
 import {
   acknowledgeDiscordReservationInteraction,
   authorizeDiscordInteractionModal,
@@ -37,6 +48,10 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (decoded.kind === "malformed") {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const adminInteraction = parseDiscordAdminInteraction(decoded.value, config.botToken);
+  if (adminInteraction.kind !== "invalid") {
+    return respondToAdminInteraction(request, config, adminInteraction);
+  }
   const interaction = parseDiscordReservationInteraction(decoded.value);
 
   switch (interaction.kind) {
@@ -64,6 +79,79 @@ export async function POST(request: Request): Promise<NextResponse> {
       return genericInteractionError(400);
     default:
       return assertNever(interaction);
+  }
+}
+
+async function respondToAdminInteraction(
+  request: Request,
+  config: NonNullable<ReturnType<typeof parseDiscordApplicationConfig>>,
+  interaction: Exclude<DiscordAdminInteraction, { readonly kind: "invalid" }>
+): Promise<NextResponse> {
+  const preparation = await waitForDiscordAdminPreparation({
+    prepare: () => prepareDiscordAdminInteraction({
+      config,
+      interaction,
+      ipHash: hashRequestClientIp(request),
+      now: new Date()
+    })
+  });
+  if (preparation.kind === "failed") {
+    reportInteractionFailure("discord_admin_interaction_ack_failed", interaction.interactionId, preparation.error);
+    return genericInteractionError(200);
+  }
+  if (preparation.kind === "timed_out") {
+    after(() => completeLateDiscordAdminPreparation(config, interaction.interactionId, preparation.pending));
+    return genericInteractionError(200);
+  }
+  return respondToPreparedAdminInteraction(config, interaction.interactionId, preparation.prepared);
+}
+
+function respondToPreparedAdminInteraction(
+  config: NonNullable<ReturnType<typeof parseDiscordApplicationConfig>>,
+  interactionId: string,
+  prepared: PreparedDiscordAdminInteraction
+): NextResponse {
+  switch (prepared.kind) {
+    case "rejected":
+      return genericInteractionError(200);
+    case "modal":
+      return NextResponse.json(prepared.response);
+    case "read":
+    case "job":
+    case "board":
+      after(async () => {
+        try {
+          await completeDiscordAdminInteraction({ config, prepared });
+        } catch (error) {
+          reportInteractionFailure("discord_admin_interaction_completion_failed", interactionId, error);
+        }
+      });
+      return NextResponse.json(prepared.kind === "board"
+        ? buildDiscordDeferredPrivateResponse()
+        : buildDiscordDeferredPublicResponse());
+    default:
+      return assertNever(prepared);
+  }
+}
+
+async function completeLateDiscordAdminPreparation(
+  config: NonNullable<ReturnType<typeof parseDiscordApplicationConfig>>,
+  interactionId: string,
+  pending: Promise<
+    | { readonly kind: "failed"; readonly error: unknown }
+    | { readonly kind: "prepared"; readonly prepared: PreparedDiscordAdminInteraction }
+  >
+): Promise<void> {
+  const outcome = await pending;
+  if (outcome.kind === "failed") {
+    reportInteractionFailure("discord_admin_interaction_ack_failed", interactionId, outcome.error);
+    return;
+  }
+  if (outcome.prepared.kind === "rejected" || outcome.prepared.kind === "modal") return;
+  try {
+    await completeDiscordAdminInteraction({ config, prepared: outcome.prepared });
+  } catch (error) {
+    reportInteractionFailure("discord_admin_interaction_completion_failed", interactionId, error);
   }
 }
 
@@ -158,6 +246,14 @@ function parseRawJson(body: Uint8Array):
 
 function genericInteractionError(status: number): NextResponse {
   return NextResponse.json(buildDiscordImmediateEphemeralErrorResponse(), { status });
+}
+
+function reportInteractionFailure(event: string, interactionId: string, error: unknown): void {
+  console.error(JSON.stringify({
+    errorType: error instanceof Error ? error.name : "UnknownError",
+    event,
+    interactionId
+  }));
 }
 
 function assertNever(value: never): never {

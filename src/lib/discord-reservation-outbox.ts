@@ -36,7 +36,7 @@ import {
 const persistedIntentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("accept"), studentNumber: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("admin_cancel"), reason: z.string().min(1), studentNumber: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("no_show"), studentNumber: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("no_show"), reason: z.string().min(1).default("Discord 관리자 노쇼 처리"), studentNumber: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("reject"), reason: z.string().min(1), studentNumber: z.string().min(1) }).strict()
 ]);
 
@@ -130,7 +130,7 @@ function interactionOperationFromClaim(
   switch (parsed.data.kind) {
     case "accept": return { ...base, kind: "accept" };
     case "admin_cancel": return { ...base, kind: "admin_cancel", reason: parsed.data.reason };
-    case "no_show": return { ...base, kind: "no_show" };
+    case "no_show": return { ...base, kind: "no_show", reason: parsed.data.reason };
     case "reject": return { ...base, kind: "reject", reason: parsed.data.reason };
   }
 }

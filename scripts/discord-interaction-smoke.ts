@@ -38,6 +38,8 @@ const discordUserId = "723456789012345678";
 const messageId = "523456789012345678";
 const reservationId = "route-fixture";
 const botToken = "local-fixture-token";
+const adminCommandInteractionId = "823456789012345678";
+const adminCommandToken = "admin-command-token";
 
 async function main(): Promise<void> { // no-excuse-ok: catch
   const input = parseArguments(process.argv.slice(2));
@@ -76,10 +78,13 @@ async function runSignedRouteScenario(
   const tampered = await sendSigned(port, privateKey, { application_id: applicationId, type: 1 }, true);
   const deferredComponent = await sendSigned(port, privateKey, actionPayload(3, mode));
   const deferredModal = await sendSigned(port, privateKey, actionPayload(5));
+  const adminStatus = mode === "full" ? await sendSigned(port, privateKey, adminStatusPayload()) : null;
   assertHttp("signed PING", ping, 200, 1);
   assertHttp("tampered PING", tampered, 401);
   assertHttp("deferred component", deferredComponent, mode === "full" ? 200 : 400, mode === "full" ? 5 : 4);
   assertHttp("modal submit", deferredModal, 400, 4);
+  if (adminStatus !== null) assertHttp("admin status command", adminStatus, 200, 5);
+  const adminCommand = mode === "full" ? await assertAdminStatusLifecycle(fakeDiscord) : "route-only";
   const lifecycle = mode === "full" ? await assertFullLifecycle(databaseUrl, fakeDiscord, port) : "route-only";
   const fenceStress = mode === "full" ? await assertFenceStress(databaseUrl, fakeDiscord) : "route-only";
   return {
@@ -87,9 +92,33 @@ async function runSignedRouteScenario(
     modalSubmit: `${deferredModal.status}/type=${responseType(deferredModal.body)}`,
     ping: `${ping.status}/type=${responseType(ping.body)}`,
     tampered: `${tampered.status}`,
+    adminCommand,
     fenceStress,
     lifecycle
   } as const;
+}
+
+function adminStatusPayload() {
+  return {
+    application_id: applicationId,
+    channel_id: channelId,
+    data: { name: "정보실", options: [{ name: "현황", options: [], type: 1 }] },
+    guild_id: guildId,
+    id: adminCommandInteractionId,
+    member: { roles: [adminRoleId], user: { id: discordUserId } },
+    token: adminCommandToken,
+    type: 2
+  } as const;
+}
+
+async function assertAdminStatusLifecycle(fakeDiscord: FakeDiscord | null): Promise<string> {
+  if (fakeDiscord === null) throw new TypeError("Admin command lifecycle requires fake Discord.");
+  const expectedPath = `PATCH /api/v10/webhooks/${applicationId}/${adminCommandToken}/messages/%40original`;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (fakeDiscord.requests.includes(expectedPath)) return "signed-command/admin-map/public-defer/original-PATCH";
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new TypeError(`Admin status command did not settle: ${JSON.stringify(fakeDiscord.requests)}`);
 }
 
 function actionPayload(type: 3 | 5, mode: SmokeMode = "route") {

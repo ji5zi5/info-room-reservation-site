@@ -19,9 +19,9 @@ const ids = {
 
 export function createDiscordSetupFixture(mode: DiscordSetupFixtureMode): DiscordSetupFixture {
   const categoryOverwrites = [
-    { allow: "0", deny: "84992", id: ids.guild, type: 0 as const },
+    { allow: "0", deny: "93184", id: ids.guild, type: 0 as const },
     { allow: "1024", deny: "0", id: ids.adminRole, type: 0 as const },
-    { allow: "84992", deny: "0", id: ids.botRole, type: 0 as const }
+    { allow: "93184", deny: "0", id: ids.botRole, type: 0 as const }
   ];
   const channelOverwrites = mode === "leaked-role"
     ? [...categoryOverwrites, { allow: "1024", deny: "0", id: ids.outsiderRole, type: 0 as const }]
@@ -55,6 +55,7 @@ export function createDiscordSetupFixture(mode: DiscordSetupFixtureMode): Discor
     ],
     guild: { id: ids.guild, ownerId: ids.owner },
     mappedAdminUserIds: [ids.admin],
+    registeredCommandNames: ["정보실"],
     roles: [
       { id: ids.guild, name: "@everyone", permissions: "1024" },
       { id: ids.adminRole, name: "operations", permissions: "0" },

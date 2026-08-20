@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { activateApplicationContract } from "@/lib/application-contract-activation";
 import { createClosedPeriodNotificationService } from "@/lib/closed-period-notification-service";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { parseDiscordApplicationConfig } from "@/lib/discord-app-config";
+import { runDiscordAdminCommandCronWorker } from "@/lib/discord-admin-interaction-completion";
 import { sendDiscordWebhook } from "@/lib/discord-notifications";
 import {
   runDiscordInteractionCronWorker,
@@ -37,11 +39,18 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
   const now = new Date();
   const jobNames = [
+    "DISCORD_ADMIN_CONSOLE",
     "DISCORD_INTERACTIONS",
     "DISCORD_RESERVATION_OUTBOX",
     "CLOSED_PERIOD_NOTIFICATIONS"
   ] as const;
   const settledRuns = await Promise.allSettled([
+    runOperationalJob({
+      job: "DISCORD_ADMIN_CONSOLE",
+      now,
+      operation: () => runDiscordAdminConsole(now),
+      store: prismaOperationalJobStore
+    }),
     runOperationalJob({
       job: "DISCORD_INTERACTIONS",
       now,
@@ -172,5 +181,21 @@ async function runClosedPeriodNotifications(now: Date): Promise<CronJobOperation
     oldestBacklogAt: backlog.oldestAt,
     result: summary,
     value: summary
+  };
+}
+
+async function runDiscordAdminConsole(now: Date): Promise<CronJobOperationResult> {
+  const config = parseDiscordApplicationConfig(process.env);
+  if (config === null) {
+    const disabled = { kind: "disabled" as const };
+    return { backlogCount: 0, kind: "succeeded", oldestBacklogAt: null, result: disabled, value: disabled };
+  }
+  const result = await runDiscordAdminCommandCronWorker({ config, now });
+  return {
+    backlogCount: result.commands.retried + result.commands.abandoned + result.deliveries.failed,
+    kind: "succeeded",
+    oldestBacklogAt: null,
+    result,
+    value: result
   };
 }

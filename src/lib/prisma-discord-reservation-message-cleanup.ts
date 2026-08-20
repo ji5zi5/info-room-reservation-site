@@ -6,6 +6,14 @@ import { withDiscordReservationMessageSystemContext } from "./prisma-discord-res
 export const DISCORD_CLEANUP_BATCH_SIZE = 100;
 
 type DiscordInteractionJobCleanupTransaction = {
+  readonly discordAdminCommandJob?: {
+    readonly deleteMany: (
+      input: Prisma.DiscordAdminCommandJobDeleteManyArgs
+    ) => PromiseLike<Prisma.BatchPayload>;
+    readonly findMany: (
+      input: Prisma.DiscordAdminCommandJobFindManyArgs
+    ) => PromiseLike<readonly { readonly id: string }[]>;
+  };
   readonly discordInteractionJob: {
     readonly deleteMany: (
       input: Prisma.DiscordInteractionJobDeleteManyArgs
@@ -93,10 +101,36 @@ async function deleteExpiredInteractionJobsInTransaction(
     where: terminalExpired
   });
   const ids = candidates.slice(0, DISCORD_CLEANUP_BATCH_SIZE).map((row) => row.interactionId);
-  const processedCount = ids.length === 0 ? 0 : (
+  const interactionProcessedCount = ids.length === 0 ? 0 : (
     await transaction.discordInteractionJob.deleteMany({
       where: { ...terminalExpired, interactionId: { in: ids } }
     })
   ).count;
-  return cleanupResult(candidates.length, processedCount);
+  if (transaction.discordAdminCommandJob === undefined) {
+    return cleanupResult(candidates.length, interactionProcessedCount);
+  }
+  const adminTerminalExpired = {
+    expiresAt: { lte: now },
+    OR: [
+      { status: { in: ["SUCCEEDED", "STALE", "ABANDONED"] } },
+      { handshakeStatus: { in: ["AWAITING_REASON", "STAGED"] } }
+    ]
+  } satisfies Prisma.DiscordAdminCommandJobWhereInput;
+  const adminCandidates = await transaction.discordAdminCommandJob.findMany({
+    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+    select: { id: true },
+    take: DISCORD_CLEANUP_BATCH_SIZE + 1,
+    where: adminTerminalExpired
+  });
+  const adminIds = adminCandidates.slice(0, DISCORD_CLEANUP_BATCH_SIZE).map((row) => row.id);
+  const adminProcessedCount = adminIds.length === 0 ? 0 : (
+    await transaction.discordAdminCommandJob.deleteMany({
+      where: { ...adminTerminalExpired, id: { in: adminIds } }
+    })
+  ).count;
+  return {
+    hasMore: candidates.length > DISCORD_CLEANUP_BATCH_SIZE || adminCandidates.length > DISCORD_CLEANUP_BATCH_SIZE,
+    processedCount: interactionProcessedCount + adminProcessedCount,
+    remainingLowerBound: candidates.length > DISCORD_CLEANUP_BATCH_SIZE || adminCandidates.length > DISCORD_CLEANUP_BATCH_SIZE ? 1 : 0
+  };
 }

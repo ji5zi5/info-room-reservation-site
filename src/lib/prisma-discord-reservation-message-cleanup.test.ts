@@ -81,4 +81,31 @@ describe("Prisma Discord reservation message cleanup", () => {
       }
     });
   });
+
+  it("also deletes expired terminal administrator command jobs", async () => {
+    const transaction = {
+      discordAdminCommandJob: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([{ id: "admin-job-1" }])
+      },
+      discordInteractionJob: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findMany: vi.fn().mockResolvedValue([])
+      }
+    };
+
+    const result = await deleteExpiredInteractionJobs(repositoryNow, transaction);
+
+    expect(result).toEqual({ hasMore: false, processedCount: 1, remainingLowerBound: 0 });
+    expect(transaction.discordAdminCommandJob.deleteMany).toHaveBeenCalledWith({
+      where: {
+        expiresAt: { lte: repositoryNow },
+        id: { in: ["admin-job-1"] },
+        OR: [
+          { status: { in: ["SUCCEEDED", "STALE", "ABANDONED"] } },
+          { handshakeStatus: { in: ["AWAITING_REASON", "STAGED"] } }
+        ]
+      }
+    });
+  });
 });

@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "smoke:external": "tsx scripts/external-smoke.ts",
     "discord:verify-setup": "npx tsx scripts/verify-discord-setup.ts",
+    "discord:register-commands": "npx tsx scripts/register-discord-commands.ts",
     "discord:disable-pending": "npx tsx scripts/disable-discord-pending.ts",
     "discord:fixture": "npx tsx scripts/discord-interaction-fixture.ts",
     "discord:smoke": "npx prisma generate && npx tsx scripts/discord-interaction-smoke.ts",

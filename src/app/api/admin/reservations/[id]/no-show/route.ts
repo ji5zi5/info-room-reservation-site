@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { markAdministratorReservationNoShow } from "@/lib/admin-no-show-operations";
+import { scheduleDiscordOperationsBoardSync } from "@/lib/discord-operations-board-after-mutation";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { messageForCsrfError, validateRequestCsrf } from "@/lib/request-csrf";
 import { readJsonRequest } from "@/lib/request-json";
@@ -59,6 +60,7 @@ export async function POST(request: Request, context: { readonly params: Promise
       case "conflict":
         return jsonNoShowConflict("conflict", "다른 요청이 예약을 먼저 처리했습니다.");
       case "ok":
+        scheduleDiscordOperationsBoardSync();
         return NextResponse.json({
           cancelledFutureReservationCount: result.cancelledFutureReservationCount,
           reservation: result.reservation,

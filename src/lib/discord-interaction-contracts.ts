@@ -90,7 +90,7 @@ export type DiscordReservationInteraction =
   | {
       readonly applicationId: string;
       readonly channelId: string;
-      readonly command: DiscordReservationVerifiedCustomId & { readonly kind: "admin_cancel" | "reject"; readonly reason: string };
+      readonly command: DiscordReservationVerifiedCustomId & { readonly kind: "admin_cancel" | "no_show" | "reject"; readonly reason: string };
       readonly discordUserId: string;
       readonly guildId: string;
       readonly interactionId: string;
@@ -122,10 +122,10 @@ export function parseDiscordReservationInteraction(
   if (command === null || reason === null) return { kind: "invalid" };
   switch (command.kind) {
     case "admin_cancel":
+    case "no_show":
     case "reject":
       return { ...actionFields(modal.data), command: { ...command, kind: command.kind, reason }, kind: "modal_submit" };
     case "accept":
-    case "no_show":
       return { kind: "invalid" };
     default:
       return assertNever(command.kind);

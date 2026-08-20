@@ -4,6 +4,7 @@ import { z } from "zod";
 import { buildNotificationSettingsPatchAdminAction } from "@/lib/admin-operation-audit";
 import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { prisma } from "@/lib/db";
+import { scheduleDiscordOperationsBoardSync } from "@/lib/discord-operations-board-after-mutation";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { isNoDatabaseMockMode } from "@/lib/mock-dev-mode";
 import { getMockNotificationSettings, updateMockNotificationSettings } from "@/lib/mock-notification-settings";
@@ -115,6 +116,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       }
     });
 
+    scheduleDiscordOperationsBoardSync();
     return NextResponse.json({ notificationSettings });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError || error instanceof ForbiddenSessionError) {

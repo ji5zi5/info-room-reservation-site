@@ -6,6 +6,7 @@ import { z } from "zod";
 import { isReservableDate } from "@/lib/advance-reservation-policy";
 import { databaseActorFromSessionUser, TransactionRetryExhaustedError } from "@/lib/db-context";
 import { runDiscordReservationOutbox } from "@/lib/discord-reservation-outbox";
+import { syncDiscordOperationsBoardAfterMutation } from "@/lib/discord-operations-board-after-mutation";
 import { reserveStudyPeriod } from "@/lib/reservation-service";
 import { createPrismaReservationStoreForActor } from "@/lib/prisma-reservation-store";
 import {
@@ -89,6 +90,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         } catch (error) {
           reportReservationOutboxFailure(result.reservation.id, error);
         }
+        await syncDiscordOperationsBoardAfterMutation();
       });
     }
 

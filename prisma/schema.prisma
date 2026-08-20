@@ -355,3 +355,61 @@ model AuditLog {
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
 }
+
+model DiscordAdminCommandJob {
+  id                          String    @id @default(cuid())
+  sourceInteractionId         String    @unique
+  executionInteractionId      String?   @unique
+  sourceApplicationId         String
+  sourceGuildId               String
+  sourceChannelId             String
+  discordActorId              String
+  localActorId                String
+  draftIntent                 String
+  reason                      String?
+  commandDigest               String?
+  ipHash                      String
+  handshakeStatus             String    @default("AWAITING_REASON")
+  status                      String    @default("DRAFT")
+  attempts                    Int       @default(0)
+  nextAttemptAt               DateTime?
+  claimId                     String?
+  claimedAt                   DateTime?
+  terminalResult              Json?
+  errorCode                   String?
+  lastError                   String?
+  resultDeliveryStatus        String    @default("NOT_READY")
+  resultDeliveryAttempts      Int       @default(0)
+  resultDeliveryNextAttemptAt DateTime?
+  resultDeliveryClaimId       String?
+  resultDeliveryClaimedAt     DateTime?
+  resultMessageId             String?
+  expiresAt                   DateTime  @default(dbgenerated("(CURRENT_TIMESTAMP + interval '30 days')"))
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([resultDeliveryStatus, resultDeliveryNextAttemptAt])
+  @@index([expiresAt])
+}
+
+model DiscordOperationsBoard {
+  id            String    @id @default("discord-operations-board")
+  guildId       String?
+  channelId     String?
+  messageId     String?   @unique
+  renderedDate  String?
+  revision      Int       @default(0)
+  stateDigest   String?
+  syncStatus    String    @default("PENDING")
+  syncAttempts  Int       @default(0)
+  nextAttemptAt DateTime? @default(now())
+  claimId       String?
+  claimedAt     DateTime?
+  lastError     String?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([syncStatus, nextAttemptAt])
+}

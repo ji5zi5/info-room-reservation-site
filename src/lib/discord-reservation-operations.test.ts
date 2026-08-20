@@ -323,7 +323,11 @@ describe("Discord reservation decisions", () => {
 
     // Then
     expect(result).toEqual({ kind: "no_show", reservationId: "reservation-1" });
-    expect(mocks.noShow).toHaveBeenCalledWith(transaction, expect.objectContaining({ ipHash, now }));
+    expect(mocks.noShow).toHaveBeenCalledWith(transaction, expect.objectContaining({
+      ipHash,
+      now,
+      reason: "운영 처리"
+    }));
   });
 
   it("does not mutate when the rendered control epoch differs from current control", async () => {
@@ -553,9 +557,7 @@ function lifecycleCommand(kind: "admin_cancel" | "no_show") {
     sourceMessageId: "message-1",
     studentNumber: "test-admin-1"
   } as const;
-  return kind === "admin_cancel"
-    ? { ...base, kind, reason: "운영 처리" } as const
-    : { ...base, kind } as const;
+  return { ...base, kind, reason: "운영 처리" } as const;
 }
 
 function operationCommand(
@@ -569,6 +571,6 @@ function operationCommand(
     case "admin_cancel":
       return { ...base, kind, reason: "운영 처리" } as const;
     case "no_show":
-      return { ...base, kind } as const;
+      return { ...base, kind, reason: "운영 처리" } as const;
   }
 }

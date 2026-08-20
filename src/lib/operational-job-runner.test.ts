@@ -55,6 +55,7 @@ describe("operational job runner", () => {
   it("records expected and unexpected failures without persisting error text", async () => {
     const expectedStore = memoryStore();
     const unexpectedStore = memoryStore();
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await expect(
       runOperationalJob({
@@ -78,7 +79,7 @@ describe("operational job runner", () => {
         job: "MAINTENANCE",
         now: startedAt,
         operation: async () => {
-          throw new Error("contains-sensitive-runtime-detail");
+          throw Object.assign(new Error("contains-sensitive-runtime-detail"), { code: "P2022" });
         },
         store: unexpectedStore
       })
@@ -87,6 +88,13 @@ describe("operational job runner", () => {
     expect(expectedStore.current).toMatchObject({ consecutiveFailures: 1, status: "FAILED" });
     expect(unexpectedStore.current?.result).toBe('{"status":"unexpected_error"}');
     expect(unexpectedStore.current?.result).not.toContain("contains-sensitive-runtime-detail");
+    expect(JSON.parse(String(errorLog.mock.calls[0]?.[0]))).toEqual({
+      errorCode: "P2022",
+      errorType: "Error",
+      event: "operational_job_unexpected_failure",
+      job: "MAINTENANCE"
+    });
+    expect(String(errorLog.mock.calls[0]?.[0])).not.toContain("contains-sensitive-runtime-detail");
   });
 
   it("records maintenance backlog as a failed run with its nonzero lower bound", async () => {

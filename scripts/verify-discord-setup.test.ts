@@ -30,6 +30,14 @@ function replaceMember(
 }
 
 describe("verifyDiscordSetup", () => {
+  it("rejects setup when the information-room guild command is missing", () => {
+    const snapshot = { ...createDiscordSetupFixture("private"), registeredCommandNames: [] };
+
+    const result = verifyDiscordSetup(snapshot);
+
+    expect(result.issues).toContainEqual({ code: "command_missing", commandName: "정보실" });
+  });
+
   it("accepts the private fixture with inherited category deny and operations allows", () => {
     // Given
     const snapshot = createDiscordSetupFixture("private");

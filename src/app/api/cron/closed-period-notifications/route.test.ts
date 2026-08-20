@@ -110,15 +110,24 @@ describe("closed-period notification cron", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it.each([
-    [false, false, false],
-    [true, false, false],
-    [false, true, false],
-    [false, false, true],
-    [true, true, false],
-    [true, false, true],
-    [false, true, true],
-    [true, true, true]
-  ] as const)("settles all siblings when failures are %s/%s/%s", async (interactions, outbox, closed) => {
+    [false, false, false, false],
+    [true, false, false, false],
+    [false, true, false, false],
+    [false, false, true, false],
+    [false, false, false, true],
+    [true, true, false, false],
+    [true, false, true, false],
+    [true, false, false, true],
+    [false, true, true, false],
+    [false, true, false, true],
+    [false, false, true, true],
+    [true, true, true, false],
+    [true, true, false, true],
+    [true, false, true, true],
+    [false, true, true, true],
+    [true, true, true, true]
+  ] as const)("settles all siblings when failures are %s/%s/%s/%s", async (admin, interactions, outbox, closed) => {
+    if (admin) routeMocks.outcomes.set("DISCORD_ADMIN_CONSOLE", "rejected");
     if (interactions) routeMocks.outcomes.set("DISCORD_INTERACTIONS", "rejected");
     if (outbox) routeMocks.outcomes.set("DISCORD_RESERVATION_OUTBOX", "rejected");
     if (closed) routeMocks.outcomes.set("CLOSED_PERIOD_NOTIFICATIONS", "rejected");
@@ -127,13 +136,14 @@ describe("closed-period notification cron", () => {
     const body = await response.json();
 
     expect(routeMocks.runOperationalJob.mock.calls.map(([input]) => input.job)).toEqual([
+      "DISCORD_ADMIN_CONSOLE",
       "DISCORD_INTERACTIONS",
       "DISCORD_RESERVATION_OUTBOX",
       "CLOSED_PERIOD_NOTIFICATIONS"
     ]);
-    expect(response.status).toBe(interactions || outbox || closed ? 502 : 200);
+    expect(response.status).toBe(admin || interactions || outbox || closed ? 502 : 200);
     expect(body).toEqual({
-      activation: interactions || outbox || closed
+      activation: admin || interactions || outbox || closed
         ? { kind: "deferred", reason: "sibling_job_failed" }
         : {
             deploymentSha: "a".repeat(40),
@@ -142,12 +152,13 @@ describe("closed-period notification cron", () => {
           },
       jobs: {
         CLOSED_PERIOD_NOTIFICATIONS: expect.objectContaining({ kind: closed ? "failed" : "succeeded" }),
+        DISCORD_ADMIN_CONSOLE: expect.objectContaining({ kind: admin ? "failed" : "succeeded" }),
         DISCORD_INTERACTIONS: expect.objectContaining({ kind: interactions ? "failed" : "succeeded" }),
         DISCORD_RESERVATION_OUTBOX: expect.objectContaining({ kind: outbox ? "failed" : "succeeded" })
       },
-      ok: !(interactions || outbox || closed)
+      ok: !(admin || interactions || outbox || closed)
     });
-    expect(routeMocks.activateApplicationContract).toHaveBeenCalledTimes(interactions || outbox || closed ? 0 : 1);
+    expect(routeMocks.activateApplicationContract).toHaveBeenCalledTimes(admin || interactions || outbox || closed ? 0 : 1);
   });
 
   it("records disabled closed-list work without skipping Discord workers", async () => {
@@ -204,8 +215,8 @@ describe("closed-period notification cron", () => {
     expect(routeMocks.runOperationalJob).not.toHaveBeenCalled();
   });
 
-  it("invokes FIRST_CRON activation only after all three sibling jobs settle", async () => {
-    // Given: one sibling remains pending while the other two settle.
+  it("invokes FIRST_CRON activation only after all four sibling jobs settle", async () => {
+    // Given: one sibling remains pending while the other three settle.
     let finishInteraction: (() => void) | undefined;
     routeMocks.runDiscordInteractionCronWorker.mockImplementation(() => new Promise((resolve) => {
       finishInteraction = () => resolve({
@@ -216,7 +227,7 @@ describe("closed-period notification cron", () => {
 
     // When: the cron starts but its interaction worker has not settled.
     const responsePromise = GET(cronRequest());
-    await vi.waitFor(() => expect(routeMocks.runOperationalJob).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(routeMocks.runOperationalJob).toHaveBeenCalledTimes(4));
 
     // Then: activation waits for the final sibling, then uses the shared FIRST_CRON source.
     expect(routeMocks.activateApplicationContract).not.toHaveBeenCalled();

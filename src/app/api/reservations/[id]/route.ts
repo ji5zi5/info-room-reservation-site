@@ -9,6 +9,7 @@ import {
   withDatabaseMutation
 } from "@/lib/db-context";
 import { prisma } from "@/lib/db";
+import { scheduleDiscordOperationsBoardSync } from "@/lib/discord-operations-board-after-mutation";
 import {
   jsonError,
   jsonMutatingRequestSafetyError,
@@ -112,6 +113,7 @@ export async function DELETE(request: Request, context: { readonly params: Promi
     if (result.kind === "not_cancellable") {
       return jsonError(409, "bad_request", "이미 처리된 예약은 취소할 수 없습니다.");
     }
+    scheduleDiscordOperationsBoardSync();
     return NextResponse.json({ reservation: result.reservation });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {

@@ -2,13 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   OPERATIONAL_JOB_POLICIES,
+  OPERATIONAL_JOB_NAMES,
   evaluateOperationalJobReadiness,
+  isOperationalJobName,
   type OperationalJobState
 } from "./operational-jobs";
 
 const now = new Date("2026-06-12T07:25:00.000Z");
 
 describe("operational job readiness", () => {
+  it("uses one complete job-name registry for persistence parsing", () => {
+    expect(OPERATIONAL_JOB_NAMES).toEqual(Object.keys(OPERATIONAL_JOB_POLICIES));
+    expect(OPERATIONAL_JOB_NAMES.every(isOperationalJobName)).toBe(true);
+    expect(isOperationalJobName("UNKNOWN_JOB")).toBe(false);
+  });
+
   it("schedules both Discord workers every minute", () => {
     expect(OPERATIONAL_JOB_POLICIES.DISCORD_INTERACTIONS).toEqual({
       intervalMs: 60_000,

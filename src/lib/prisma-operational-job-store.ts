@@ -1,78 +1,88 @@
-import type { OperationalJob } from "@prisma/client";
+import type { OperationalJob, Prisma } from "@prisma/client";
 
 import { prisma } from "./db";
-import { systemDatabaseActor, withDatabaseContext, withDatabaseMutation } from "./db-context";
-import type { OperationalJobName, OperationalJobStatus } from "./operational-jobs";
+import {
+  acquireDatabaseMutationLocks,
+  PRISMA_LOCKED_MUTATION_TRANSACTION_OPTIONS,
+  systemDatabaseActor,
+  withDatabaseContext
+} from "./db-context";
+import { isOperationalJobName, type OperationalJobName, type OperationalJobStatus } from "./operational-jobs";
 import type { OperationalJobRecord, OperationalJobStore } from "./operational-job-runner";
 
 export const prismaOperationalJobStore: OperationalJobStore = {
   async finish(input) {
-    return withDatabaseMutation({
-      actor: systemDatabaseActor(),
-      client: prisma,
-      lockKeys: [`job:${input.job}`],
-      operation: async (transaction) => {
-        const update = await transaction.operationalJob.updateMany({
-          data: {
-            backlogCount: input.backlogCount,
-            consecutiveFailures: input.succeeded ? 0 : { increment: 1 },
-            durationMs: input.durationMs,
-            failureCode: input.failureCode,
-            finishedAt: input.finishedAt,
-            ...(input.succeeded ? { lastSuccessAt: input.finishedAt } : {}),
-            oldestBacklogAt: input.oldestBacklogAt,
-            result: input.result,
-            status: input.succeeded ? "SUCCEEDED" : "FAILED"
-          },
-          where: { job: input.job, startedAt: input.startedAt, status: "RUNNING" }
-        });
-        if (update.count !== 1) {
-          throw new OperationalJobClaimLostError(input.job);
-        }
-        const record = await transaction.operationalJob.findUnique({ where: { job: input.job } });
-        if (!record) {
-          throw new OperationalJobClaimLostError(input.job);
-        }
-        return toOperationalJobRecord(record);
+    return withOperationalJobMutation(input.job, async (transaction) => {
+      const update = await transaction.operationalJob.updateMany({
+        data: {
+          backlogCount: input.backlogCount,
+          consecutiveFailures: input.succeeded ? 0 : { increment: 1 },
+          durationMs: input.durationMs,
+          failureCode: input.failureCode,
+          finishedAt: input.finishedAt,
+          ...(input.succeeded ? { lastSuccessAt: input.finishedAt } : {}),
+          oldestBacklogAt: input.oldestBacklogAt,
+          result: input.result,
+          status: input.succeeded ? "SUCCEEDED" : "FAILED"
+        },
+        where: { job: input.job, startedAt: input.startedAt, status: "RUNNING" }
+      });
+      if (update.count !== 1) {
+        throw new OperationalJobClaimLostError(input.job);
       }
+      const record = await transaction.operationalJob.findUnique({ where: { job: input.job } });
+      if (!record) {
+        throw new OperationalJobClaimLostError(input.job);
+      }
+      return toOperationalJobRecord(record);
     });
   },
 
   async tryStart(input) {
-    return withDatabaseMutation({
-      actor: systemDatabaseActor(),
-      client: prisma,
-      lockKeys: [`job:${input.job}`],
-      operation: async (transaction) => {
-        const existing = await transaction.operationalJob.findUnique({ where: { job: input.job } });
-        const runningCutoff = new Date(input.startedAt.getTime() - input.timeoutMs);
-        if (existing?.status === "RUNNING" && existing.startedAt > runningCutoff) {
-          return null;
-        }
-        const record = await transaction.operationalJob.upsert({
-          create: {
-            job: input.job,
-            lastAttemptAt: input.startedAt,
-            startedAt: input.startedAt,
-            status: "RUNNING"
-          },
-          update: {
-            ...(existing?.status === "RUNNING" ? { consecutiveFailures: { increment: 1 } } : {}),
-            durationMs: null,
-            failureCode: null,
-            finishedAt: null,
-            lastAttemptAt: input.startedAt,
-            result: null,
-            startedAt: input.startedAt,
-            status: "RUNNING"
-          },
-          where: { job: input.job }
-        });
-        return toOperationalJobRecord(record);
+    return withOperationalJobMutation(input.job, async (transaction) => {
+      const existing = await transaction.operationalJob.findUnique({ where: { job: input.job } });
+      const runningCutoff = new Date(input.startedAt.getTime() - input.timeoutMs);
+      if (existing?.status === "RUNNING" && existing.startedAt > runningCutoff) {
+        return null;
       }
+      const record = await transaction.operationalJob.upsert({
+        create: {
+          job: input.job,
+          lastAttemptAt: input.startedAt,
+          startedAt: input.startedAt,
+          status: "RUNNING"
+        },
+        update: {
+          ...(existing?.status === "RUNNING" ? { consecutiveFailures: { increment: 1 } } : {}),
+          durationMs: null,
+          failureCode: null,
+          finishedAt: null,
+          lastAttemptAt: input.startedAt,
+          result: null,
+          startedAt: input.startedAt,
+          status: "RUNNING"
+        },
+        where: { job: input.job }
+      });
+      return toOperationalJobRecord(record);
     });
   }
 };
+
+function withOperationalJobMutation<TResult>(
+  job: OperationalJobName,
+  operation: (transaction: Prisma.TransactionClient) => Promise<TResult>
+): Promise<TResult> {
+  return withDatabaseContext({
+    actor: systemDatabaseActor(),
+    client: prisma,
+    operation: async (transaction) => {
+      await acquireDatabaseMutationLocks(transaction, [`job:${job}`]);
+      return operation(transaction);
+    },
+    options: PRISMA_LOCKED_MUTATION_TRANSACTION_OPTIONS
+  });
+}
 
 export async function getPrismaOperationalJobs(): Promise<readonly OperationalJobRecord[]> {
   const records = await withDatabaseContext({
@@ -101,12 +111,7 @@ function toOperationalJobRecord(record: OperationalJob): OperationalJobRecord {
 }
 
 function parseOperationalJobName(value: string): OperationalJobName {
-  if (
-    value === "CLOSED_PERIOD_NOTIFICATIONS"
-    || value === "DISCORD_INTERACTIONS"
-    || value === "DISCORD_RESERVATION_OUTBOX"
-    || value === "MAINTENANCE"
-  ) {
+  if (isOperationalJobName(value)) {
     return value;
   }
   throw new InvalidOperationalJobRecordError("job", value);

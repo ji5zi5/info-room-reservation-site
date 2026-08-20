@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { cancelAdministratorReservation } from "@/lib/admin-reservation-operations";
+import { scheduleDiscordOperationsBoardSync } from "@/lib/discord-operations-board-after-mutation";
 import {
   isSerializableTransactionConflict,
   TransactionRetryExhaustedError
@@ -76,6 +77,7 @@ export async function POST(request: Request, context: { readonly params: Promise
     if (result.kind === "invalid_status") {
       return jsonError(409, "bad_request", "이미 처리된 예약은 관리자 취소로 변경할 수 없습니다.");
     }
+    scheduleDiscordOperationsBoardSync();
     return NextResponse.json({ reservation: result.reservation });
   } catch (error) {
     if (error instanceof UnauthorizedSessionError) {

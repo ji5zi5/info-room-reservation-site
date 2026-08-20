@@ -1,17 +1,14 @@
-import { createHash } from "node:crypto";
-
-import { z } from "zod";
-
 import type { DiscordApplicationConfig } from "./discord-app-config";
-import { createDiscordBotClient, type DiscordBotDeliveryResult, type DiscordBotMessagePayload } from "./discord-bot";
+import { createDiscordBotClient } from "./discord-bot";
 import { prisma } from "./db";
 import { systemDatabaseActor, withDatabaseContext } from "./db-context";
 import {
   runDiscordInteractionJobs,
-  type DiscordInteractionDispatchResult,
-  type DiscordInteractionJobClaim,
-  type DiscordInteractionJobRunResult
 } from "./discord-interaction-job-runner";
+import { waitForDiscordInteractionDeadline } from "./discord-interaction-deadline";
+import {
+  buildDiscordInteractionStageInput,
+} from "./discord-interaction-job-contract";
 import {
   adaptDiscordReservationOperationCommand,
   type DiscordReservationInteraction
@@ -19,8 +16,11 @@ import {
 import { dispatchDiscordReservationOperation } from "./discord-reservation-outbox-runtime";
 import type { DiscordReservationOperationCommand } from "./discord-reservation-operations";
 import {
+  runExactDiscordReservationInteraction,
+  type DiscordInteractionCompletionDependencies
+} from "./discord-reservation-interaction-completion";
+import {
   activateDiscordInteractionJob,
-  prismaDiscordInteractionJobStore,
   settleDiscordInteractionHandshake,
   stageDiscordInteractionJob,
   type DiscordInteractionActivationResult,
@@ -31,13 +31,6 @@ import {
 
 const ACK_DEADLINE_MS = 1_500;
 const HANDSHAKE_TRANSACTION_OPTIONS = { maxWait: 100, timeout: 800 } as const;
-const persistedIntentSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("accept"), studentNumber: z.string().min(1) }),
-  z.object({ kind: z.literal("admin_cancel"), reason: z.string().min(1).max(200), studentNumber: z.string().min(1) }),
-  z.object({ kind: z.literal("no_show"), studentNumber: z.string().min(1) }),
-  z.object({ kind: z.literal("reject"), reason: z.string().min(1).max(200), studentNumber: z.string().min(1) })
-]);
-
 type ActionInteraction = Extract<DiscordReservationInteraction, { readonly kind: "component" | "modal_submit" }>;
 
 type AuthorizedContext = {
@@ -52,23 +45,10 @@ type AuthorizedContext = {
   readonly databaseNow: Date;
 };
 
-type HandlerDependencies = {
+type HandlerDependencies = DiscordInteractionCompletionDependencies & {
   readonly activate: (input: { readonly commandDigest: string; readonly interactionId: string }) => Promise<DiscordInteractionActivationResult>;
   readonly clockMs: () => number;
-  readonly dispatch: (input: { readonly command: DiscordReservationOperationCommand; readonly ipHash: string; readonly now: Date }) => Promise<DiscordInteractionDispatchResult>;
-  readonly editCompletion: (input: {
-    readonly applicationId: string;
-    readonly botToken: string;
-    readonly interactionToken: string;
-    readonly payload: DiscordBotMessagePayload;
-  }) => Promise<DiscordBotDeliveryResult>;
   readonly loadContext: (input: { readonly messageId: string; readonly studentNumber: string }) => Promise<AuthorizedContext | null>;
-  readonly runJobs: (input: {
-    readonly dispatch: (claim: DiscordInteractionJobClaim) => Promise<DiscordInteractionDispatchResult>;
-    readonly interactionId?: string;
-    readonly now: Date;
-    readonly store: typeof prismaDiscordInteractionJobStore;
-  }) => Promise<DiscordInteractionJobRunResult>;
   readonly stage: (input: DiscordInteractionStageInput) => Promise<DiscordInteractionEnqueueResult>;
   readonly settle: (input: { readonly commandDigest: string; readonly interactionId: string }) => Promise<DiscordInteractionSettlementResult>;
   readonly waitForDeadline: (milliseconds: number, signal: AbortSignal) => Promise<boolean>;
@@ -98,7 +78,7 @@ export function createDiscordInteractionHandler(dependencies: HandlerDependencie
       readonly botToken: string;
       readonly interactionId: string;
       readonly interactionToken: string;
-    }): Promise<void> => runExact(dependencies, input)
+    }): Promise<void> => runExactDiscordReservationInteraction(dependencies, input)
   } as const;
 }
 
@@ -112,7 +92,7 @@ const defaultHandler = createDiscordInteractionHandler({
   runJobs: runDiscordInteractionJobs,
   stage: stageDiscordInteractionJob,
   settle: settleDiscordInteractionHandshake,
-  waitForDeadline
+  waitForDeadline: waitForDiscordInteractionDeadline
 });
 
 export const acknowledgeDiscordReservationInteraction = defaultHandler.acknowledge;
@@ -143,7 +123,7 @@ async function acknowledge(
       const resolved = await resolveCommand(dependencies, input);
       const remainingBeforeStage = ACK_DEADLINE_MS - (dependencies.clockMs() - startedAt);
       if (resolved === null || timedOut || remainingBeforeStage <= 0) return { kind: "rejected" };
-      const staged = stageInput(resolved.command, input.ipHash, new Date(
+      const staged = buildDiscordInteractionStageInput(resolved.command, input.ipHash, new Date(
         resolved.databaseNow.getTime() + remainingBeforeStage
       ));
       stagedIdentity = { commandDigest: staged.commandDigest, interactionId: staged.interactionId };
@@ -217,130 +197,6 @@ async function loadAuthorizedInteractionContext(
   return context;
 }
 
-function stageInput(
-  command: DiscordReservationOperationCommand,
-  ipHash: string,
-  activationDeadline: Date
-): DiscordInteractionStageInput {
-  const intent = serializeIntent(command);
-  const durable = {
-    commandDigest: "",
-    discordActorId: command.discordActorId,
-    interactionId: command.interactionId,
-    intent,
-    ipHash,
-    localActorId: command.localActorId,
-    renderedEpoch: command.renderedControlEpoch,
-    reservationId: command.reservationId,
-    sourceApplicationId: command.sourceApplicationId ?? "",
-    sourceChannelId: command.sourceChannelId,
-    sourceGuildId: command.sourceGuildId,
-    sourceMessageId: command.sourceMessageId
-  };
-  return {
-    ...durable,
-    activationDeadline,
-    commandDigest: commandDigest(durable)
-  };
-}
-
-function serializeIntent(command: DiscordReservationOperationCommand): string {
-  switch (command.kind) {
-    case "accept": return JSON.stringify({ kind: command.kind, studentNumber: command.studentNumber });
-    case "admin_cancel":
-    case "reject": return JSON.stringify({ kind: command.kind, reason: command.reason, studentNumber: command.studentNumber });
-    case "no_show": return JSON.stringify({ kind: command.kind, studentNumber: command.studentNumber });
-    default: return assertNever(command);
-  }
-}
-
-function commandDigest(input: Omit<DiscordInteractionStageInput, "activationDeadline" | "commandDigest"> & { readonly commandDigest: string }): string {
-  const canonical = JSON.stringify({
-    discordActorId: input.discordActorId,
-    interactionId: input.interactionId,
-    intent: input.intent,
-    localActorId: input.localActorId,
-    renderedEpoch: input.renderedEpoch,
-    reservationId: input.reservationId,
-    sourceApplicationId: input.sourceApplicationId,
-    sourceChannelId: input.sourceChannelId,
-    sourceGuildId: input.sourceGuildId,
-    sourceMessageId: input.sourceMessageId
-  });
-  return `sha256:${createHash("sha256").update("discord-interaction-job:v1\0").update(canonical).digest("hex")}`;
-}
-
-async function runExact(
-  dependencies: HandlerDependencies,
-  input: { readonly applicationId: string; readonly botToken: string; readonly interactionId: string; readonly interactionToken: string }
-): Promise<void> {
-  let completion: DiscordInteractionDispatchResult | null = null;
-  const result = await dependencies.runJobs({
-    dispatch: async (claim) => {
-      const operation = operationFromClaim(claim);
-      const outcome = operation === null
-        ? { errorCode: "persisted_command_invalid", errorType: "INTEGRITY", kind: "terminal_failure" } as const
-        : await dependencies.dispatch({ command: operation, ipHash: claim.ipHash, now: new Date() });
-      completion = outcome;
-      return outcome;
-    },
-    interactionId: input.interactionId,
-    now: new Date(),
-    store: prismaDiscordInteractionJobStore
-  });
-  if (result.claimed !== 1) return;
-  await editCompletionBestEffort(dependencies, input, completionPayload(completion));
-}
-
-function operationFromClaim(claim: DiscordInteractionJobClaim): DiscordReservationOperationCommand | null {
-  const parsedJson = parsePersistedJson(claim.intent);
-  const parsed = persistedIntentSchema.safeParse(parsedJson);
-  if (!parsed.success) return null;
-  const base = {
-    discordActorId: claim.discordActorId,
-    interactionId: claim.interactionId,
-    localActorId: claim.localActorId,
-    renderedControlEpoch: claim.renderedEpoch,
-    reservationId: claim.reservationId,
-    sourceApplicationId: claim.sourceApplicationId,
-    sourceChannelId: claim.sourceChannelId,
-    sourceGuildId: claim.sourceGuildId,
-    sourceMessageId: claim.sourceMessageId,
-    studentNumber: parsed.data.studentNumber
-  };
-  const digestInput = {
-    commandDigest: "",
-    discordActorId: claim.discordActorId,
-    interactionId: claim.interactionId,
-    intent: claim.intent,
-    ipHash: claim.ipHash,
-    localActorId: claim.localActorId,
-    renderedEpoch: claim.renderedEpoch,
-    reservationId: claim.reservationId,
-    sourceApplicationId: claim.sourceApplicationId ?? "",
-    sourceChannelId: claim.sourceChannelId,
-    sourceGuildId: claim.sourceGuildId,
-    sourceMessageId: claim.sourceMessageId
-  };
-  if (commandDigest(digestInput) !== claim.commandDigest) return null;
-  switch (parsed.data.kind) {
-    case "accept": return { ...base, kind: "accept" };
-    case "admin_cancel": return { ...base, kind: "admin_cancel", reason: parsed.data.reason };
-    case "no_show": return { ...base, kind: "no_show" };
-    case "reject": return { ...base, kind: "reject", reason: parsed.data.reason };
-    default: return assertNever(parsed.data);
-  }
-}
-
-function parsePersistedJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    if (error instanceof SyntaxError) return null;
-    throw error;
-  }
-}
-
 async function loadAuthorizedContext(input: {
   readonly messageId: string;
   readonly studentNumber: string;
@@ -375,46 +231,6 @@ async function loadAuthorizedContext(input: {
     },
     options: HANDSHAKE_TRANSACTION_OPTIONS
   });
-}
-
-function completionPayload(result: DiscordInteractionDispatchResult | null): DiscordBotMessagePayload {
-  if (result?.kind === "succeeded") return embedPayload(0x57f287, "처리 완료", "요청을 처리했습니다.");
-  if (result?.kind === "stale") return embedPayload(0xfee75c, "처리 결과", "이미 처리되었거나 만료된 요청입니다.");
-  return embedPayload(0xed4245, "처리 실패", "요청을 처리할 수 없습니다.");
-}
-
-async function editCompletionBestEffort(
-  dependencies: HandlerDependencies,
-  input: { readonly applicationId: string; readonly botToken: string; readonly interactionId: string; readonly interactionToken: string },
-  payload: DiscordBotMessagePayload
-): Promise<void> {
-  try {
-    const result = await dependencies.editCompletion({
-      applicationId: input.applicationId,
-      botToken: input.botToken,
-      interactionToken: input.interactionToken,
-      payload
-    });
-    if (result.kind !== "sent") reportDeliveryFailure(input.interactionId, result);
-  } catch (error) {
-    reportBoundaryFailure("discord_interaction_ephemeral_completion_failed", input.interactionId, error);
-  }
-}
-
-function embedPayload(color: number, title: string, description: string): DiscordBotMessagePayload {
-  return { allowed_mentions: { parse: [] }, embeds: [{ color, description, fields: [], title }] };
-}
-
-function waitForDeadline(milliseconds: number, signal: AbortSignal): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (signal.aborted) { resolve(false); return; }
-    const timer = setTimeout(() => resolve(true), milliseconds);
-    signal.addEventListener("abort", () => { clearTimeout(timer); resolve(false); }, { once: true });
-  });
-}
-
-function reportDeliveryFailure(interactionId: string, result: Exclude<DiscordBotDeliveryResult, { readonly kind: "sent" }>): void {
-  console.error(JSON.stringify({ code: result.code, event: "discord_interaction_ephemeral_completion_failed", interactionId, outcome: result.outcome }));
 }
 
 function reportBoundaryFailure(event: string, interactionId: string, error: unknown): void {

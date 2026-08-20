@@ -73,6 +73,8 @@ export function operationalJobLabel(job: OperationalJobName): string {
       return "마감 명단 알림";
     case "DISCORD_INTERACTIONS":
       return "Discord 상호작용";
+    case "DISCORD_ADMIN_CONSOLE":
+      return "Discord 운영 콘솔";
     case "DISCORD_RESERVATION_OUTBOX":
       return "Discord 예약 전송함";
     case "MAINTENANCE":

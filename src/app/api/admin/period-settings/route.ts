@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { toKstDate } from "@/lib/date";
 import { prisma } from "@/lib/db";
+import { scheduleDiscordOperationsBoardSync } from "@/lib/discord-operations-board-after-mutation";
 import { databaseActorFromSessionUser, withDatabaseContext } from "@/lib/db-context";
 import { jsonError, jsonMutatingRequestSafetyError, jsonRateLimitError } from "@/lib/http";
 import { buildPeriodSettingsPatchAdminAction } from "@/lib/admin-operation-audit";
@@ -148,6 +149,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       }
     });
 
+    scheduleDiscordOperationsBoardSync();
     return NextResponse.json({
       periods: await getPeriodSummaries(parsed.data.date, { actor })
     });

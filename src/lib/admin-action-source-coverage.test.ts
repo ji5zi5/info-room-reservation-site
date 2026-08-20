@@ -7,10 +7,14 @@ const directAdminActionRouteFiles = [
   "src/app/api/admin/notification-settings/route.ts",
   "src/app/api/admin/notifications/closed-periods/send/route.ts",
   "src/app/api/admin/period-settings/route.ts",
-  "src/app/api/admin/reservations/admin-create-reservation.ts",
   "src/app/api/admin/users/[id]/restriction/route.ts",
   "src/app/api/admin/users/[id]/sessions/revoke/route.ts"
 ] as const;
+
+const sharedAdminCreateAuditContract = {
+  operationFile: "src/lib/admin-reservation-create-service.ts",
+  routeFile: "src/app/api/admin/reservations/admin-create-reservation.ts"
+} as const;
 
 const sharedAdminCancellationAuditContract = {
   operationFile: "src/lib/admin-reservation-operations.ts",
@@ -41,6 +45,16 @@ describe("admin action source coverage", () => {
       expect(source, `${filePath} should compute hashed request source`).toContain("hashRequestClientIp(request)");
       expect(source, `${filePath} should persist AdminAction.ipHash`).toContain("ipHash");
     }
+  });
+
+  it("passes the hashed web reservation-create source to the shared AdminAction writer", () => {
+    const routeSource = readFileSync(join(process.cwd(), sharedAdminCreateAuditContract.routeFile), "utf8");
+    const operationSource = readFileSync(join(process.cwd(), sharedAdminCreateAuditContract.operationFile), "utf8");
+
+    expect(routeSource).toContain("const ipHash = hashRequestClientIp(request)");
+    expect(routeSource).toContain("ipHash,");
+    expect(operationSource).toContain("adminAction.create");
+    expect(operationSource).toContain("ipHash: input.ipHash");
   });
 
   it("passes the hashed web cancellation source to the shared AdminAction writer", () => {

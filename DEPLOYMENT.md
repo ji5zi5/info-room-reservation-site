@@ -53,8 +53,9 @@ delivery has a definite failure; ambiguous bot delivery is retried with the same
 ## Discord Interactive Operations
 
 Use a dedicated Discord application installed only in the operations guild. In OAuth2 URL
-Generator select the `bot` scope and grant only `View Channel`, `Send Messages`, `Embed
-Links`, and `Read Message History`. Slash-command and Gateway scopes are not needed. Deny
+Generator select the `bot` and `applications.commands` scopes and grant only `View Channel`,
+`Send Messages`, `Embed Links`, `Read Message History`, and `Manage Messages`. The last
+permission is required to pin the operations board. Gateway intents are not needed. Deny
 `View Channel` to `@everyone`, grant it only to the configured operations role and bot, and
 review category plus channel role/member overwrites. The guild owner and roles with the
 unavoidable `Administrator` permission can still view and must be part of the approved
@@ -82,12 +83,14 @@ student-facing APIs, screenshots, or unsecured evidence.
 1. Create the application/bot, private channel, role, and one-to-one administrator map.
 2. Set the complete seven-variable group in the target environment. Keep the webhook set.
 3. Run `npm run predeploy:check`; output must say `discordApplication=enabled`. A missing group member, malformed public key/ID/map, or duplicate map binding must fail.
-4. Run `npm run discord:verify-setup -- --fixture private` for a no-network fixture check, then `npm run discord:verify-setup` with the target environment loaded. The live check reads guild roles, bot membership, channel/category overwrites, and the guild owner. It fails on a leaked role/member viewer, an unapproved effective viewer, partial configuration, missing bot permissions, or API/auth mismatch.
-5. Deploy to staging, configure its Interaction Endpoint URL, and run `npm run discord:smoke -- --mode route --port 3217`. This generates/signs requests locally and never writes to production Discord. Use `--mode full` only with `INTEGRATION_DATABASE_URL` pointing to loopback Postgres and a database name ending `_test`; it refuses every other database.
-6. Confirm signed PING, authorization rejects, modal/deferred responses, source-message completion, and webhook fallback. Promote the already-tested deployment, then repeat setup verification against production.
+4. Run `npm run discord:register-commands` with the target environment loaded. This replaces the guild command set with the Korean `/정보실` command tree, so rerun it whenever the command definition changes.
+5. Run `npm run discord:verify-setup -- --fixture private` for a no-network fixture check, then `npm run discord:verify-setup` with the target environment loaded. The live check reads guild commands, guild roles, bot membership, channel/category overwrites, and the guild owner. It fails on a missing `/정보실` command, leaked role/member viewer, unapproved effective viewer, partial configuration, missing pin/message permissions, or API/auth mismatch.
+6. Deploy to staging, configure its Interaction Endpoint URL, and run `npm run discord:smoke -- --mode route --port 3217`. This generates/signs requests locally and never writes to production Discord. Use `--mode full` only with `INTEGRATION_DATABASE_URL` pointing to loopback Postgres and a database name ending `_test`; it refuses every other database.
+7. Confirm signed PING, authorization rejects, modal/deferred responses, source-message completion, `/정보실` commands, the pinned operations board, and webhook fallback. Promote the already-tested deployment, then repeat setup verification against production.
 
-The one-minute closed-period cron independently recovers pending initial sends and source
-message updates. Monitor interaction 4xx/5xx and latency, bot delivery outcomes, fallback
+The one-minute closed-period cron independently recovers pending initial sends, administrator
+commands, result delivery, the pinned operations board, and source-message updates. Monitor
+interaction 4xx/5xx and latency, bot delivery outcomes, fallback
 count, retry age, claim age, unsynced revisions, and cron execution. Alert before a retry
 reaches its 60-minute cap. Keep the existing webhook operational so webhook-only mode and
 definite-failure fallback remain available.

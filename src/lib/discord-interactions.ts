@@ -50,7 +50,7 @@ export function adaptDiscordReservationOperationCommand(input: {
   };
   switch (input.command.kind) {
     case "accept": return { ...base, kind: "accept" };
-    case "no_show": return { ...base, kind: "no_show" };
+    case "no_show": return input.command.reason === undefined ? null : { ...base, kind: "no_show", reason: input.command.reason };
     case "admin_cancel": return input.command.reason === undefined ? null : { ...base, kind: "admin_cancel", reason: input.command.reason };
     case "reject": return input.command.reason === undefined ? null : { ...base, kind: "reject", reason: input.command.reason };
     default: return assertNever(input.command.kind);

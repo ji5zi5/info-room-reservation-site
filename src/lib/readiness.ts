@@ -86,6 +86,12 @@ export async function getReadinessReport(input: {
       policy: OPERATIONAL_JOB_POLICIES.CLOSED_PERIOD_NOTIFICATIONS,
       state: byJob.get("CLOSED_PERIOD_NOTIFICATIONS") ?? null
     }),
+    DISCORD_ADMIN_CONSOLE: evaluateOperationalJobReadiness({
+      enabled: snapshot.discordOperationsEnabled ?? false,
+      now: input.now,
+      policy: OPERATIONAL_JOB_POLICIES.DISCORD_ADMIN_CONSOLE,
+      state: byJob.get("DISCORD_ADMIN_CONSOLE") ?? null
+    }),
     DISCORD_INTERACTIONS: discordJobReadiness({
       job: "DISCORD_INTERACTIONS",
       now: input.now,
@@ -154,6 +160,7 @@ function unavailableReport(config: SimpleReadinessCheck, database: SimpleReadine
       database,
       jobs: {
         CLOSED_PERIOD_NOTIFICATIONS: NOT_CHECKED_JOB,
+        DISCORD_ADMIN_CONSOLE: NOT_CHECKED_JOB,
         DISCORD_INTERACTIONS: NOT_CHECKED_JOB,
         DISCORD_RESERVATION_OUTBOX: NOT_CHECKED_JOB,
         MAINTENANCE: NOT_CHECKED_JOB

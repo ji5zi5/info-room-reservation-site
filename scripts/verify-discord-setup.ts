@@ -1,21 +1,23 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import ky, { HTTPError } from "ky";
+import { HTTPError } from "ky";
 import { z } from "zod";
 
-import { DiscordApplicationConfigError, parseDiscordApplicationConfig } from "../src/lib/discord-app-config";
+import { DiscordApplicationConfigError } from "../src/lib/discord-app-config";
+import { DiscordSetupCliError, loadLiveDiscordSetupSnapshot } from "./load-live-discord-setup";
 import { createDiscordSetupFixture, type DiscordSetupFixtureMode } from "./verify-discord-setup.fixtures";
 
 export const DISCORD_PERMISSIONS = {
   ADMINISTRATOR: 8n,
   EMBED_LINKS: 16_384n,
+  MANAGE_MESSAGES: 8_192n,
   READ_MESSAGE_HISTORY: 65_536n,
   SEND_MESSAGES: 2_048n,
   VIEW_CHANNEL: 1_024n
 } as const;
 
-const requiredBotPermissions = ["VIEW_CHANNEL", "SEND_MESSAGES", "EMBED_LINKS", "READ_MESSAGE_HISTORY"] as const;
+const requiredBotPermissions = ["VIEW_CHANNEL", "SEND_MESSAGES", "EMBED_LINKS", "READ_MESSAGE_HISTORY", "MANAGE_MESSAGES"] as const;
 const decimalPattern = /^\d+$/u;
 const snowflakePattern = /^[1-9]\d{16,19}$/u;
 
@@ -43,11 +45,13 @@ export type DiscordSetupSnapshot = {
   readonly explicitMembers: readonly DiscordMember[];
   readonly guild: { readonly id: string; readonly ownerId: string };
   readonly mappedAdminUserIds: readonly string[];
+  readonly registeredCommandNames: readonly string[];
   readonly roles: readonly DiscordRole[];
 };
 export type VerificationIssue =
   | { readonly code: "admin_role_cannot_view" | "admin_role_is_everyone" | "admin_role_missing" | "explicit_member_missing" | "leaked_member" | "leaked_role" | "mapped_admin_missing" | "mapped_admin_role_missing" | "malformed_data"; readonly subjectId: string }
-  | { readonly code: "bot_permissions_missing"; readonly missingPermissions: readonly (typeof requiredBotPermissions)[number][] };
+  | { readonly code: "bot_permissions_missing"; readonly missingPermissions: readonly (typeof requiredBotPermissions)[number][] }
+  | { readonly code: "command_missing"; readonly commandName: "정보실" };
 export type VerificationResult = { readonly issues: readonly VerificationIssue[]; readonly ok: boolean };
 
 function has(permissions: bigint, permission: bigint): boolean {
@@ -170,49 +174,10 @@ export function verifyDiscordSetup(snapshot: DiscordSetupSnapshot): Verification
   const missingPermissions = requiredBotPermissions.filter((name) => !has(botPermissions, DISCORD_PERMISSIONS[name]));
   if (snapshot.botMember.user.id !== snapshot.botUserId) issues.push({ code: "malformed_data", subjectId: snapshot.botUserId });
   if (missingPermissions.length > 0) issues.push({ code: "bot_permissions_missing", missingPermissions });
+  if (!snapshot.registeredCommandNames.includes("정보실")) {
+    issues.push({ code: "command_missing", commandName: "정보실" });
+  }
   return { issues, ok: issues.length === 0 };
-}
-
-const PermissionSchema = z.string().regex(decimalPattern);
-const OverwriteSchema = z.object({ allow: PermissionSchema, deny: PermissionSchema, id: z.string().regex(snowflakePattern), type: z.union([z.literal(0), z.literal(1)]) });
-const MemberSchema = z.object({ roles: z.array(z.string().regex(snowflakePattern)), user: z.object({ id: z.string().regex(snowflakePattern) }) })
-  .transform((member): DiscordMember => ({ roles: member.roles, user: member.user }));
-const RoleSchema = z.object({ id: z.string().regex(snowflakePattern), name: z.string(), permissions: PermissionSchema,
-  tags: z.object({ bot_id: z.string().regex(snowflakePattern).optional() }).optional() })
-  .transform((role): DiscordRole => role.tags?.bot_id
-    ? { id: role.id, name: role.name, permissions: role.permissions, tags: { botId: role.tags.bot_id } }
-    : { id: role.id, name: role.name, permissions: role.permissions });
-const ChannelSchema = z.object({ guild_id: z.string().regex(snowflakePattern), id: z.string().regex(snowflakePattern),
-  parent_id: z.string().regex(snowflakePattern).nullable(), permission_overwrites: z.array(OverwriteSchema), type: z.number().int() })
-  .transform((channel): DiscordChannel => ({ guildId: channel.guild_id, id: channel.id, parentId: channel.parent_id,
-    permissionOverwrites: channel.permission_overwrites, type: channel.type }));
-const GuildSchema = z.object({ id: z.string().regex(snowflakePattern), owner_id: z.string().regex(snowflakePattern) });
-
-class DiscordSetupCliError extends Error {}
-
-async function loadLiveSnapshot(): Promise<DiscordSetupSnapshot> {
-  const config = parseDiscordApplicationConfig(process.env);
-  if (config === null) throw new DiscordSetupCliError("Complete Discord application environment is required.");
-  const api = ky.create({ headers: { Authorization: `Bot ${config.botToken}` }, prefixUrl: "https://discord.com/api/v10",
-    retry: { limit: 2, methods: ["get"], statusCodes: [408, 429, 500, 502, 503, 504] }, timeout: 5_000 });
-  const get = async (path: string): Promise<unknown> => api.get(path).json<unknown>();
-  const [guildRaw, rolesRaw, channelRaw] = await Promise.all([
-    get(`guilds/${config.guildId}`), get(`guilds/${config.guildId}/roles`), get(`channels/${config.channelId}`)
-  ]);
-  const guild = GuildSchema.parse(guildRaw);
-  const roles = z.array(RoleSchema).parse(rolesRaw);
-  const channel = ChannelSchema.parse(channelRaw);
-  if (guild.id !== config.guildId || channel.id !== config.channelId) throw new DiscordSetupCliError("Configured Discord guild or channel did not resolve.");
-  const category = channel.parentId === null ? null : ChannelSchema.parse(await get(`channels/${channel.parentId}`));
-  const explicitIds = [...(category?.permissionOverwrites ?? []), ...channel.permissionOverwrites]
-    .filter((entry) => entry.type === 1).map((entry) => entry.id);
-  const memberIds = [...new Set([config.applicationId, ...config.adminUserBindings.map((binding) => binding.discordUserId), ...explicitIds])];
-  const members = await Promise.all(memberIds.map(async (id) => MemberSchema.parse(await get(`guilds/${config.guildId}/members/${id}`))));
-  const botMember = members.find((member) => member.user.id === config.applicationId);
-  if (!botMember) throw new DiscordSetupCliError("Discord bot guild member did not resolve.");
-  return { adminRoleId: config.adminRoleId, botMember, botUserId: config.applicationId, category, channel,
-    explicitMembers: members, guild: { id: guild.id, ownerId: guild.owner_id },
-    mappedAdminUserIds: config.adminUserBindings.map((binding) => binding.discordUserId), roles };
 }
 
 function fixtureMode(args: readonly string[]): DiscordSetupFixtureMode | null {
@@ -230,7 +195,7 @@ function isCliFixtureMode(value: string | undefined): value is Exclude<DiscordSe
 async function runCli(): Promise<void> {
   try {
     const mode = fixtureMode(process.argv.slice(2));
-    const result = verifyDiscordSetup(mode === null ? await loadLiveSnapshot() : createDiscordSetupFixture(mode));
+    const result = verifyDiscordSetup(mode === null ? await loadLiveDiscordSetupSnapshot() : createDiscordSetupFixture(mode));
     if (!result.ok) {
       for (const issue of result.issues) console.error(JSON.stringify(issue));
       process.exitCode = 1;

@@ -15,6 +15,10 @@ const REAL_TERMINAL_WRITERS = [
     markers: ["data: { status: \"NO_SHOW\" }", "data: { status: \"CANCELLED\" }"]
   },
   {
+    file: "src/lib/admin-user-sanction-service.ts",
+    markers: ["data: { status: \"CANCELLED\" }"]
+  },
+  {
     file: "src/app/api/admin/users/[id]/restriction/route.ts",
     markers: ["status: \"CANCELLED\""]
   },

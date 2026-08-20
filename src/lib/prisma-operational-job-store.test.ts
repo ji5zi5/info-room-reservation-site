@@ -37,9 +37,10 @@ vi.mock("./db", () => ({
 }));
 
 vi.mock("./db-context", () => ({
+  acquireDatabaseMutationLocks: vi.fn(),
+  PRISMA_LOCKED_MUTATION_TRANSACTION_OPTIONS: { isolationLevel: "ReadCommitted", maxWait: 5_000, timeout: 10_000 },
   systemDatabaseActor: () => ({ id: null, role: "SYSTEM" }),
-  withDatabaseContext: storeMocks.withDatabaseContext,
-  withDatabaseMutation: vi.fn()
+  withDatabaseContext: storeMocks.withDatabaseContext
 }));
 
 import { getPrismaOperationalJobs } from "./prisma-operational-job-store";

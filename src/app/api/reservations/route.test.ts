@@ -23,6 +23,7 @@ const routeMocks = vi.hoisted(() => ({
   reserveMockStudyPeriod: vi.fn(),
   reserveStudyPeriod: vi.fn<ReserveStudyPeriod>(),
   runDiscordReservationOutbox: vi.fn(),
+  syncDiscordOperationsBoardAfterMutation: vi.fn(),
   validateRequestCsrf: vi.fn<ValidateRequestCsrf>()
 }));
 
@@ -48,6 +49,10 @@ vi.mock("@/lib/mock-reservation-data", () => ({
 
 vi.mock("@/lib/discord-reservation-outbox", () => ({
   runDiscordReservationOutbox: routeMocks.runDiscordReservationOutbox
+}));
+
+vi.mock("@/lib/discord-operations-board-after-mutation", () => ({
+  syncDiscordOperationsBoardAfterMutation: routeMocks.syncDiscordOperationsBoardAfterMutation
 }));
 
 vi.mock("@/lib/request-csrf", () => ({
@@ -119,6 +124,7 @@ describe("reservation create route Discord notification", () => {
     routeMocks.reserveStudyPeriod.mockResolvedValue({ kind: "confirmed", reservation: confirmedReservation });
     routeMocks.reserveMockStudyPeriod.mockReturnValue({ kind: "confirmed", reservation: confirmedReservation });
     routeMocks.runDiscordReservationOutbox.mockResolvedValue({ initial: {}, sync: {} });
+    routeMocks.syncDiscordOperationsBoardAfterMutation.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -143,6 +149,7 @@ describe("reservation create route Discord notification", () => {
       now: expect.any(Date),
       reservationId: confirmedReservation.id
     });
+    expect(routeMocks.syncDiscordOperationsBoardAfterMutation).toHaveBeenCalledOnce();
     expect(errorLog).not.toHaveBeenCalled();
   });
 

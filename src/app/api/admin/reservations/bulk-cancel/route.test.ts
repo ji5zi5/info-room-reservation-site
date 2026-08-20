@@ -12,11 +12,15 @@ const routeMocks = vi.hoisted(() => ({
   enforceAdminMutationRateLimit: vi.fn<(request: Request, userId: string) => Promise<RateLimitResult>>(),
   requireAdminSession: vi.fn<() => Promise<CurrentSession>>(),
   requireMutatingRequestSafety: vi.fn<(request: Request) => null>(),
+  scheduleDiscordOperationsBoardSync: vi.fn(),
   validateRequestCsrf: vi.fn<(request: Request, sessionId: string) => Promise<CsrfValidationResult>>()
 }));
 
 vi.mock("@/lib/admin-bulk-cancellation", () => ({
   bulkCancelAdministratorReservations: routeMocks.bulkCancelAdministratorReservations
+}));
+vi.mock("@/lib/discord-operations-board-after-mutation", () => ({
+  scheduleDiscordOperationsBoardSync: routeMocks.scheduleDiscordOperationsBoardSync
 }));
 vi.mock("@/lib/request-csrf", () => ({
   messageForCsrfError: (reason: string) => `csrf:${reason}`,
@@ -85,6 +89,7 @@ describe("admin bulk reservation cancellation route", () => {
       ...body,
       source: { kind: "WEB_ADMIN" }
     });
+    expect(routeMocks.scheduleDiscordOperationsBoardSync).toHaveBeenCalledTimes(mode === "execute" ? 1 : 0);
   });
 
   it.each([

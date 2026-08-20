@@ -1,5 +1,19 @@
+export const OPERATIONAL_JOB_NAMES = [
+  "CLOSED_PERIOD_NOTIFICATIONS",
+  "DISCORD_ADMIN_CONSOLE",
+  "DISCORD_INTERACTIONS",
+  "DISCORD_RESERVATION_OUTBOX",
+  "MAINTENANCE"
+] as const;
+
+export type OperationalJobName = (typeof OPERATIONAL_JOB_NAMES)[number];
+
 export const OPERATIONAL_JOB_POLICIES = {
   CLOSED_PERIOD_NOTIFICATIONS: {
+    intervalMs: 60_000,
+    timeoutMs: 2 * 60_000
+  },
+  DISCORD_ADMIN_CONSOLE: {
     intervalMs: 60_000,
     timeoutMs: 2 * 60_000
   },
@@ -15,9 +29,11 @@ export const OPERATIONAL_JOB_POLICIES = {
     intervalMs: 24 * 60 * 60_000,
     timeoutMs: 15 * 60_000
   }
-} as const;
+} as const satisfies Record<OperationalJobName, { readonly intervalMs: number; readonly timeoutMs: number }>;
 
-export type OperationalJobName = keyof typeof OPERATIONAL_JOB_POLICIES;
+export function isOperationalJobName(value: string): value is OperationalJobName {
+  return OPERATIONAL_JOB_NAMES.some((job) => job === value);
+}
 export type OperationalJobStatus = "FAILED" | "RUNNING" | "SUCCEEDED";
 
 export type OperationalJobState = {
