@@ -12,9 +12,17 @@ DROP POLICY IF EXISTS "admin_action_runtime_all" ON "AdminAction";
 DROP POLICY IF EXISTS "user_sanction_runtime_all" ON "UserSanction";
 DROP POLICY IF EXISTS "audit_log_runtime_all" ON "AuditLog";
 
-ALTER ROLE info_room_runtime WITH
-  NOSUPERUSER
-  NOCREATEDB
-  NOCREATEROLE
-  NOREPLICATION
-  NOBYPASSRLS;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'info_room_runtime') THEN
+    RAISE EXCEPTION 'info_room_runtime role is required';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_roles
+    WHERE rolname = 'info_room_runtime'
+      AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+  ) THEN
+    RAISE EXCEPTION 'info_room_runtime role has unsafe privileges';
+  END IF;
+END
+$$;

@@ -113,6 +113,14 @@ describe("Postgres row level security policy migration", () => {
     expect(sql).toContain("app_private.require_application_contract");
     expect(sql).toMatch(/CREATE ROLE info_room_activation_owner[\s\S]*?NOLOGIN[\s\S]*?NOSUPERUSER[\s\S]*?NOBYPASSRLS/iu);
     expect(sql).toMatch(/CREATE ROLE info_room_activation_executor[\s\S]*?LOGIN[\s\S]*?NOSUPERUSER[\s\S]*?NOBYPASSRLS/iu);
+    expect(sql).toContain("GRANT info_room_activation_owner TO CURRENT_USER;");
+    expect(sql.indexOf("GRANT info_room_activation_owner TO CURRENT_USER;")).toBeLessThan(
+      sql.indexOf("ALTER FUNCTION app_private.record_application_readiness")
+    );
+    expect(sql).toContain("GRANT USAGE, CREATE ON SCHEMA app_private TO info_room_activation_owner;");
+    expect(sql.indexOf("GRANT USAGE, CREATE ON SCHEMA app_private TO info_room_activation_owner;")).toBeLessThan(
+      sql.indexOf("ALTER FUNCTION app_private.record_application_readiness")
+    );
     expect(sql).toContain("ALTER FUNCTION app_private.record_application_readiness(text, text, text) OWNER TO info_room_activation_owner;");
     expect(sql).toContain("ALTER FUNCTION app_private.activate_application_contract(text, text, text) OWNER TO info_room_activation_owner;");
     expect(sql).toContain('CREATE POLICY "application_deployment_receipt_activation_insert"');
@@ -207,14 +215,16 @@ describe("Postgres row level security policy migration", () => {
     ).toEqual(expectedDrops);
   });
 
-  it("hardens the existing runtime role in the corrective migration", () => {
+  it("rejects an unsafe runtime role without requiring managed-database role alteration", () => {
     const correction = orderedMigrations().find(
       ({ name }) => name === CORRECTIVE_RUNTIME_ROLE_MIGRATION
     );
 
+    expect(correction?.sql).toContain("info_room_runtime role has unsafe privileges");
     expect(correction?.sql).toMatch(
-      /ALTER ROLE info_room_runtime WITH\s+NOSUPERUSER\s+NOCREATEDB\s+NOCREATEROLE\s+NOREPLICATION\s+NOBYPASSRLS\s*;/mu
+      /rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls/mu
     );
+    expect(correction?.sql).not.toContain("ALTER ROLE info_room_runtime");
   });
 
   it("does not recreate unconditional runtime policies after the flawed migration", () => {

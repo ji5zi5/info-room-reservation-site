@@ -133,14 +133,12 @@ BEGIN
       NOCREATEROLE
       NOREPLICATION
       NOBYPASSRLS;
-  ELSE
-    ALTER ROLE info_room_activation_owner WITH
-      NOLOGIN
-      NOSUPERUSER
-      NOCREATEDB
-      NOCREATEROLE
-      NOREPLICATION
-      NOBYPASSRLS;
+  ELSIF EXISTS (
+    SELECT 1 FROM pg_roles
+    WHERE rolname = 'info_room_activation_owner'
+      AND (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+  ) THEN
+    RAISE EXCEPTION 'info_room_activation_owner role has unsafe privileges';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'info_room_activation_executor') THEN
     CREATE ROLE info_room_activation_executor
@@ -150,17 +148,17 @@ BEGIN
       NOCREATEROLE
       NOREPLICATION
       NOBYPASSRLS;
-  ELSE
-    ALTER ROLE info_room_activation_executor WITH
-      LOGIN
-      NOSUPERUSER
-      NOCREATEDB
-      NOCREATEROLE
-      NOREPLICATION
-      NOBYPASSRLS;
+  ELSIF EXISTS (
+    SELECT 1 FROM pg_roles
+    WHERE rolname = 'info_room_activation_executor'
+      AND (NOT rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+  ) THEN
+    RAISE EXCEPTION 'info_room_activation_executor role has unsafe privileges';
   END IF;
 END
 $$;
+
+GRANT info_room_activation_owner TO CURRENT_USER;
 
 CREATE TABLE app_private.online_schema_migrations (
   name TEXT PRIMARY KEY,
@@ -339,9 +337,9 @@ REVOKE ALL ON FUNCTION app_private.record_application_readiness(text, text, text
 REVOKE ALL ON FUNCTION app_private.activate_application_contract(text, text, text) FROM PUBLIC, info_room_runtime;
 REVOKE ALL ON FUNCTION app_private.require_application_contract() FROM PUBLIC, info_room_runtime;
 REVOKE ALL ON FUNCTION app_private.immutable_discord_interaction_job_context() FROM PUBLIC, info_room_runtime;
+GRANT USAGE, CREATE ON SCHEMA app_private TO info_room_activation_owner;
 ALTER FUNCTION app_private.record_application_readiness(text, text, text) OWNER TO info_room_activation_owner;
 ALTER FUNCTION app_private.activate_application_contract(text, text, text) OWNER TO info_room_activation_owner;
-GRANT USAGE ON SCHEMA app_private TO info_room_activation_owner;
 GRANT EXECUTE ON FUNCTION app_private.discord_ops_readiness_digest() TO info_room_activation_owner;
 GRANT USAGE ON SCHEMA app_private TO info_room_activation_executor;
 GRANT EXECUTE ON FUNCTION app_private.record_application_readiness(text, text, text) TO info_room_activation_executor;
