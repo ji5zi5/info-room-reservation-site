@@ -11,7 +11,8 @@ import {
   ONLINE_INDEX_SESSION_COMMANDS,
   OnlineIndexError,
   applyOnlineAdminSearchIndexes,
-  catalogDefinitionMatchesManifest
+  catalogDefinitionMatchesManifest,
+  normalizePgOwnerConnectionString
 } from "./apply-online-admin-search-indexes";
 
 const runnerSource = readFileSync(resolve("scripts/apply-online-admin-search-indexes.ts"), "utf8");
@@ -246,6 +247,19 @@ describe("online admin search index runner", () => {
     // When/Then: the boundary returns a typed configuration failure.
     await expect(operation).rejects.toEqual(expect.objectContaining({ code: "DIRECT_URL_MISSING", name: "OnlineIndexError" }));
     expect(OnlineIndexError).toBeDefined();
+  });
+
+  it("uses libpq TLS semantics for owner URLs that require encrypted transport", () => {
+    const normalized = new URL(normalizePgOwnerConnectionString(
+      "postgresql://owner:password@example.test:5432/database?sslmode=require"
+    ));
+    const verified = new URL(normalizePgOwnerConnectionString(
+      "postgresql://owner:password@example.test:5432/database?sslmode=verify-full"
+    ));
+
+    expect(normalized.searchParams.get("sslmode")).toBe("require");
+    expect(normalized.searchParams.get("uselibpqcompat")).toBe("true");
+    expect(verified.searchParams.get("uselibpqcompat")).toBeNull();
   });
 
   it("traverses populated PostgreSQL pages while the exact-base writer survives migration and online indexes", () => {

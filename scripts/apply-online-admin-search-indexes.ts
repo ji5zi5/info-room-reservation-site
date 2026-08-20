@@ -130,11 +130,19 @@ export function catalogDefinitionMatchesManifest(name: string, candidate: unknow
   return parsed.success && matchesManifest(parsed.data, manifest);
 }
 
+export function normalizePgOwnerConnectionString(directUrl: string): string {
+  const parsed = new URL(directUrl);
+  if (parsed.searchParams.get("sslmode") === "require") {
+    parsed.searchParams.set("uselibpqcompat", "true");
+  }
+  return parsed.toString();
+}
+
 export async function applyOnlineAdminSearchIndexes(directUrl = process.env.DIRECT_URL): Promise<void> {
   if (directUrl === undefined || directUrl.length === 0) {
     throw new OnlineIndexError("DIRECT_URL_MISSING", "DIRECT_URL is required for owner-only online index application");
   }
-  const client = new Client({ connectionString: directUrl });
+  const client = new Client({ connectionString: normalizePgOwnerConnectionString(directUrl) });
   let connected = false;
   let locked = false;
   try {
