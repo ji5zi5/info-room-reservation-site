@@ -3,18 +3,15 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
-  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readlinkSync,
   readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
   statSync,
-  symlinkSync
 } from "node:fs";
 import { get } from "node:http";
 import { connect } from "node:net";
@@ -22,8 +19,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { z } from "zod";
 import pg from "pg";
+import { z } from "zod";
+
+import { copyGeneratedArtifact } from "./generated-artifact-copy.mjs";
 
 const TODO_COUNT = 21;
 const READINESS_DIGEST = "c99eebbeec6b76f35bce411575d3f03614703fa528d27964cce6989b5356e2b4";
@@ -714,33 +713,12 @@ function snapshotGeneratedArtifacts() {
   const root = mkdtempSync(join(tmpdir(), "operational-fomo-artifacts-"));
   const paths = [".next", "test-results", "tsconfig.tsbuildinfo", "next-env.d.ts"];
   const present = new Set(paths.filter((path) => existsSync(resolve(path))));
-  for (const path of present) copyArtifact(resolve(path), join(root, basename(path)));
+  for (const path of present) copyGeneratedArtifact(resolve(path), join(root, basename(path)));
   return { restore() {
     for (const path of paths) rmSync(resolve(path), { force: true, recursive: true });
-    for (const path of present) copyArtifact(join(root, basename(path)), resolve(path));
+    for (const path of present) copyGeneratedArtifact(join(root, basename(path)), resolve(path));
     rmSync(root, { force: true, recursive: true });
   } };
-}
-
-function copyArtifact(source, destination) {
-  const metadata = lstatSync(source);
-  if (metadata.isDirectory()) {
-    mkdirSync(destination, { recursive: true });
-    for (const entry of readdirSync(source)) {
-      copyArtifact(join(source, entry), join(destination, entry));
-    }
-    return;
-  }
-  mkdirSync(dirname(destination), { recursive: true });
-  if (metadata.isFile()) {
-    copyFileSync(source, destination);
-    return;
-  }
-  if (metadata.isSymbolicLink()) {
-    symlinkSync(readlinkSync(source), destination, statSync(source).isDirectory() ? "dir" : "file");
-    return;
-  }
-  fail("CORE", `unsupported generated artifact type: ${source}`);
 }
 
 function waitForHealth(port, server) {
