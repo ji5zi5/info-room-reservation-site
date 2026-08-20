@@ -219,6 +219,8 @@ describe("Prisma Discord interaction job store", () => {
 
     // Then: no claim is returned and jobs are untouched.
     expect(result).toEqual([]);
+    const controlQuery = mocks.transaction.$queryRaw.mock.calls[0]?.[0] as { readonly strings?: readonly string[] };
+    expect(controlQuery.strings?.join(" ")).not.toContain("FOR SHARE");
     expect(mocks.transaction.discordInteractionJob.updateMany).not.toHaveBeenCalled();
   });
 

@@ -21,6 +21,7 @@ const routeMocks = vi.hoisted(() => ({
   getPrismaNotificationSettings: vi.fn(),
   isNoDatabaseMockMode: vi.fn<() => boolean>(),
   outcomes: new Map<string, "failed" | "rejected" | "running" | "succeeded">(),
+  runDiscordAdminCommandCronWorker: vi.fn(),
   runDiscordInteractionCronWorker: vi.fn(),
   runDiscordReservationOutbox: vi.fn(),
   runOperationalJob: vi.fn<(input: RunJobInput) => Promise<unknown>>(),
@@ -38,6 +39,9 @@ vi.mock("@/lib/closed-period-notification-service", () => ({
 vi.mock("@/lib/discord-reservation-outbox", () => ({
   runDiscordInteractionCronWorker: routeMocks.runDiscordInteractionCronWorker,
   runDiscordReservationOutbox: routeMocks.runDiscordReservationOutbox
+}));
+vi.mock("@/lib/discord-admin-interaction-completion", () => ({
+  runDiscordAdminCommandCronWorker: routeMocks.runDiscordAdminCommandCronWorker
 }));
 vi.mock("@/lib/mock-dev-mode", () => ({ isNoDatabaseMockMode: routeMocks.isNoDatabaseMockMode }));
 vi.mock("@/lib/mock-notification-settings", () => ({
@@ -67,6 +71,13 @@ describe("closed-period notification cron", () => {
     vi.stubEnv("CLOSED_PERIOD_CRON_SECRET", "closed-period-secret");
     vi.stubEnv("MAINTENANCE_CRON_SECRET", "maintenance-secret");
     vi.stubEnv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/token");
+    vi.stubEnv("DISCORD_APPLICATION_ID", "10000000000000001");
+    vi.stubEnv("DISCORD_PUBLIC_KEY", "a".repeat(64));
+    vi.stubEnv("DISCORD_BOT_TOKEN", "bot-token");
+    vi.stubEnv("DISCORD_GUILD_ID", "10000000000000002");
+    vi.stubEnv("DISCORD_CHANNEL_ID", "10000000000000003");
+    vi.stubEnv("DISCORD_ADMIN_ROLE_ID", "10000000000000004");
+    vi.stubEnv("DISCORD_ADMIN_USER_MAP", "10000000000000005:12345");
     routeMocks.isNoDatabaseMockMode.mockReturnValue(false);
     routeMocks.activateApplicationContract.mockResolvedValue({
       deploymentSha: "a".repeat(40),
@@ -84,6 +95,11 @@ describe("closed-period notification cron", () => {
       retried: 0,
       stale: 0,
       succeeded: 0
+    });
+    routeMocks.runDiscordAdminCommandCronWorker.mockResolvedValue({
+      commands: { abandoned: 0, claimed: 0, retried: 0, stale: 0, succeeded: 0 },
+      deliveries: { delivered: 0, failed: 0 },
+      operationsBoard: { kind: "unchanged" }
     });
     routeMocks.runDiscordReservationOutbox.mockResolvedValue({
       initial: { claimed: 0, retried: 0, review: 0, sent: 0, terminal: 0 },
@@ -178,6 +194,35 @@ describe("closed-period notification cron", () => {
       value: { kind: "disabled", processed: 0 }
     });
     expect(routeMocks.getDueClosedPeriodNotificationCandidates).not.toHaveBeenCalled();
+  });
+
+  it("records Discord application workers as disabled when only a webhook is configured", async () => {
+    for (const key of [
+      "DISCORD_APPLICATION_ID",
+      "DISCORD_PUBLIC_KEY",
+      "DISCORD_BOT_TOKEN",
+      "DISCORD_GUILD_ID",
+      "DISCORD_CHANNEL_ID",
+      "DISCORD_ADMIN_ROLE_ID",
+      "DISCORD_ADMIN_USER_MAP"
+    ]) {
+      vi.stubEnv(key, "");
+    }
+
+    const response = await GET(cronRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.runDiscordInteractionCronWorker).not.toHaveBeenCalled();
+    expect(routeMocks.runDiscordAdminCommandCronWorker).not.toHaveBeenCalled();
+    expect(body.jobs.DISCORD_INTERACTIONS).toEqual({
+      kind: "succeeded",
+      value: { kind: "disabled" }
+    });
+    expect(body.jobs.DISCORD_ADMIN_CONSOLE).toEqual({
+      kind: "succeeded",
+      value: { kind: "disabled" }
+    });
   });
 
   it("settles siblings before reporting a closed-list preflight failure", async () => {

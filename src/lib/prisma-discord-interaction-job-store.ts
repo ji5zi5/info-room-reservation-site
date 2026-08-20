@@ -232,7 +232,6 @@ async function claimDiscordInteractionJobs(
       SELECT "enabled", "epoch"
       FROM "DiscordOperationsControl"
       WHERE "id" = ${CONTROL_ID}
-      FOR SHARE
     `);
     if (control?.enabled !== true) {
       return [];

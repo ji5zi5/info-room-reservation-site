@@ -54,16 +54,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     runOperationalJob({
       job: "DISCORD_INTERACTIONS",
       now,
-      operation: async () => {
-        const result = await runDiscordInteractionCronWorker(now);
-        return {
-          backlogCount: result.backlog.count,
-          kind: "succeeded",
-          oldestBacklogAt: result.backlog.oldestAt === null ? null : new Date(result.backlog.oldestAt),
-          result,
-          value: result
-        };
-      },
+      operation: () => runDiscordInteractions(now),
       store: prismaOperationalJobStore
     }),
     runOperationalJob({
@@ -195,6 +186,22 @@ async function runDiscordAdminConsole(now: Date): Promise<CronJobOperationResult
     backlogCount: result.commands.retried + result.commands.abandoned + result.deliveries.failed,
     kind: "succeeded",
     oldestBacklogAt: null,
+    result,
+    value: result
+  };
+}
+
+async function runDiscordInteractions(now: Date): Promise<CronJobOperationResult> {
+  const config = parseDiscordApplicationConfig(process.env);
+  if (config === null) {
+    const disabled = { kind: "disabled" as const };
+    return { backlogCount: 0, kind: "succeeded", oldestBacklogAt: null, result: disabled, value: disabled };
+  }
+  const result = await runDiscordInteractionCronWorker(now);
+  return {
+    backlogCount: result.backlog.count,
+    kind: "succeeded",
+    oldestBacklogAt: result.backlog.oldestAt === null ? null : new Date(result.backlog.oldestAt),
     result,
     value: result
   };
