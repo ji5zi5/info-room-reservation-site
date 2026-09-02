@@ -80,6 +80,10 @@ src/lib/        auth, reservation, admin, notification domain logic
 tests/          Playwright E2E flows
 ```
 
+## 함께 만든 사람
+
+- [@jsk1004ha](https://github.com/jsk1004ha) — 예약 상태 유지와 학생 피드백 개선, 제한 사용자 처리, 관리자 블랙리스트 기능을 함께 개발했습니다.
+
 ## 운영 경계
 
 - 운영 DB 변경은 Prisma migration으로 관리합니다.
