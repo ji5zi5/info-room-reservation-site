@@ -97,9 +97,9 @@ describe("closed-period notification cron", () => {
       succeeded: 0
     });
     routeMocks.runDiscordAdminCommandCronWorker.mockResolvedValue({
+      board: { kind: "unchanged" },
       commands: { abandoned: 0, claimed: 0, retried: 0, stale: 0, succeeded: 0 },
-      deliveries: { delivered: 0, failed: 0 },
-      operationsBoard: { kind: "unchanged" }
+      deliveries: { delivered: 0, failed: 0 }
     });
     routeMocks.runDiscordReservationOutbox.mockResolvedValue({
       initial: { claimed: 0, retried: 0, review: 0, sent: 0, terminal: 0 },
@@ -194,6 +194,27 @@ describe("closed-period notification cron", () => {
       value: { kind: "disabled", processed: 0 }
     });
     expect(routeMocks.getDueClosedPeriodNotificationCandidates).not.toHaveBeenCalled();
+  });
+
+  it("fails the cron visibly when the operations board cannot synchronize", async () => {
+    // Given: command processing succeeds but the pinned board update fails.
+    routeMocks.runDiscordAdminCommandCronWorker.mockResolvedValue({
+      board: { code: "discord_http_403", kind: "failed" },
+      commands: { abandoned: 0, claimed: 0, retried: 0, stale: 0, succeeded: 0 },
+      deliveries: { delivered: 0, failed: 0 }
+    });
+
+    // When: the scheduled worker runs.
+    const response = await GET(cronRequest());
+    const body = await response.json();
+
+    // Then: monitoring receives a failed job instead of a false all-clear response.
+    expect(response.status).toBe(502);
+    expect(body.jobs.DISCORD_ADMIN_CONSOLE).toMatchObject({
+      failureCode: "discord_http_403",
+      kind: "failed"
+    });
+    expect(body.activation).toEqual({ kind: "deferred", reason: "sibling_job_failed" });
   });
 
   it("records Discord application workers as disabled when only a webhook is configured", async () => {

@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 
 import type { DiscordBotMessagePayload } from "./discord-bot";
 import { buildDiscordOperationsBoardCustomId } from "./discord-admin-custom-ids";
+import type { ClosedPeriodNotificationStatus } from "./closed-period-notifications";
 import type { PeriodSummary } from "./period-settings";
+
+export type DiscordOperationsBoardClosedListStatus = ClosedPeriodNotificationStatus | "NOT_SENT";
 
 export type DiscordOperationsBoardSnapshot = {
   readonly adminCommandBacklog: number;
@@ -17,15 +20,23 @@ export type DiscordOperationsBoardSnapshot = {
   }[];
   readonly periods: readonly (PeriodSummary & {
     readonly closedListProcessedAt: string | null;
-    readonly closedListStatus: string;
+    readonly closedListStatus: DiscordOperationsBoardClosedListStatus;
   })[];
   readonly recentErrorCount: number;
   readonly reservationNotificationsEnabled: boolean;
   readonly unresolvedDeliveries: number;
 };
 
-export function discordOperationsBoardStateDigest(snapshot: DiscordOperationsBoardSnapshot): string {
-  return `sha256:${createHash("sha256").update("discord-operations-board:v4\0").update(JSON.stringify(snapshot)).digest("hex")}`;
+export function discordOperationsBoardStateDigest(
+  snapshot: DiscordOperationsBoardSnapshot,
+  observedAt: Date
+): string {
+  return `sha256:${createHash("sha256")
+    .update("discord-operations-board:v5\0")
+    .update(observedAt.toISOString().slice(0, 16))
+    .update("\0")
+    .update(JSON.stringify(snapshot))
+    .digest("hex")}`;
 }
 
 export function buildDiscordOperationsBoardPayload(input: {
@@ -34,6 +45,7 @@ export function buildDiscordOperationsBoardPayload(input: {
   readonly secret: string;
   readonly snapshot: DiscordOperationsBoardSnapshot;
 }): DiscordBotMessagePayload {
+  const attentionCount = boardAttentionCount(input.snapshot);
   return {
     allowed_mentions: { parse: [] },
     components: [{
@@ -41,14 +53,17 @@ export function buildDiscordOperationsBoardPayload(input: {
         button("현황 새로고침", buildDiscordOperationsBoardCustomId({ action: "refresh", revision: input.revision, secret: input.secret }), 1),
         button("8면학 명단", buildDiscordOperationsBoardCustomId({ action: "roster_eighth", revision: input.revision, secret: input.secret })),
         button("1면학 명단", buildDiscordOperationsBoardCustomId({ action: "roster_first", revision: input.revision, secret: input.secret })),
-        button("확인할 작업", buildDiscordOperationsBoardCustomId({ action: "backlog", revision: input.revision, secret: input.secret }))
+        button(
+          attentionCount === 0 ? "확인할 작업" : `확인할 작업 ${attentionCount}건`,
+          buildDiscordOperationsBoardCustomId({ action: "backlog", revision: input.revision, secret: input.secret })
+        )
       ],
       type: 1
     }],
     embeds: [{
       color: 0x3e6ae1,
       description: [
-        `**${formatBoardDate(input.snapshot.date)}** · ${formatKstTime(input.observedAt)} 기준`,
+        `**${formatBoardDate(input.snapshot.date)}** · 마지막 동기화 ${formatKstTime(input.observedAt)}`,
         `신청 알림 ${enabledLabel(input.snapshot.reservationNotificationsEnabled)} · 마감 명단 알림 ${enabledLabel(input.snapshot.closedNotificationsEnabled)}`,
         `${lastProcessedLabel(input.snapshot.lastProcessedAt)} · ${recentErrorLabel(input.snapshot.recentErrorCount)}`
       ].join("\n"),
@@ -59,12 +74,15 @@ export function buildDiscordOperationsBoardPayload(input: {
           value: [
             `신청 시간 ${period.openTime} - ${period.closeTime}`,
             `신청 ${period.confirmedCount}명 / ${period.capacity}명 · ${remainingLabel(period.remaining)}`,
-            closedListLabel(period.enabled, period.closedListStatus, period.closedListProcessedAt),
+            closedListLabel({
+              enabled: period.enabled,
+              notificationsEnabled: input.snapshot.closedNotificationsEnabled,
+              processedAt: period.closedListProcessedAt,
+              status: period.closedListStatus,
+              windowState: period.windowState
+            }),
             "",
-            "신청자",
-            period.applicants.length === 0
-              ? "없음"
-              : period.applicants.map((applicant, index) => `${index + 1}. ${applicant.studentNumber} ${applicant.name}`).join("\n")
+            ...applicantLines(period.applicants)
           ].join("\n")
         })),
         {
@@ -98,17 +116,36 @@ function windowLabel(state: PeriodSummary["windowState"]): string {
   }
 }
 
-function closedListLabel(enabled: boolean, status: string, processedAt: string | null): string {
-  if (!enabled) return "운영 중지로 명단 전송 안 함";
-  const processed = processedAt === null ? "" : ` · ${formatKstDateTime(new Date(processedAt))}`;
-  switch (status) {
+function closedListLabel(input: {
+  readonly enabled: boolean;
+  readonly notificationsEnabled: boolean;
+  readonly processedAt: string | null;
+  readonly status: DiscordOperationsBoardClosedListStatus;
+  readonly windowState: PeriodSummary["windowState"];
+}): string {
+  if (!input.enabled) return "운영 중지로 명단 전송 안 함";
+  const processed = input.processedAt === null ? "" : ` · ${formatKstDateTime(new Date(input.processedAt))}`;
+  switch (input.status) {
     case "SENT": return `마감 명단 전송 완료${processed}`;
     case "FAILED": return `마감 명단 전송 실패${processed}`;
-    case "UNKNOWN": return `마감 명단 확인 필요${processed}`;
-    case "PENDING":
-    case "SENDING": return "마감 명단 전송 중";
-    default: return "마감 후 명단 자동 전송";
+    case "UNKNOWN":
+    case "PENDING_REVIEW": return `마감 명단 전송 여부 확인 필요${processed}`;
+    case "PENDING": return `마감 명단 전송 대기${processed}`;
+    case "SENDING": return `마감 명단 전송 중${processed}`;
+    case "ABANDONED": return `마감 명단 처리 종료${processed}`;
+    case "NOT_SENT":
+      if (!input.notificationsEnabled) return "마감 명단 알림 꺼짐";
+      return input.windowState === "closed"
+        ? "마감 명단 전송 대기"
+        : "마감 후 명단 자동 전송 예정";
+    default: throw new TypeError(`Unhandled Discord operations board delivery status: ${String(input.status)}`);
   }
+}
+
+function applicantLines(applicants: PeriodSummary["applicants"]): readonly string[] {
+  return applicants.length === 0
+    ? ["신청자 없음"]
+    : ["신청자 명단", ...applicants.map((applicant, index) => `${index + 1}. ${applicant.studentNumber} ${applicant.name}`)];
 }
 
 function remainingLabel(remaining: number): string {
@@ -131,12 +168,17 @@ function operationalStatusLabel(snapshot: DiscordOperationsBoardSnapshot): strin
   const backlogs = [
     snapshot.adminCommandBacklog > 0 ? `관리자 요청 ${snapshot.adminCommandBacklog}건` : null,
     snapshot.interactionBacklog > 0 ? `예약 버튼 ${snapshot.interactionBacklog}건` : null,
-    snapshot.unresolvedDeliveries > 0 ? `알림 재전송 ${snapshot.unresolvedDeliveries}건` : null
+    snapshot.unresolvedDeliveries > 0 ? `마감 명단 ${snapshot.unresolvedDeliveries}건` : null
   ].filter((part): part is string => part !== null);
-  const attention = backlogs.length === 0
-    ? "관리자 확인이 필요한 작업 없음"
-    : `확인 필요: ${backlogs.join(" · ")}`;
+  if (backlogs.length === 0 && !hasDetailedStatus) {
+    return `${jobLines[0]} · 확인할 작업 없음`;
+  }
+  const attention = backlogs.length === 0 ? "확인할 작업 없음" : `확인 필요: ${backlogs.join(" · ")}`;
   return [...jobLines, "", attention].join("\n");
+}
+
+function boardAttentionCount(snapshot: DiscordOperationsBoardSnapshot): number {
+  return snapshot.adminCommandBacklog + snapshot.interactionBacklog + snapshot.unresolvedDeliveries;
 }
 
 function operationalJobLabel(job: string): string {
@@ -191,7 +233,7 @@ function formatKstDateTime(date: Date): string {
 }
 
 function lastProcessedLabel(value: string | null): string {
-  return value === null ? "최근 처리 기록 없음" : `마지막 처리 ${formatKstDateTime(new Date(value))}`;
+  return value === null ? "최근 업무 처리 없음" : `최근 업무 처리 ${formatKstDateTime(new Date(value))}`;
 }
 
 function recentErrorLabel(count: number): string {

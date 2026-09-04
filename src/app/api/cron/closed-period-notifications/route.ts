@@ -182,9 +182,11 @@ async function runDiscordAdminConsole(now: Date): Promise<CronJobOperationResult
     return { backlogCount: 0, kind: "succeeded", oldestBacklogAt: null, result: disabled, value: disabled };
   }
   const result = await runDiscordAdminCommandCronWorker({ config, now });
+  const boardFailureCode = result.board.kind === "failed" ? result.board.code : null;
   return {
     backlogCount: result.commands.retried + result.commands.abandoned + result.deliveries.failed,
-    kind: "succeeded",
+    ...(boardFailureCode === null ? {} : { failureCode: boardFailureCode }),
+    kind: boardFailureCode === null ? "succeeded" : "failed",
     oldestBacklogAt: null,
     result,
     value: result

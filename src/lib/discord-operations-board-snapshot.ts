@@ -1,9 +1,15 @@
 import { prisma } from "./db";
 import { systemDatabaseActor, withDatabaseContext } from "./db-context";
-import type { DiscordOperationsBoardSnapshot } from "./discord-operations-board-contracts";
+import { CLOSED_LIST_NOTIFICATION_KIND, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
+import type {
+  DiscordOperationsBoardClosedListStatus,
+  DiscordOperationsBoardSnapshot
+} from "./discord-operations-board-contracts";
 import { getPeriodSummaries } from "./period-settings";
 import { getPrismaNotificationSettings } from "./prisma-notification-settings";
 import { STUDY_PERIODS } from "./study-periods";
+
+const ACTIONABLE_CLOSED_LIST_STATUSES = ["FAILED", "PENDING_REVIEW", "UNKNOWN"] as const satisfies readonly ClosedPeriodNotificationStatus[];
 
 export async function loadDiscordOperationsBoardSnapshot(input: {
   readonly date: string;
@@ -35,11 +41,16 @@ export async function loadDiscordOperationsBoardSnapshot(input: {
         ] = await Promise.all([
           transaction.notificationDelivery.findMany({
             select: { sentAt: true, status: true, studyPeriod: true, updatedAt: true },
-            where: { date: input.date, kind: "CLOSED_PERIOD" }
+            where: { date: input.date, kind: CLOSED_LIST_NOTIFICATION_KIND }
           }),
           transaction.discordAdminCommandJob.count({ where: { status: { in: ["PENDING", "PROCESSING", "RETRY"] } } }),
           transaction.discordInteractionJob.count({ where: { status: { in: ["PENDING", "PROCESSING", "RETRY"] } } }),
-          transaction.notificationDelivery.count({ where: { status: { in: ["FAILED", "PENDING", "SENDING", "UNKNOWN"] } } }),
+          transaction.notificationDelivery.count({
+            where: {
+              kind: CLOSED_LIST_NOTIFICATION_KIND,
+              status: { in: [...ACTIONABLE_CLOSED_LIST_STATUSES] }
+            }
+          }),
           transaction.operationalJob.findMany({
             orderBy: { job: "asc" },
             select: { backlogCount: true, job: true, status: true }
@@ -92,10 +103,11 @@ export async function loadDiscordOperationsBoardSnapshot(input: {
     periods: STUDY_PERIODS.map((studyPeriod) => {
       const period = periods.find((candidate) => candidate.studyPeriod === studyPeriod);
       if (period === undefined) throw new DiscordOperationsBoardPeriodError(studyPeriod);
+      const delivery = health.deliveries.find((candidate) => candidate.studyPeriod === studyPeriod);
       return {
         ...period,
-        closedListProcessedAt: deliveryProcessedAt(health.deliveries.find((delivery) => delivery.studyPeriod === studyPeriod)),
-        closedListStatus: health.deliveries.find((delivery) => delivery.studyPeriod === studyPeriod)?.status ?? "NOT_SENT"
+        closedListProcessedAt: deliveryProcessedAt(delivery),
+        closedListStatus: delivery === undefined ? "NOT_SENT" : parseClosedListStatus(delivery.status)
       };
     }),
     recentErrorCount: health.recentErrorCount,
@@ -115,6 +127,28 @@ function latestIso(values: readonly (Date | undefined)[]): string | null {
     : new Date(Math.max(...dates.map((date) => date.getTime()))).toISOString();
 }
 
+function parseClosedListStatus(status: string): DiscordOperationsBoardClosedListStatus {
+  switch (status) {
+    case "ABANDONED":
+    case "FAILED":
+    case "PENDING":
+    case "PENDING_REVIEW":
+    case "SENDING":
+    case "SENT":
+    case "UNKNOWN":
+      return status;
+    default:
+      throw new DiscordOperationsBoardDeliveryStatusError(status);
+  }
+}
+
 class DiscordOperationsBoardPeriodError extends Error {
   public override readonly name = "DiscordOperationsBoardPeriodError";
+}
+
+class DiscordOperationsBoardDeliveryStatusError extends Error {
+  public constructor(status: string) {
+    super(`Invalid Discord operations board delivery status: ${status}`);
+    this.name = "DiscordOperationsBoardDeliveryStatusError";
+  }
 }
