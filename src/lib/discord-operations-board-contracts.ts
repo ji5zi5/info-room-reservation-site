@@ -25,7 +25,7 @@ export type DiscordOperationsBoardSnapshot = {
 };
 
 export function discordOperationsBoardStateDigest(snapshot: DiscordOperationsBoardSnapshot): string {
-  return `sha256:${createHash("sha256").update("discord-operations-board:v2\0").update(JSON.stringify(snapshot)).digest("hex")}`;
+  return `sha256:${createHash("sha256").update("discord-operations-board:v3\0").update(JSON.stringify(snapshot)).digest("hex")}`;
 }
 
 export function buildDiscordOperationsBoardPayload(input: {
