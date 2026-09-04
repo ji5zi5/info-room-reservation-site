@@ -87,4 +87,26 @@ describe("Discord operations board contracts", () => {
     expect(rendered).not.toContain("closed-period:");
     expect(payload.components?.[0]?.components[0]).toMatchObject({ label: "현황 새로고침", style: 1 });
   });
+
+  it("keeps routine in-progress work compact when nothing needs attention", () => {
+    const payload = buildDiscordOperationsBoardPayload({
+      observedAt: new Date("2026-08-20T05:00:00Z"),
+      revision: 1,
+      secret: "secret",
+      snapshot: {
+        ...snapshot,
+        operationalJobs: [
+          { backlogCount: 0, job: "DISCORD_ADMIN_CONSOLE", status: "RUNNING" },
+          { backlogCount: 0, job: "MAINTENANCE", status: "SUCCEEDED" }
+        ]
+      }
+    });
+    const rendered = JSON.stringify(payload);
+
+    expect(rendered).toContain("자동 처리 정상");
+    expect(rendered).toContain("관리자 확인이 필요한 작업 없음");
+    expect(rendered).not.toContain("관리자 명령 처리");
+    expect(rendered).not.toContain("DISCORD_ADMIN_CONSOLE");
+    expect(rendered).not.toContain("RUNNING");
+  });
 });

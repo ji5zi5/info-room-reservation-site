@@ -116,7 +116,7 @@ function remainingLabel(remaining: number): string {
 
 function operationalStatusLabel(snapshot: DiscordOperationsBoardSnapshot): string {
   const hasDetailedStatus = snapshot.operationalJobs.some(
-    (job) => job.status !== "SUCCEEDED" || job.backlogCount > 0
+    (job) => (job.status !== "SUCCEEDED" && job.status !== "RUNNING") || job.backlogCount > 0
   );
   const jobLines = snapshot.operationalJobs.length === 0
     ? ["자동 작업 실행 기록 없음"]
