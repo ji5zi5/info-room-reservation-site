@@ -46,6 +46,22 @@ describe("parseDiscordApplicationConfig", () => {
     });
   });
 
+  it("accepts a four-digit school student number in an administrator binding", () => {
+    // Given
+    const raw = {
+      ...completeConfig,
+      DISCORD_ADMIN_USER_MAP: "223456789012345678:2414"
+    } as const;
+
+    // When
+    const result = parseDiscordApplicationConfig(raw);
+
+    // Then
+    expect(result?.adminUserBindings).toEqual([
+      { discordUserId: "223456789012345678", studentNumber: "2414" }
+    ]);
+  });
+
   it.each(["development", "test", "production"] as const)(
     "rejects a partial application interaction configuration in %s",
     (nodeEnv) => {

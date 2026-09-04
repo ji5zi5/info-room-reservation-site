@@ -10,7 +10,7 @@ const DISCORD_APPLICATION_ENV_KEYS = [
 
 const DISCORD_SNOWFLAKE_PATTERN = /^[1-9]\d{16,19}$/u;
 const DISCORD_PUBLIC_KEY_PATTERN = /^[0-9a-f]{64}$/iu;
-const STUDENT_NUMBER_PATTERN = /^\d{5}$/u;
+const STUDENT_NUMBER_PATTERN = /^\d{4,5}$/u;
 
 export type DiscordApplicationConfig = {
   readonly adminRoleId: string;
