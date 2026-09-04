@@ -52,7 +52,7 @@ describe("Discord operations board service", () => {
   it("updates the pinned message when the board presentation version changes", async () => {
     const snapshot = boardSnapshot();
     const previousDigest = `sha256:${createHash("sha256")
-      .update("discord-operations-board:v2\0")
+      .update("discord-operations-board:v3\0")
       .update(JSON.stringify(snapshot))
       .digest("hex")}`;
     const bot = {

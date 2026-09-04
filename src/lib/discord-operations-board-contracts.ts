@@ -25,7 +25,7 @@ export type DiscordOperationsBoardSnapshot = {
 };
 
 export function discordOperationsBoardStateDigest(snapshot: DiscordOperationsBoardSnapshot): string {
-  return `sha256:${createHash("sha256").update("discord-operations-board:v3\0").update(JSON.stringify(snapshot)).digest("hex")}`;
+  return `sha256:${createHash("sha256").update("discord-operations-board:v4\0").update(JSON.stringify(snapshot)).digest("hex")}`;
 }
 
 export function buildDiscordOperationsBoardPayload(input: {
@@ -59,7 +59,7 @@ export function buildDiscordOperationsBoardPayload(input: {
           value: [
             `신청 시간 ${period.openTime} - ${period.closeTime}`,
             `신청 ${period.confirmedCount}명 / ${period.capacity}명 · ${remainingLabel(period.remaining)}`,
-            closedListLabel(period.closedListStatus, period.closedListProcessedAt),
+            closedListLabel(period.enabled, period.closedListStatus, period.closedListProcessedAt),
             "",
             "신청자",
             period.applicants.length === 0
@@ -98,7 +98,8 @@ function windowLabel(state: PeriodSummary["windowState"]): string {
   }
 }
 
-function closedListLabel(status: string, processedAt: string | null): string {
+function closedListLabel(enabled: boolean, status: string, processedAt: string | null): string {
+  if (!enabled) return "운영 중지로 명단 전송 안 함";
   const processed = processedAt === null ? "" : ` · ${formatKstDateTime(new Date(processedAt))}`;
   switch (status) {
     case "SENT": return `마감 명단 전송 완료${processed}`;

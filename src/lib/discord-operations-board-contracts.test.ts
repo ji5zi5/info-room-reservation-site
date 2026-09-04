@@ -73,6 +73,8 @@ describe("Discord operations board contracts", () => {
     expect(rendered).toContain("8월 20일 목요일");
     expect(rendered).toContain("8면학 · 운영 중지");
     expect(rendered).toContain("신청 1명 / 10명 · 9자리 남음");
+    expect(rendered).toContain("운영 중지로 명단 전송 안 함");
+    expect(rendered).not.toContain("마감 후 명단 자동 전송");
     expect(rendered).toContain("관리자 명령 처리 · 정상");
     expect(rendered).toContain("예약 버튼 처리 · 처리 중 · 대기 2건");
     expect(rendered).toContain("마감 명단 전송 · 오류");
