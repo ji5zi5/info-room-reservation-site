@@ -106,6 +106,27 @@ describe("readiness report", () => {
     });
   });
 
+  it("degrades an active operational job when operator-actionable backlog remains", async () => {
+    const report = await getReadinessReport({
+      assertConfig: () => undefined,
+      loadSnapshot: async () => ({
+        closedPeriodNotificationsEnabled: true,
+        jobs: [
+          {
+            ...succeededJob("DISCORD_INTERACTIONS"),
+            backlogCount: 2,
+            job: "CLOSED_PERIOD_NOTIFICATIONS" as const
+          },
+          { ...succeededJob("DISCORD_INTERACTIONS"), job: "MAINTENANCE" as const }
+        ]
+      }),
+      now
+    });
+
+    expect(report.status).toBe("degraded");
+    expect(report.checks.jobs.CLOSED_PERIOD_NOTIFICATIONS).toEqual({ code: "backlog", status: "degraded" });
+  });
+
   it.each([
     [null, "never_run", "unready"],
     [{ ...succeededJob("DISCORD_INTERACTIONS"), lastSuccessAt: new Date("2026-06-12T07:21:00.000Z") }, "stale", "unready"],

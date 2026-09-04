@@ -37,6 +37,7 @@ export function isOperationalJobName(value: string): value is OperationalJobName
 export type OperationalJobStatus = "FAILED" | "RUNNING" | "SUCCEEDED";
 
 export type OperationalJobState = {
+  readonly backlogCount?: number;
   readonly consecutiveFailures: number;
   readonly finishedAt: Date | null;
   readonly lastAttemptAt: Date;
@@ -47,6 +48,7 @@ export type OperationalJobState = {
 
 export type OperationalJobReadiness = {
   readonly code:
+    | "backlog"
     | "disabled"
     | "healthy"
     | "last_attempt_failed"
@@ -87,6 +89,9 @@ export function evaluateOperationalJobReadiness(input: {
   }
   if (input.state.status === "FAILED") {
     return { code: "last_attempt_failed", status: "degraded" };
+  }
+  if ((input.state.backlogCount ?? 0) > 0) {
+    return { code: "backlog", status: "degraded" };
   }
   return { code: "healthy", status: "ok" };
 }

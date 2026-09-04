@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { parseDiscordApplicationConfig } from "./discord-app-config";
 import { assertProductionEnvSafe } from "./env";
 import { getPrismaNotificationSettings } from "./prisma-notification-settings";
 import { getPrismaOperationalJobs } from "./prisma-operational-job-store";
@@ -28,6 +29,7 @@ export async function getPrismaReadinessReport(now: Date = new Date()): Promise<
             retentionBacklogCount: discord.reservationOutboxRetentionBacklogCount
           }
         },
+        discordOperationsEnabled: parseDiscordApplicationConfig(process.env) !== null,
         jobs
       };
     },
