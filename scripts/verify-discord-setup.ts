@@ -5,6 +5,10 @@ import { HTTPError } from "ky";
 import { z } from "zod";
 
 import { DiscordApplicationConfigError } from "../src/lib/discord-app-config";
+import {
+  DISCORD_ADMIN_COMMAND_NAMES,
+  type DiscordAdminCommandName
+} from "../src/lib/discord-admin-command-definition";
 import { DiscordSetupCliError, loadLiveDiscordSetupSnapshot } from "./load-live-discord-setup";
 import { createDiscordSetupFixture, type DiscordSetupFixtureMode } from "./verify-discord-setup.fixtures";
 
@@ -12,12 +16,20 @@ export const DISCORD_PERMISSIONS = {
   ADMINISTRATOR: 8n,
   EMBED_LINKS: 16_384n,
   MANAGE_MESSAGES: 8_192n,
+  PIN_MESSAGES: 2_251_799_813_685_248n,
   READ_MESSAGE_HISTORY: 65_536n,
   SEND_MESSAGES: 2_048n,
   VIEW_CHANNEL: 1_024n
 } as const;
 
-const requiredBotPermissions = ["VIEW_CHANNEL", "SEND_MESSAGES", "EMBED_LINKS", "READ_MESSAGE_HISTORY", "MANAGE_MESSAGES"] as const;
+const requiredBotPermissions = [
+  "VIEW_CHANNEL",
+  "SEND_MESSAGES",
+  "EMBED_LINKS",
+  "READ_MESSAGE_HISTORY",
+  "MANAGE_MESSAGES",
+  "PIN_MESSAGES"
+] as const;
 const decimalPattern = /^\d+$/u;
 const snowflakePattern = /^[1-9]\d{16,19}$/u;
 
@@ -51,7 +63,7 @@ export type DiscordSetupSnapshot = {
 export type VerificationIssue =
   | { readonly code: "admin_role_cannot_view" | "admin_role_is_everyone" | "admin_role_missing" | "explicit_member_missing" | "leaked_member" | "leaked_role" | "mapped_admin_missing" | "mapped_admin_role_missing" | "malformed_data"; readonly subjectId: string }
   | { readonly code: "bot_permissions_missing"; readonly missingPermissions: readonly (typeof requiredBotPermissions)[number][] }
-  | { readonly code: "command_missing"; readonly commandName: "정보실" };
+  | { readonly code: "command_missing"; readonly commandName: DiscordAdminCommandName };
 export type VerificationResult = { readonly issues: readonly VerificationIssue[]; readonly ok: boolean };
 
 function has(permissions: bigint, permission: bigint): boolean {
@@ -174,8 +186,10 @@ export function verifyDiscordSetup(snapshot: DiscordSetupSnapshot): Verification
   const missingPermissions = requiredBotPermissions.filter((name) => !has(botPermissions, DISCORD_PERMISSIONS[name]));
   if (snapshot.botMember.user.id !== snapshot.botUserId) issues.push({ code: "malformed_data", subjectId: snapshot.botUserId });
   if (missingPermissions.length > 0) issues.push({ code: "bot_permissions_missing", missingPermissions });
-  if (!snapshot.registeredCommandNames.includes("정보실")) {
-    issues.push({ code: "command_missing", commandName: "정보실" });
+  for (const commandName of DISCORD_ADMIN_COMMAND_NAMES) {
+    if (!snapshot.registeredCommandNames.includes(commandName)) {
+      issues.push({ code: "command_missing", commandName });
+    }
   }
   return { issues, ok: issues.length === 0 };
 }

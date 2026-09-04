@@ -30,12 +30,20 @@ function replaceMember(
 }
 
 describe("verifyDiscordSetup", () => {
-  it("rejects setup when the information-room guild command is missing", () => {
+  it("reports every missing administrator guild command", () => {
     const snapshot = { ...createDiscordSetupFixture("private"), registeredCommandNames: [] };
 
     const result = verifyDiscordSetup(snapshot);
 
-    expect(result.issues).toContainEqual({ code: "command_missing", commandName: "정보실" });
+    expect(result.issues.filter((issue) => issue.code === "command_missing")).toEqual([
+      { code: "command_missing", commandName: "현황" },
+      { code: "command_missing", commandName: "명단" },
+      { code: "command_missing", commandName: "예약" },
+      { code: "command_missing", commandName: "학생" },
+      { code: "command_missing", commandName: "설정" },
+      { code: "command_missing", commandName: "알림" },
+      { code: "command_missing", commandName: "운영" }
+    ]);
   });
 
   it("accepts the private fixture with inherited category deny and operations allows", () => {
@@ -257,7 +265,7 @@ describe("verifyDiscordSetup", () => {
     expect(result.issues).toContainEqual({ code: "admin_role_is_everyone", subjectId: snapshot.guild.id });
   });
 
-  it("requires all four bot channel permissions", () => {
+  it("requires every configured bot channel permission", () => {
     // Given
     const base = createDiscordSetupFixture("private");
     const snapshot = {
@@ -285,5 +293,34 @@ describe("verifyDiscordSetup", () => {
 
     // Then
     expect(result.issues).toContainEqual({ code: "bot_permissions_missing", missingPermissions: ["EMBED_LINKS"] });
+  });
+
+  it("requires Discord's separate pin messages permission", () => {
+    const pinMessagesPermission = 2_251_799_813_685_248n;
+    const base = createDiscordSetupFixture("private");
+    const withoutPinPermission = (allow: string) => (BigInt(allow) & ~pinMessagesPermission).toString();
+    const snapshot = {
+      ...base,
+      category: {
+        ...base.category,
+        permissionOverwrites: base.category.permissionOverwrites.map((overwrite) =>
+          overwrite.id === "500000000000000004"
+            ? { ...overwrite, allow: withoutPinPermission(overwrite.allow) }
+            : overwrite
+        )
+      },
+      channel: {
+        ...base.channel,
+        permissionOverwrites: base.channel.permissionOverwrites.map((overwrite) =>
+          overwrite.id === "500000000000000004"
+            ? { ...overwrite, allow: withoutPinPermission(overwrite.allow) }
+            : overwrite
+        )
+      }
+    };
+
+    const result = verifyDiscordSetup(snapshot);
+
+    expect(result.issues).toContainEqual({ code: "bot_permissions_missing", missingPermissions: ["PIN_MESSAGES"] });
   });
 });

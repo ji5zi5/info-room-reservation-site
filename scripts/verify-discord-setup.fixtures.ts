@@ -1,3 +1,4 @@
+import { DISCORD_ADMIN_COMMAND_NAMES } from "../src/lib/discord-admin-command-definition";
 import type { DiscordChannel, DiscordSetupSnapshot } from "./verify-discord-setup";
 
 export type DiscordSetupFixtureMode = "everyone-admin" | "leaked-member" | "leaked-role" | "private";
@@ -21,7 +22,7 @@ export function createDiscordSetupFixture(mode: DiscordSetupFixtureMode): Discor
   const categoryOverwrites = [
     { allow: "0", deny: "93184", id: ids.guild, type: 0 as const },
     { allow: "1024", deny: "0", id: ids.adminRole, type: 0 as const },
-    { allow: "93184", deny: "0", id: ids.botRole, type: 0 as const }
+    { allow: "2251799813778432", deny: "0", id: ids.botRole, type: 0 as const }
   ];
   const channelOverwrites = mode === "leaked-role"
     ? [...categoryOverwrites, { allow: "1024", deny: "0", id: ids.outsiderRole, type: 0 as const }]
@@ -55,7 +56,7 @@ export function createDiscordSetupFixture(mode: DiscordSetupFixtureMode): Discor
     ],
     guild: { id: ids.guild, ownerId: ids.owner },
     mappedAdminUserIds: [ids.admin],
-    registeredCommandNames: ["정보실"],
+    registeredCommandNames: DISCORD_ADMIN_COMMAND_NAMES,
     roles: [
       { id: ids.guild, name: "@everyone", permissions: "1024" },
       { id: ids.adminRole, name: "operations", permissions: "0" },
