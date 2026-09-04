@@ -23,8 +23,12 @@ export function requestDiscordOperationsBoardSync(now: Date): Promise<void> {
   return withSystemContext(async (transaction) => {
     await transaction.discordOperationsBoard.upsert({
       create: { id: BOARD_ID, nextAttemptAt: now, syncStatus: "PENDING" },
-      update: { nextAttemptAt: now, syncStatus: "PENDING" },
+      update: {},
       where: { id: BOARD_ID }
+    });
+    await transaction.discordOperationsBoard.updateMany({
+      data: { nextAttemptAt: now, syncStatus: "PENDING" },
+      where: refreshableBoardWhere(now)
     });
   });
 }
@@ -35,9 +39,9 @@ export function claimDiscordOperationsBoardSync(input: {
 }): Promise<DiscordOperationsBoardClaim | null> {
   return withSystemContext(async (transaction) => {
     if (input.force) {
-      await transaction.discordOperationsBoard.update({
+      await transaction.discordOperationsBoard.updateMany({
         data: { nextAttemptAt: input.now, syncStatus: "PENDING" },
-        where: { id: BOARD_ID }
+        where: refreshableBoardWhere(input.now)
       });
     }
     const board = await transaction.discordOperationsBoard.findUnique({ where: { id: BOARD_ID } });
@@ -150,6 +154,18 @@ export function isCurrentDiscordOperationsBoardControl(input: {
 
 function safeIdentifier(value: string): string {
   return /^[A-Za-z0-9_.:-]{1,64}$/u.test(value) ? value : "discord_board_sync_failed";
+}
+
+function refreshableBoardWhere(now: Date): Prisma.DiscordOperationsBoardWhereInput {
+  const leaseExpiredAt = new Date(now.getTime() - CLAIM_LEASE_MS);
+  return {
+    id: BOARD_ID,
+    OR: [
+      { syncStatus: { not: "SYNCING" } },
+      { claimedAt: null },
+      { claimedAt: { lte: leaseExpiredAt } }
+    ]
+  };
 }
 
 function withSystemContext<TResult>(operation: (transaction: Prisma.TransactionClient) => Promise<TResult>): Promise<TResult> {
