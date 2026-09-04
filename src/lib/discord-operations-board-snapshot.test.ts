@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => {
     count,
     deliveryFindMany,
     findFirst,
+    getClosedPeriodBacklog: vi.fn(),
     getNotificationSettings: vi.fn(),
     getPeriodSummaries: vi.fn(),
     notificationDeliveryCount,
@@ -71,6 +72,9 @@ vi.mock("./db-context", () => ({
   withDatabaseContext: mocks.withDatabaseContext
 }));
 vi.mock("./period-settings", () => ({ getPeriodSummaries: mocks.getPeriodSummaries }));
+vi.mock("./prisma-notification-repository", () => ({
+  getClosedPeriodNotificationBacklogSummary: mocks.getClosedPeriodBacklog
+}));
 vi.mock("./prisma-notification-settings", () => ({
   getPrismaNotificationSettings: mocks.getNotificationSettings
 }));
@@ -82,7 +86,8 @@ describe("Discord operations board snapshot", () => {
     vi.resetAllMocks();
     mocks.count.mockResolvedValue(0);
     mocks.findFirst.mockResolvedValue(null);
-    mocks.notificationDeliveryCount.mockResolvedValue(1);
+    mocks.notificationDeliveryCount.mockResolvedValue(6);
+    mocks.getClosedPeriodBacklog.mockResolvedValue({ count: 0, oldestAt: null });
     mocks.getNotificationSettings.mockResolvedValue({
       closedPeriodNotificationsEnabled: true,
       reservationCreatedNotificationsEnabled: false
@@ -113,10 +118,12 @@ describe("Discord operations board snapshot", () => {
       closedListProcessedAt: "2026-09-04T07:21:00.000Z",
       closedListStatus: "SENT"
     });
+    expect(result.unresolvedDeliveries).toBe(0);
+    expect(mocks.getClosedPeriodBacklog).toHaveBeenCalledWith(new Date("2026-09-04T08:30:00.000Z"));
     expect(mocks.deliveryFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { date: "2026-09-04", kind: "CLOSED_LIST" }
     }));
-    expect(mocks.notificationDeliveryCount).toHaveBeenCalledWith({
+    expect(mocks.notificationDeliveryCount).not.toHaveBeenCalledWith({
       where: {
         kind: "CLOSED_LIST",
         status: { in: ["FAILED", "PENDING_REVIEW", "UNKNOWN"] }

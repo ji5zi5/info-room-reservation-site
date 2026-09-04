@@ -1,15 +1,14 @@
 import { prisma } from "./db";
 import { systemDatabaseActor, withDatabaseContext } from "./db-context";
-import { CLOSED_LIST_NOTIFICATION_KIND, type ClosedPeriodNotificationStatus } from "./closed-period-notifications";
+import { CLOSED_LIST_NOTIFICATION_KIND } from "./closed-period-notifications";
 import type {
   DiscordOperationsBoardClosedListStatus,
   DiscordOperationsBoardSnapshot
 } from "./discord-operations-board-contracts";
 import { getPeriodSummaries } from "./period-settings";
+import { getClosedPeriodNotificationBacklogSummary } from "./prisma-notification-repository";
 import { getPrismaNotificationSettings } from "./prisma-notification-settings";
 import { STUDY_PERIODS } from "./study-periods";
-
-const ACTIONABLE_CLOSED_LIST_STATUSES = ["FAILED", "PENDING_REVIEW", "UNKNOWN"] as const satisfies readonly ClosedPeriodNotificationStatus[];
 
 export async function loadDiscordOperationsBoardSnapshot(input: {
   readonly date: string;
@@ -17,9 +16,10 @@ export async function loadDiscordOperationsBoardSnapshot(input: {
 }): Promise<DiscordOperationsBoardSnapshot> {
   const actor = systemDatabaseActor();
   const recentSince = new Date(input.now.getTime() - 24 * 60 * 60_000);
-  const [periods, settings, health] = await Promise.all([
+  const [periods, settings, backlog, health] = await Promise.all([
     getPeriodSummaries(input.date, { actor, includeApplicants: true, now: input.now }),
     getPrismaNotificationSettings(),
+    getClosedPeriodNotificationBacklogSummary(input.now),
     withDatabaseContext({
       actor,
       client: prisma,
@@ -28,7 +28,6 @@ export async function loadDiscordOperationsBoardSnapshot(input: {
           deliveries,
           adminCommandBacklog,
           interactionBacklog,
-          unresolvedDeliveries,
           operationalJobs,
           recentAdminErrors,
           recentInteractionErrors,
@@ -45,12 +44,6 @@ export async function loadDiscordOperationsBoardSnapshot(input: {
           }),
           transaction.discordAdminCommandJob.count({ where: { status: { in: ["PENDING", "PROCESSING", "RETRY"] } } }),
           transaction.discordInteractionJob.count({ where: { status: { in: ["PENDING", "PROCESSING", "RETRY"] } } }),
-          transaction.notificationDelivery.count({
-            where: {
-              kind: CLOSED_LIST_NOTIFICATION_KIND,
-              status: { in: [...ACTIONABLE_CLOSED_LIST_STATUSES] }
-            }
-          }),
           transaction.operationalJob.findMany({
             orderBy: { job: "asc" },
             select: { backlogCount: true, job: true, status: true }
@@ -87,8 +80,7 @@ export async function loadDiscordOperationsBoardSnapshot(input: {
             latestAdminAction?.createdAt
           ]),
           operationalJobs,
-          recentErrorCount: recentAdminErrors + recentInteractionErrors + recentDeliveryErrors + recentOperationalErrors,
-          unresolvedDeliveries
+          recentErrorCount: recentAdminErrors + recentInteractionErrors + recentDeliveryErrors + recentOperationalErrors
         };
       }
     })
@@ -112,7 +104,7 @@ export async function loadDiscordOperationsBoardSnapshot(input: {
     }),
     recentErrorCount: health.recentErrorCount,
     reservationNotificationsEnabled: settings.reservationCreatedNotificationsEnabled,
-    unresolvedDeliveries: health.unresolvedDeliveries
+    unresolvedDeliveries: backlog.count
   };
 }
 
