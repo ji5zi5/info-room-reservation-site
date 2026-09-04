@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { createDiscordOperationsBoardService, type DiscordOperationsBoardClaim } from "./discord-operations-board-service";
@@ -45,6 +47,34 @@ describe("Discord operations board service", () => {
     expect(result.kind).toBe("unchanged");
     expect(bot.editChannelMessage).not.toHaveBeenCalled();
     expect(completeUnchanged).toHaveBeenCalledOnce();
+  });
+
+  it("updates the pinned message when the board presentation version changes", async () => {
+    const snapshot = boardSnapshot();
+    const previousDigest = `sha256:${createHash("sha256")
+      .update("discord-operations-board:v1\0")
+      .update(JSON.stringify(snapshot))
+      .digest("hex")}`;
+    const bot = {
+      createChannelMessage: vi.fn(),
+      deleteChannelMessage: vi.fn(),
+      editChannelMessage: vi.fn().mockResolvedValue({ kind: "sent", messageId: claim.messageId })
+    };
+    const complete = vi.fn().mockResolvedValue(true);
+    const sync = createDiscordOperationsBoardService({
+      claim: vi.fn().mockResolvedValue({ ...claim, stateDigest: previousDigest }),
+      complete,
+      completeUnchanged: vi.fn(),
+      fail: vi.fn(),
+      loadSnapshot: vi.fn().mockResolvedValue(snapshot),
+      pin: vi.fn()
+    });
+
+    const result = await sync({ bot, config, force: false, now: new Date("2026-08-20T05:00:00Z") });
+
+    expect(result).toEqual({ kind: "updated", messageId: claim.messageId });
+    expect(bot.editChannelMessage).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledOnce();
   });
 
   it("creates and pins the board when no configured message exists", async () => {
