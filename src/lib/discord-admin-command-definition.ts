@@ -15,10 +15,13 @@ type DiscordCommandOption = {
 export type DiscordApplicationCommandDefinition = {
   readonly description: string;
   readonly dm_permission: false;
-  readonly name: "정보실";
+  readonly name: DiscordAdminCommandName;
   readonly options: readonly DiscordCommandOption[];
   readonly type: 1;
 };
+
+export const DISCORD_ADMIN_COMMAND_NAMES = ["현황", "명단", "예약", "학생", "설정", "알림", "운영"] as const;
+export type DiscordAdminCommandName = (typeof DISCORD_ADMIN_COMMAND_NAMES)[number];
 
 const periodChoices = [
   { name: "8면학", value: "EIGHTH" },
@@ -36,27 +39,26 @@ const scopeOption = { choices: scopeChoices, description: "전체 또는 날짜�
 const settingDateOption = { description: "범위가 특정 날짜일 때 YYYY-MM-DD", name: "날짜", required: false, type: 3 } as const;
 const enabledOption = { description: "사용 여부", name: "사용", required: true, type: 5 } as const;
 
-export const discordInfoRoomCommandDefinition: DiscordApplicationCommandDefinition = {
-  description: "정보실 예약 운영",
-  dm_permission: false,
-  name: "정보실",
-  options: [
-    {
-      description: "예약과 운영 상태 확인",
-      name: "현황",
-      options: [dateOption],
-      type: 1
-    },
-    {
-      description: "신청자 명단 확인",
-      name: "명단",
-      options: [{ ...dateOption }, { ...periodOption, required: false }],
-      type: 1
-    },
-    {
-      description: "예약 관리",
-      name: "예약",
-      options: [
+export const discordAdminCommandDefinitions: readonly DiscordApplicationCommandDefinition[] = [
+  {
+    description: "예약과 운영 상태 확인",
+    dm_permission: false,
+    name: "현황",
+    options: [dateOption],
+    type: 1
+  },
+  {
+    description: "신청자 명단 확인",
+    dm_permission: false,
+    name: "명단",
+    options: [{ ...dateOption }, { ...periodOption, required: false }],
+    type: 1
+  },
+  {
+    description: "예약 추가와 취소",
+    dm_permission: false,
+    name: "예약",
+    options: [
         {
           description: "학생 예약 추가",
           name: "추가",
@@ -81,12 +83,13 @@ export const discordInfoRoomCommandDefinition: DiscordApplicationCommandDefiniti
           type: 1
         }
       ],
-      type: 2
-    },
-    {
-      description: "학생 조회와 제재",
-      name: "학생",
-      options: [
+    type: 1
+  },
+  {
+    description: "학생 조회와 제재",
+    dm_permission: false,
+    name: "학생",
+    options: [
         {
           description: "학번 또는 이름으로 학생 조회",
           name: "조회",
@@ -140,12 +143,13 @@ export const discordInfoRoomCommandDefinition: DiscordApplicationCommandDefiniti
           type: 1
         }
       ],
-      type: 2
-    },
-    {
-      description: "운영 설정",
-      name: "설정",
-      options: [
+    type: 1
+  },
+  {
+    description: "예약 운영 설정",
+    dm_permission: false,
+    name: "설정",
+    options: [
         { description: "적용 중인 설정 조회", name: "조회", options: [dateOption], type: 1 },
         {
           description: "신청 시작과 마감 시각 변경",
@@ -172,12 +176,13 @@ export const discordInfoRoomCommandDefinition: DiscordApplicationCommandDefiniti
           type: 1
         }
       ],
-      type: 2
-    },
-    {
-      description: "Discord 알림 관리",
-      name: "알림",
-      options: [
+    type: 1
+  },
+  {
+    description: "Discord 알림 관리",
+    dm_permission: false,
+    name: "알림",
+    options: [
         { description: "알림 설정 확인", name: "상태", type: 1 },
         { description: "신청 알림 변경", name: "신청", options: [enabledOption], type: 1 },
         { description: "마감 명단 알림 변경", name: "마감", options: [enabledOption], type: 1 },
@@ -188,18 +193,17 @@ export const discordInfoRoomCommandDefinition: DiscordApplicationCommandDefiniti
           type: 1
         }
       ],
-      type: 2
-    },
-    {
-      description: "Discord 운영 상태와 복구",
-      name: "운영",
-      options: [
+    type: 1
+  },
+  {
+    description: "Discord 운영 상태와 복구",
+    dm_permission: false,
+    name: "운영",
+    options: [
         { description: "작업 상태 확인", name: "상태", type: 1 },
         { description: "미처리 작업 확인", name: "미처리", type: 1 },
         { description: "운영판 즉시 동기화", name: "동기화", type: 1 }
       ],
-      type: 2
-    }
-  ],
-  type: 1
-};
+    type: 1
+  }
+];

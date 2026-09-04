@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { discordInfoRoomCommandDefinition } from "./discord-admin-command-definition";
+import {
+  DISCORD_ADMIN_COMMAND_NAMES,
+  discordAdminCommandDefinitions
+} from "./discord-admin-command-definition";
 
-describe("Discord information-room command definition", () => {
+describe("Discord administrator command definitions", () => {
+  it("registers separate top-level commands instead of an information-room command tree", () => {
+    expect(discordAdminCommandDefinitions.map((definition) => definition.name)).toEqual(DISCORD_ADMIN_COMMAND_NAMES);
+  });
+
   it("registers every planned command path exactly once", () => {
-    // Given: the guild command registration definition.
     const expected = [
       "현황", "명단",
       "예약/추가", "예약/취소", "예약/일괄취소",
@@ -14,21 +20,21 @@ describe("Discord information-room command definition", () => {
       "운영/상태", "운영/미처리", "운영/동기화"
     ];
 
-    // When: its command paths are enumerated.
-    const paths = discordInfoRoomCommandDefinition.options.flatMap((option) =>
-      option.type === 2
-        ? (option.options ?? []).map((child) => `${option.name}/${child.name}`)
-        : [option.name]
+    const paths = discordAdminCommandDefinitions.flatMap((definition) =>
+      definition.options.every((option) => option.type === 1)
+        ? definition.options.map((option) => `${definition.name}/${option.name}`)
+        : [definition.name]
     );
 
-    // Then: Discord exposes the complete operator surface without duplicates.
     expect(paths).toEqual(expected);
     expect(new Set(paths).size).toBe(paths.length);
   });
 
   it("places every required option before optional options", () => {
-    const commandOptions = discordInfoRoomCommandDefinition.options.flatMap((option) =>
-      option.type === 2 ? option.options ?? [] : [option]
+    const commandOptions = discordAdminCommandDefinitions.flatMap((definition) =>
+      definition.options.every((option) => option.type === 1)
+        ? definition.options
+        : [{ ...definition, options: definition.options }]
     );
 
     for (const command of commandOptions) {

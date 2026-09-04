@@ -1,11 +1,15 @@
 import { z } from "zod";
 
 import { toKstDate } from "./date";
+import {
+  DISCORD_ADMIN_COMMAND_NAMES,
+  type DiscordAdminCommandName
+} from "./discord-admin-command-definition";
 import type { DiscordAdminDraftIntent } from "./discord-admin-intents";
 
 const rootSchema = z.object({
-  name: z.literal("정보실"),
-  options: z.array(z.unknown()).length(1)
+  name: z.enum(DISCORD_ADMIN_COMMAND_NAMES),
+  options: z.array(z.unknown()).optional().default([])
 }).passthrough();
 const optionSchema = z.object({
   name: z.string().min(1),
@@ -32,8 +36,12 @@ type CommandSelection = {
 export function parseDiscordAdminCommandData(input: unknown, now: Date): DiscordAdminDraftIntent | null {
   const root = rootSchema.safeParse(input);
   if (!root.success) return null;
-  const option = parseOption(root.data.options[0]);
-  const selection = option === null ? null : selectCommand(option);
+  const parsedOptions = root.data.options.map(parseOption);
+  if (parsedOptions.some((option) => option === null)) return null;
+  const selection = selectCommand(
+    root.data.name,
+    parsedOptions.filter((option): option is ParsedOption => option !== null)
+  );
   if (selection === null) return null;
   const date = optionalDate(selection.arguments, "날짜") ?? toKstDate(now);
 
@@ -135,11 +143,17 @@ function notificationToggle(options: readonly ParsedOption[], kind: "notificatio
   return enabled === null ? null : { enabled, kind };
 }
 
-function selectCommand(option: ParsedOption): CommandSelection | null {
-  if (option.type === 1) return { arguments: option.options, path: option.name };
-  if (option.type !== 2 || option.options.length !== 1) return null;
-  const child = option.options[0];
-  return child?.type === 1 ? { arguments: child.options, path: `${option.name}/${child.name}` } : null;
+function selectCommand(commandName: DiscordAdminCommandName, options: readonly ParsedOption[]): CommandSelection | null {
+  if (commandName === "현황" || commandName === "명단") {
+    return options.every((option) => option.type === 3 || option.type === 4 || option.type === 5)
+      ? { arguments: options, path: commandName }
+      : null;
+  }
+  if (options.length !== 1) return null;
+  const child = options[0];
+  return child?.type === 1
+    ? { arguments: child.options, path: `${commandName}/${child.name}` }
+    : null;
 }
 
 function parseOption(input: unknown): ParsedOption | null {

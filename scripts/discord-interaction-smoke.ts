@@ -102,7 +102,7 @@ function adminStatusPayload() {
   return {
     application_id: applicationId,
     channel_id: channelId,
-    data: { name: "정보실", options: [{ name: "현황", options: [], type: 1 }] },
+    data: { name: "현황" },
     guild_id: guildId,
     id: adminCommandInteractionId,
     member: { roles: [adminRoleId], user: { id: discordUserId } },

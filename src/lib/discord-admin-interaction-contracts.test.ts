@@ -13,7 +13,7 @@ const now = new Date("2026-08-20T05:00:00.000Z");
 describe("Discord administrator interaction contracts", () => {
   it("parses the public status command with today's KST date", () => {
     // Given: a signed Discord application command from the configured operations channel.
-    const payload = commandPayload({ name: "정보실", options: [{ name: "현황", type: 1 }] });
+    const payload = commandPayload({ name: "현황" });
 
     // When: the interaction crosses the command boundary.
     const result = parseDiscordAdminInteraction(payload, secret, now);
@@ -25,19 +25,17 @@ describe("Discord administrator interaction contracts", () => {
   it("parses a nested reservation cancellation as a reason draft", () => {
     // Given: a cancellation slash command with an explicit slot.
     const payload = commandPayload({
-      name: "정보실",
+      name: "예약",
       options: [{
-        name: "예약",
+        name: "취소",
         options: [{
-          name: "취소",
-          options: [
-            { name: "학번", type: 3, value: "31001" },
-            { name: "날짜", type: 3, value: "2026-08-21" },
-            { name: "시간대", type: 3, value: "EIGHTH" }
-          ],
-          type: 1
+          name: "학번", type: 3, value: "31001"
+        }, {
+          name: "날짜", type: 3, value: "2026-08-21"
+        }, {
+          name: "시간대", type: 3, value: "EIGHTH"
         }],
-        type: 2
+        type: 1
       }]
     });
 
@@ -49,6 +47,16 @@ describe("Discord administrator interaction contracts", () => {
       intent: { date: "2026-08-21", kind: "reservation_cancel", studentNumber: "31001", studyPeriod: "EIGHTH" },
       kind: "command"
     });
+  });
+
+  it("rejects the removed information-room root command", () => {
+    const result = parseDiscordAdminInteraction(
+      commandPayload({ name: "정보실", options: [{ name: "현황", type: 1 }] }),
+      secret,
+      now
+    );
+
+    expect(result).toEqual({ kind: "invalid" });
   });
 
   it("accepts a signed reason modal and rejects a tampered source interaction", () => {

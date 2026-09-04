@@ -5,7 +5,7 @@ import ky, { HTTPError } from "ky";
 import { z } from "zod";
 
 import { DiscordApplicationConfigError, parseDiscordApplicationConfig } from "../src/lib/discord-app-config";
-import { discordInfoRoomCommandDefinition } from "../src/lib/discord-admin-command-definition";
+import { discordAdminCommandDefinitions } from "../src/lib/discord-admin-command-definition";
 
 const responseSchema = z.array(z.object({ id: z.string().min(1), name: z.string().min(1) }));
 
@@ -19,7 +19,7 @@ export async function registerDiscordCommands(rawEnvironment: Readonly<Record<st
     `https://discord.com/api/v10/applications/${encodeURIComponent(config.applicationId)}/guilds/${encodeURIComponent(config.guildId)}/commands`,
     {
       headers: { authorization: `Bot ${config.botToken}` },
-      json: [discordInfoRoomCommandDefinition],
+      json: discordAdminCommandDefinitions,
       retry: { limit: 1, methods: ["put"], statusCodes: [408, 429, 500, 502, 503, 504] },
       timeout: 10_000
     }
